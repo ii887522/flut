@@ -1,0 +1,12 @@
+{
+  "editor.formatOnSave": true,
+  "rust-analyzer.check.command": "clippy",
+  "rust-analyzer.check.extraArgs": [
+    "--",
+    "-A",
+    "clippy::too_many_arguments",
+    "-A",
+    "clippy::needless_lifetimes"
+  ],
+  "rust-analyzer.checkOnSave": true
+}

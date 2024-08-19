@@ -1,0 +1,20 @@
+[package]
+name = "flut"
+description = "A stripped down Flutter clone that supports cross platform GUI and game development"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.80"
+repository = "https://github.com/ii887522/flut"
+publish = false
+
+[profile.dev]
+split-debuginfo = "packed"
+
+[profile.release]
+codegen-units = 1
+lto = true
+panic = "abort"
+split-debuginfo = "packed"
+strip = true
+
+[dependencies]
