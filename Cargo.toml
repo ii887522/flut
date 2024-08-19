@@ -7,6 +7,14 @@ rust-version = "1.80"
 repository = "https://github.com/ii887522/flut"
 publish = false
 
+[package.metadata.vcpkg]
+dependencies = ["sdl2", "sdl2-image", "sdl2-mixer"]
+git = "https://github.com/microsoft/vcpkg"
+rev = "2024.07.12"
+
+[package.metadata.vcpkg.target]
+x86_64-pc-windows-msvc = { triplet = "x64-windows-static-md" }
+
 [profile.dev]
 split-debuginfo = "packed"
 
@@ -18,3 +26,14 @@ split-debuginfo = "packed"
 strip = true
 
 [dependencies]
+gl = { version = "0.14", default-features = false }
+
+[dependencies.sdl2]
+version = "0.37"
+default-features = false
+features = ["image", "mixer", "static-link", "use-vcpkg"]
+
+[dependencies.skia-safe]
+version = "0.75"
+default-features = false
+features = ["gl", "binary-cache"]
