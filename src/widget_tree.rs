@@ -55,7 +55,7 @@ impl WidgetTree<'_> {
         .unwrap();
 
       match widget_node.widget {
-        Widget::Stateless(widget) => {
+        Widget::Stateless(mut widget) => {
           widget_node.widget = widget.build(widget_node.constraint);
 
           if let Some(buildable_index) = self.empty_buildable_indices.pop() {

@@ -1,5 +1,9 @@
 pub(super) mod buildable;
+pub mod column;
+pub mod grid;
 pub mod painter_widget;
+pub mod rect_widget;
+pub mod row;
 pub mod stack;
 pub mod stack_child;
 pub mod stateful_widget;
@@ -7,7 +11,11 @@ pub mod stateless_widget;
 pub mod widget;
 
 pub(super) use buildable::Buildable;
+pub use column::Column;
+pub use grid::Grid;
 pub use painter_widget::PainterWidget;
+pub use rect_widget::RectWidget;
+pub use row::Row;
 pub use stack::Stack;
 pub use stack_child::StackChild;
 pub use stateful_widget::StatefulWidget;

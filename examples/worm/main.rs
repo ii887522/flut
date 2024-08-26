@@ -4,12 +4,13 @@
 mod models;
 mod pages;
 
-use flut::{app, App};
+use flut::{app, widgets::widget::*, App};
+use pages::GamePage;
 
 fn main() {
   app::run(App {
     title: "Worm",
-    size: (1280, 720),
-    ..Default::default()
+    size: (720, 720),
+    child: Some(GamePage.into_widget()),
   });
 }
