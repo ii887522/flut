@@ -29,6 +29,11 @@ strip = true
 gl = { version = "0.14", default-features = false }
 rayon = { version = "1.10", default-features = false }
 
+[dependencies.rand]
+version = "0.8"
+default-features = false
+features = ["std", "std_rng"]
+
 [dependencies.sdl2]
 version = "0.37"
 default-features = false
