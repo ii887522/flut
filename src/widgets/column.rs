@@ -1,10 +1,11 @@
 use super::{StackChild, StatelessWidget, Widget};
-use crate::widgets::Stack;
+use crate::{models::HorizontalAlign, widgets::Stack};
 use skia_safe::Rect;
 use std::mem;
 
 #[derive(Debug, Default)]
 pub struct Column<'a> {
+  pub align: HorizontalAlign,
   pub children: Vec<Widget<'a>>,
 }
 
@@ -33,14 +34,29 @@ impl<'a> StatelessWidget<'a> for Column<'a> {
 
         let height = child_size.1;
 
+        let x = constraint.x()
+          + (constraint.width() - width)
+            * match self.align {
+              HorizontalAlign::Left => 0.0,
+              HorizontalAlign::Center => 0.5,
+              HorizontalAlign::Right => 1.0,
+            };
+
+        // Ensure no overlapping between children
+        if unknown_height_child.is_some() {
+          y -= height;
+        }
+
         dst_children.push(StackChild {
-          position: (constraint.x(), y),
+          position: (x, y),
           size: (width, height),
           child: Some(child),
         });
 
         // Ensure no overlapping between children
-        y += height;
+        if unknown_height_child.is_none() {
+          y += height;
+        }
       } else if unknown_height_child.is_none() {
         // child height is unknown
         //
@@ -70,8 +86,16 @@ impl<'a> StatelessWidget<'a> for Column<'a> {
         child_size.0
       };
 
+      let x = constraint.x()
+        + (constraint.width() - width)
+          * match self.align {
+            HorizontalAlign::Left => 0.0,
+            HorizontalAlign::Center => 0.5,
+            HorizontalAlign::Right => 1.0,
+          };
+
       dst_children.push(StackChild {
-        position: (constraint.x(), old_y),
+        position: (x, old_y),
         size: (width, y - old_y),
         child: Some(child),
       });

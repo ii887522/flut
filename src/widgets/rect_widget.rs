@@ -8,6 +8,9 @@ pub struct RectWidget {
 
 impl PainterWidget for RectWidget {
   fn draw(&self, canvas: &Canvas, constraint: Rect) {
-    canvas.draw_rect(constraint, Paint::default().set_color(self.color));
+    canvas.draw_rect(
+      constraint,
+      Paint::default().set_anti_alias(true).set_color(self.color),
+    );
   }
 }

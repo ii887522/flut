@@ -2,8 +2,11 @@ use crate::models::{Direction, GameCell, WormCell};
 use flut::{
   collections::U16SparseSet,
   helpers::{Clock, Context},
-  models::AudioTask,
-  widgets::{stateful_widget::State, widget::*, Column, Grid, RectWidget, StatefulWidget, Widget},
+  models::{AudioTask, HorizontalAlign},
+  widgets::{
+    stateful_widget::State, widget::*, Column, Grid, RectWidget, Spacing, StatefulWidget, Text,
+    Widget,
+  },
 };
 use rand::prelude::*;
 use rayon::prelude::*;
@@ -220,23 +223,42 @@ impl<'a> State<'a> for GamePageState {
     let grid_model = Arc::clone(&self.grid_model);
 
     Column {
-      children: vec![Grid {
-        col_count: COL_COUNT,
-        row_count: ROW_COUNT,
-        gap: 2.0,
-        builder: Box::new(move |index| {
-          RectWidget {
-            color: match grid_model.read().unwrap()[index as usize] {
-              GameCell::Air => Color::from_rgb(56, 56, 56),
-              GameCell::Worm => Color::from_rgb(243, 125, 121),
-              GameCell::Wall => Color::RED,
-              GameCell::Food => Color::GREEN,
-            },
-          }
-          .into_widget()
-        }),
-      }
-      .into_widget()],
+      align: HorizontalAlign::Center,
+      children: vec![
+        Spacing {
+          height: 16.0,
+          ..Default::default()
+        }
+        .into_widget(),
+        Text::new()
+          .text((self.worm.len() - 1).to_string())
+          .color(Color::WHITE)
+          .font_size(48.0)
+          .call()
+          .into_widget(),
+        Spacing {
+          height: 16.0,
+          ..Default::default()
+        }
+        .into_widget(),
+        Grid {
+          col_count: COL_COUNT,
+          row_count: ROW_COUNT,
+          gap: 2.0,
+          builder: Box::new(move |index| {
+            RectWidget {
+              color: match grid_model.read().unwrap()[index as usize] {
+                GameCell::Air => Color::from_rgb(56, 56, 56),
+                GameCell::Worm => Color::from_rgb(243, 125, 121),
+                GameCell::Wall => Color::RED,
+                GameCell::Food => Color::GREEN,
+              },
+            }
+            .into_widget()
+          }),
+        }
+        .into_widget(),
+      ],
     }
     .into_widget()
   }

@@ -1,10 +1,11 @@
 use super::{StackChild, StatelessWidget, Widget};
-use crate::widgets::Stack;
+use crate::{models::VerticalAlign, widgets::Stack};
 use skia_safe::Rect;
 use std::mem;
 
 #[derive(Debug, Default)]
 pub struct Row<'a> {
+  pub align: VerticalAlign,
   pub children: Vec<Widget<'a>>,
 }
 
@@ -33,14 +34,29 @@ impl<'a> StatelessWidget<'a> for Row<'a> {
           child_size.1
         };
 
+        // Ensure no overlapping between children
+        if unknown_width_child.is_some() {
+          x -= width;
+        }
+
+        let y = constraint.y()
+          + (constraint.height() - height)
+            * match self.align {
+              VerticalAlign::Top => 0.0,
+              VerticalAlign::Middle => 0.5,
+              VerticalAlign::Bottom => 1.0,
+            };
+
         dst_children.push(StackChild {
-          position: (x, constraint.y()),
+          position: (x, y),
           size: (width, height),
           child: Some(child),
         });
 
         // Ensure no overlapping between children
-        x += width;
+        if unknown_width_child.is_none() {
+          x += width;
+        }
       } else if unknown_width_child.is_none() {
         // child width is unknown
         //
@@ -70,8 +86,16 @@ impl<'a> StatelessWidget<'a> for Row<'a> {
         child_size.1
       };
 
+      let y = constraint.y()
+        + (constraint.height() - height)
+          * match self.align {
+            VerticalAlign::Top => 0.0,
+            VerticalAlign::Middle => 0.5,
+            VerticalAlign::Bottom => 1.0,
+          };
+
       dst_children.push(StackChild {
-        position: (old_x, constraint.y()),
+        position: (old_x, y),
         size: (x - old_x, height),
         child: Some(child),
       });
