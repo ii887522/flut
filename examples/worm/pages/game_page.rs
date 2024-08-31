@@ -1,7 +1,8 @@
 use crate::models::{Direction, GameCell, WormCell};
 use flut::{
   collections::U16SparseSet,
-  helpers::Clock,
+  helpers::{Clock, Context},
+  models::AudioTask,
   widgets::{stateful_widget::State, widget::*, Column, Grid, RectWidget, StatefulWidget, Widget},
 };
 use rand::prelude::*;
@@ -20,7 +21,12 @@ const ROW_COUNT: u16 = 41;
 pub(crate) struct GamePage;
 
 impl<'a> StatefulWidget<'a> for GamePage {
-  fn new_state(&self) -> Box<dyn State<'a> + 'a> {
+  fn new_state(&self, ctx: &Context<'_>) -> Box<dyn State<'a> + 'a> {
+    if let Some(audio_tx) = &ctx.audio_tx {
+      let _ = audio_tx.send(AudioTask::LoadSound("assets/audio/dead.wav"));
+      let _ = audio_tx.send(AudioTask::LoadSound("assets/audio/eat.wav"));
+    }
+
     let grid_model = (0..COL_COUNT * ROW_COUNT)
       .into_par_iter()
       .map(|index| {
@@ -109,7 +115,7 @@ impl GamePageState {
     self.set_grid_cell(self.air_indices.random().unwrap(), GameCell::Food);
   }
 
-  fn move_worm(&mut self) {
+  fn move_worm(&mut self, ctx: &Context<'_>) {
     let head = self.worm.front().unwrap();
 
     let new_head = WormCell {
@@ -126,10 +132,19 @@ impl GamePageState {
       let grid_model = self.grid_model.read().unwrap();
 
       if let GameCell::Wall | GameCell::Worm = grid_model[new_head.position as usize] {
+        if let Some(audio_tx) = &ctx.audio_tx {
+          let _ = audio_tx.send(AudioTask::PlaySound("assets/audio/dead.wav"));
+        }
+
         self.is_worm_dead = true;
         return;
       } else if let GameCell::Food = grid_model[new_head.position as usize] {
         drop(grid_model);
+
+        if let Some(audio_tx) = &ctx.audio_tx {
+          let _ = audio_tx.send(AudioTask::PlaySound("assets/audio/eat.wav"));
+        }
+
         self.spawn_food();
       } else {
         drop(grid_model);
@@ -188,7 +203,7 @@ impl<'a> State<'a> for GamePageState {
     }
   }
 
-  fn update(&mut self, dt: f32) -> bool {
+  fn update(&mut self, ctx: &Context<'_>, dt: f32) -> bool {
     if !self.clock.update(dt) || self.is_worm_dead {
       return false;
     }
@@ -197,7 +212,7 @@ impl<'a> State<'a> for GamePageState {
       self.worm.front_mut().unwrap().direction = next_worm_direction;
     }
 
-    self.move_worm();
+    self.move_worm(ctx);
     true
   }
 

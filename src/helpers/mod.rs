@@ -1,25 +1,5 @@
-#[derive(Clone, Copy, Debug, Default, PartialEq, PartialOrd)]
-pub struct Clock {
-  accumulator: f32,
-  tps: f32,
-}
+pub mod clock;
+pub mod context;
 
-impl Clock {
-  pub const fn new(tps: f32) -> Self {
-    Self {
-      accumulator: 0.0,
-      tps,
-    }
-  }
-
-  pub fn update(&mut self, dt: f32) -> bool {
-    self.accumulator += dt;
-
-    if self.accumulator >= 1.0 / self.tps {
-      self.accumulator -= 1.0 / self.tps;
-      return true;
-    }
-
-    false
-  }
-}
+pub use clock::Clock;
+pub use context::Context;

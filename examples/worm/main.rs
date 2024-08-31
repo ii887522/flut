@@ -11,6 +11,7 @@ fn main() {
   app::run(App {
     title: "Worm",
     size: (720, 720),
+    use_audio: true,
     child: Some(GamePage.into_widget()),
   });
 }
