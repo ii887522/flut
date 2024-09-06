@@ -1,6 +1,8 @@
 pub(super) mod buildable;
 pub mod column;
+pub mod dialog;
 pub mod grid;
+pub mod icon;
 pub mod painter_widget;
 pub mod rect_widget;
 pub mod row;
@@ -14,7 +16,9 @@ pub mod widget;
 
 pub(super) use buildable::Buildable;
 pub use column::Column;
+pub use dialog::Dialog;
 pub use grid::Grid;
+pub use icon::Icon;
 pub use painter_widget::PainterWidget;
 pub use rect_widget::RectWidget;
 pub use row::Row;

@@ -1,4 +1,8 @@
-use crate::{boot::audio, helpers::Context, widgets::Widget, WidgetTree};
+use crate::{
+  boot::{audio, context},
+  widgets::Widget,
+  WidgetTree,
+};
 use sdl2::{
   event::Event,
   image::LoadSurface,
@@ -15,7 +19,13 @@ use skia_safe::{
   },
   Color, ColorType, Rect,
 };
-use std::{ffi::CStr, sync::mpsc, thread, time::Instant};
+use std::{
+  ffi::CStr,
+  fmt::Debug,
+  sync::{atomic::Ordering, mpsc},
+  thread,
+  time::Instant,
+};
 
 #[derive(Debug)]
 pub struct App<'a> {
@@ -47,13 +57,11 @@ pub fn run(app: App<'_>) {
 
   let sdl = sdl2::init().unwrap();
 
-  let audio_tx = if app.use_audio {
+  if app.use_audio {
     let (audio_tx, audio_rx) = mpsc::channel();
+    context::AUDIO_TX.set(audio_tx).unwrap();
     thread::spawn(|| audio::main(audio_rx));
-    Some(audio_tx)
-  } else {
-    None
-  };
+  }
 
   let vid_subsys = sdl.video().unwrap();
   let gl_attr = vid_subsys.gl_attr();
@@ -163,14 +171,18 @@ pub fn run(app: App<'_>) {
   let canvas = skia_surface.canvas();
   const TPS: f32 = 240.0;
   const MAX_FRAME_TICK_COUNT: u32 = 8;
+  let drawable_size = (drawable_size.0 as _, drawable_size.1 as _);
+
+  context::DRAWABLE_SIZE
+    .0
+    .store(drawable_size.0, Ordering::Relaxed);
+
+  context::DRAWABLE_SIZE
+    .1
+    .store(drawable_size.1, Ordering::Relaxed);
+
   let mut event_pump = sdl.event_pump().unwrap();
-
-  let mut widget_tree = WidgetTree::new(
-    app.child,
-    Rect::from_wh(drawable_size.0 as _, drawable_size.1 as _),
-    Context { audio_tx },
-  );
-
+  let mut widget_tree = WidgetTree::new(app.child, Rect::from_wh(drawable_size.0, drawable_size.1));
   let mut now = Instant::now();
 
   'running: loop {

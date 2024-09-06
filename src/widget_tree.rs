@@ -1,19 +1,15 @@
-use crate::{
-  helpers::Context,
-  widgets::{Buildable, Widget},
-};
+use crate::widgets::{Buildable, Widget};
 use rayon::prelude::*;
 use sdl2::event::Event;
 use skia_safe::{Canvas, Rect};
 use std::collections::{HashMap, VecDeque};
 
 #[derive(Debug)]
-pub(super) struct WidgetTree<'a, 'b> {
+pub(super) struct WidgetTree<'a> {
   widget_nodes: Vec<Option<WidgetNode<'a>>>,
   buildables: Vec<Option<Buildable<'a>>>,
   empty_widget_node_indices: Vec<u32>,
   empty_buildable_indices: Vec<u32>,
-  ctx: Context<'b>,
 }
 
 #[derive(Debug)]
@@ -24,18 +20,13 @@ struct WidgetNode<'a> {
   buildable_indices: Vec<u32>,
 }
 
-impl WidgetTree<'_, '_> {
-  pub(super) fn new<'a, 'b>(
-    root: Option<Widget<'a>>,
-    constraint: Rect,
-    ctx: Context<'b>,
-  ) -> WidgetTree<'a, 'b> {
+impl WidgetTree<'_> {
+  pub(super) fn new<'a>(root: Option<Widget<'a>>, constraint: Rect) -> WidgetTree<'a> {
     let mut this = WidgetTree {
       widget_nodes: vec![],
       buildables: vec![],
       empty_widget_node_indices: vec![],
       empty_buildable_indices: vec![],
-      ctx,
     };
 
     if let Some(root) = root {
@@ -81,7 +72,7 @@ impl WidgetTree<'_, '_> {
           widget_node_index_lifo_q.push(widget_node_index);
         }
         Widget::Stateful(widget) => {
-          let state = widget.new_state(&self.ctx);
+          let state = widget.new_state();
           widget_node.widget = state.build(widget_node.constraint);
 
           if let Some(buildable_index) = self.empty_buildable_indices.pop() {
@@ -148,8 +139,9 @@ impl WidgetTree<'_, '_> {
 
           widget_node.widget = Widget::StackChild(stack_child);
         }
-        Widget::Painter(_) => {
+        Widget::Painter(widget) => {
           // Painter widget can be drawn directly, no expand logic needed
+          widget_node.widget = Widget::Painter(widget);
         }
       }
 
@@ -187,7 +179,7 @@ impl WidgetTree<'_, '_> {
         if let Buildable::Stateful(state) =
           self.buildables[buildable_index as usize].as_mut().unwrap()
         {
-          if !state.update(&self.ctx, dt) {
+          if !state.update(dt) {
             // Widget state not changed, thus can be reused
             continue;
           }
@@ -267,7 +259,7 @@ impl WidgetTree<'_, '_> {
             last_child_to_parent.insert(last_child_index, widget_node_index);
 
             // Traverse the expanded widget tree in depth-first order
-            widget_node_index_lifo_q.par_extend(widget_node.child_indices.par_iter());
+            widget_node_index_lifo_q.par_extend(widget_node.child_indices.par_iter().rev());
           }
         }
         Widget::StackChild(_) => {

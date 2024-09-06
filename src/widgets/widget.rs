@@ -15,7 +15,7 @@ impl Widget<'_> {
       Widget::Stateless(widget) => widget.get_size(),
       Widget::Stateful(widget) => widget.get_size(),
       Widget::Painter(widget) => widget.get_size(),
-      Widget::Stack(_) => (0.0, 0.0),
+      Widget::Stack(_) => (-1.0, -1.0),
       Widget::StackChild(stack_child) => stack_child.get_size(),
     }
   }

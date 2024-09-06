@@ -1,7 +1,7 @@
 #![deny(elided_lifetimes_in_paths)]
 
 pub mod app;
-mod boot;
+pub mod boot;
 pub mod collections;
 pub mod helpers;
 pub mod models;

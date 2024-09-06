@@ -4,7 +4,7 @@ use std::fmt::Debug;
 
 pub trait StatelessWidget<'a>: Debug + Send {
   fn get_size(&self) -> (f32, f32) {
-    (0.0, 0.0)
+    (-1.0, -1.0)
   }
 
   fn pre_draw(&self, _canvas: &Canvas, _constraint: Rect) {}

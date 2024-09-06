@@ -8,5 +8,6 @@
     "-A",
     "clippy::needless_lifetimes"
   ],
-  "rust-analyzer.checkOnSave": true
+  "rust-analyzer.checkOnSave": true,
+  "rust-analyzer.linkedProjects": ["flut_codegen/Cargo.toml", "Cargo.toml"]
 }

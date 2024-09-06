@@ -1,8 +1,9 @@
 use super::PainterWidget;
+use crate::boot::context;
 use optarg2chain::optarg_impl;
 use skia_safe::{font::Edging, Canvas, Color, Font, FontMgr, FontStyle, Paint, Point, Rect};
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug)]
 pub struct Text {
   text: String,
   font: Font,
@@ -17,15 +18,19 @@ impl Text {
     #[optarg_default] text: String,
     #[optarg("Segoe UI")] font_family: &'a str,
     #[optarg(12.0)] font_size: f32,
-    #[optarg_default] color: Color,
+    #[optarg(Color::BLACK)] color: Color,
   ) -> Self {
-    let mut font = Font::new(
-      FontMgr::new()
-        .match_family_style(font_family, FontStyle::default())
-        .unwrap(),
-      font_size,
-    );
+    let mut text_typefaces = context::TEXT_TYPEFACES.lock().unwrap();
 
+    let typeface = text_typefaces
+      .entry(font_family.to_string())
+      .or_insert_with_key(|font_family| {
+        FontMgr::new()
+          .match_family_style(font_family, FontStyle::default())
+          .unwrap()
+      });
+
+    let mut font = Font::new(&*typeface, font_size);
     font.set_edging(Edging::AntiAlias);
     let (_, bound) = font.measure_str(&text, None);
 
@@ -35,12 +40,6 @@ impl Text {
       color,
       bound,
     }
-  }
-}
-
-impl Default for Text {
-  fn default() -> Self {
-    Self::new().call()
   }
 }
 
