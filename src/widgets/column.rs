@@ -1,22 +1,61 @@
 use super::{StackChild, StatelessWidget, Widget};
-use crate::{models::HorizontalAlign, widgets::Stack};
+use crate::{
+  models::{HorizontalAlign, Origin},
+  widgets::Stack,
+};
+use optarg2chain::optarg_impl;
 use rayon::prelude::*;
 use skia_safe::Rect;
-use std::mem;
+use std::{cell::OnceCell, mem};
 
 #[derive(Debug, Default)]
 pub struct Column<'a> {
-  pub align: HorizontalAlign,
-  pub children: Vec<Widget<'a>>,
+  align: HorizontalAlign,
+  children: Vec<Widget<'a>>,
+  size: OnceCell<(f32, f32)>,
+}
+
+#[optarg_impl]
+impl<'a> Column<'a> {
+  #[optarg_method(ColumnNewBuilder, call)]
+  pub fn new(
+    #[optarg_default] align: HorizontalAlign,
+    #[optarg_default] children: Vec<Widget<'a>>,
+  ) -> Self {
+    Self {
+      align,
+      children,
+      size: OnceCell::new(),
+    }
+  }
 }
 
 impl<'a> StatelessWidget<'a> for Column<'a> {
+  fn get_size(&self) -> (f32, f32) {
+    *self.size.get_or_init(|| {
+      self
+        .children
+        .iter()
+        .try_fold((0.0, 0.0), |acc, child| {
+          let child_size = child.get_size();
+
+          if child_size.1 < 0.0 {
+            Err(())
+          } else {
+            Ok((child_size.0.max(acc.0), child_size.1 + acc.1))
+          }
+        })
+        .unwrap_or((-1.0, -1.0))
+    })
+  }
+
   fn build(&mut self, constraint: Rect) -> Widget<'a> {
     let mut children = mem::take(&mut self.children)
       .into_par_iter()
       .map(|child| StackChild {
         position: (0.0, 0.0),
         size: (0.0, 0.0),
+        origin: Origin::TopLeft,
         child: Some(child),
       })
       .collect::<Vec<_>>();
@@ -47,7 +86,7 @@ impl<'a> StatelessWidget<'a> for Column<'a> {
         if child_index == unknown_height_child_index {
           // Last child to process where it's height is unknown. Can calculate this child height by filling the
           // remaining space
-          let height = y - stack_child.position.1;
+          let height = y - stack_child.get_position().1;
           stack_child.size = (width, height);
           break;
         }

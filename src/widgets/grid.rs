@@ -1,4 +1,5 @@
 use super::{Stack, StackChild, StatelessWidget, Widget};
+use crate::models::Origin;
 use rayon::prelude::*;
 use skia_safe::Rect;
 use std::fmt::{self, Debug, Formatter};
@@ -37,6 +38,7 @@ impl<'a> StatelessWidget<'a> for Grid<'a> {
             (i / self.col_count as u32) as f32 * (child_size.1 + self.gap) + constraint.y(),
           ),
           size: child_size,
+          origin: Origin::TopLeft,
           child: Some((self.builder)(i)),
         })
         .collect(),

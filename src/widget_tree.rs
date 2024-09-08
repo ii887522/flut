@@ -90,12 +90,15 @@ impl WidgetTree<'_> {
         }
         Widget::Stack(mut stack) => {
           for stack_child in stack.children.drain(..) {
+            let stack_child_position = stack_child.get_position();
+            let stack_child_size = stack_child.get_size();
+
             let stack_child_node = WidgetNode {
               constraint: Rect::from_xywh(
-                stack_child.position.0,
-                stack_child.position.1,
-                stack_child.size.0,
-                stack_child.size.1,
+                stack_child_position.0,
+                stack_child_position.1,
+                stack_child_size.0,
+                stack_child_size.1,
               ),
               widget: Widget::StackChild(Box::new(stack_child)),
               child_indices: vec![],

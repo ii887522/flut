@@ -1,21 +1,31 @@
 use super::{widget::*, RectWidget, Stack, StackChild, StatelessWidget, Widget};
 use crate::{
   boot::context,
-  widgets::{Icon, Text},
+  models::{icon_name, Origin},
+  widgets::{Button, Icon, Text},
 };
-use skia_safe::{Color, Rect};
+use skia_safe::{
+  font_style::{Slant, Weight, Width},
+  Color, FontStyle, Rect,
+};
 use std::sync::atomic::Ordering;
 
-#[derive(Debug, PartialEq, Eq)]
-pub struct Dialog {
+#[derive(Debug)]
+pub struct Dialog<'a> {
   pub color: Color,
   pub header_icon: u16,
   pub header_icon_color: Color,
   pub header_title: String,
   pub header_title_color: Color,
+  pub body: Option<Widget<'a>>,
+  pub close_icon: u16,
+  pub close_label: String,
+  pub ok_icon: u16,
+  pub ok_label: String,
+  pub has_ok: bool,
 }
 
-impl Default for Dialog {
+impl Default for Dialog<'_> {
   fn default() -> Self {
     Self {
       color: Color::BLACK,
@@ -23,13 +33,29 @@ impl Default for Dialog {
       header_icon_color: Color::BLACK,
       header_title: "".to_string(),
       header_title_color: Color::BLACK,
+      body: None,
+      close_icon: icon_name::CLOSE,
+      close_label: "Close".to_string(),
+      ok_icon: icon_name::CHECK,
+      ok_label: "OK".to_string(),
+      has_ok: false,
     }
   }
 }
 
-impl<'a> StatelessWidget<'a> for Dialog {
+impl<'a> StatelessWidget<'a> for Dialog<'a> {
+  fn get_size(&self) -> (f32, f32) {
+    // (0.0, 0.0) so that this widget can be inserted in Column or Row or any other layout widget.
+    // Size is ignored and this widget always cover the whole app
+    (0.0, 0.0)
+  }
+
   fn build(&mut self, _constraint: Rect) -> Widget<'a> {
-    const SIZE: (f32, f32) = (600.0, 300.0);
+    // _constraint is unused since this dialog will cover the whole app
+
+    const SIZE: (f32, f32) = (512.0, 256.0);
+    const BUTTON_SIZE: (f32, f32) = (208.0, 64.0);
+    const BUTTON_GAP: f32 = 32.0;
 
     let drawable_size = (
       context::DRAWABLE_SIZE.0.load(Ordering::Relaxed),
@@ -46,6 +72,7 @@ impl<'a> StatelessWidget<'a> for Dialog {
         Some(StackChild {
           position: (0.0, 0.0),
           size: drawable_size,
+          origin: Origin::TopLeft,
           child: Some(
             RectWidget {
               color: Color::from_argb(128, 0, 0, 0),
@@ -57,10 +84,12 @@ impl<'a> StatelessWidget<'a> for Dialog {
         Some(StackChild {
           position,
           size: SIZE,
+          origin: Origin::TopLeft,
           child: Some(
             RectWidget {
               color: self.color,
               border_radius: 8.0,
+              ..Default::default()
             }
             .into_widget(),
           ),
@@ -69,8 +98,9 @@ impl<'a> StatelessWidget<'a> for Dialog {
           None
         } else {
           Some(StackChild {
-            position,
+            position: (position.0 + 16.0, position.1 + 16.0),
             size: (0.0, 0.0),
+            origin: Origin::TopLeft,
             child: Some(
               Icon::new(self.header_icon)
                 .size(64.0)
@@ -84,11 +114,17 @@ impl<'a> StatelessWidget<'a> for Dialog {
           None
         } else {
           Some(StackChild {
-            position: (position.0 + 64.0, position.1 + 16.0),
+            position: (position.0 + 88.0, position.1 + 32.0),
             size: (0.0, 0.0),
+            origin: Origin::TopLeft,
             child: Some(
               Text::new()
                 .text(&self.header_title)
+                .font_style(FontStyle::new(
+                  Weight::SEMI_BOLD,
+                  Width::NORMAL,
+                  Slant::Upright,
+                ))
                 .font_size(32.0)
                 .color(self.header_title_color)
                 .call()
@@ -96,17 +132,62 @@ impl<'a> StatelessWidget<'a> for Dialog {
             ),
           })
         },
+        self.body.take().map(|body| StackChild {
+          position: (position.0 + 16.0, position.1 + 88.0),
+          size: (SIZE.0 - 32.0, SIZE.1 - 184.0),
+          origin: Origin::TopLeft,
+          child: Some(body),
+        }),
+        Some(StackChild {
+          position: (
+            (drawable_size.0
+              - BUTTON_SIZE.0
+              - if self.has_ok {
+                BUTTON_SIZE.0 + BUTTON_GAP
+              } else {
+                0.0
+              })
+              * 0.5,
+            position.1 + SIZE.1 - 80.0,
+          ),
+          size: BUTTON_SIZE,
+          origin: Origin::TopLeft,
+          child: Some(
+            Button {
+              bg_color: Color::RED,
+              icon: self.close_icon,
+              label: self.close_label.to_string(),
+              ..Default::default()
+            }
+            .into_widget(),
+          ),
+        }),
+        if self.has_ok {
+          Some(StackChild {
+            position: (
+              (drawable_size.0 + BUTTON_GAP) * 0.5,
+              position.1 + SIZE.1 - 80.0,
+            ),
+            size: BUTTON_SIZE,
+            origin: Origin::TopLeft,
+            child: Some(
+              Button {
+                bg_color: Color::from_rgb(0, 128, 0),
+                icon: self.ok_icon,
+                label: self.ok_label.to_string(),
+                ..Default::default()
+              }
+              .into_widget(),
+            ),
+          })
+        } else {
+          None
+        },
       ]
       .into_iter()
       .flatten()
       .collect(),
     }
     .into()
-  }
-
-  fn get_size(&self) -> (f32, f32) {
-    // (0.0, 0.0) so that this widget can be inserted in Column or Row or any other layout widget.
-    // Size is ignored and this widget always cover the whole app
-    (0.0, 0.0)
   }
 }

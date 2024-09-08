@@ -223,69 +223,87 @@ impl<'a> State<'a> for GamePageState {
   fn build(&self, _constraint: Rect) -> Widget<'a> {
     let grid_model = Arc::clone(&self.grid_model);
 
-    Column {
-      align: HorizontalAlign::Center,
-      children: vec![
-        Some(
-          Spacing {
-            height: 16.0,
-            ..Default::default()
-          }
-          .into_widget(),
-        ),
-        Some(
-          Text::new()
-            .text((self.worm.len() - 1).to_string())
-            .color(Color::WHITE)
-            .font_size(48.0)
-            .call()
-            .into_widget(),
-        ),
-        Some(
-          Spacing {
-            height: 16.0,
-            ..Default::default()
-          }
-          .into_widget(),
-        ),
-        Some(
-          Grid {
-            col_count: COL_COUNT,
-            row_count: ROW_COUNT,
-            gap: 2.0,
-            builder: Box::new(move |index| {
-              RectWidget {
-                color: match grid_model.read().unwrap()[index as usize] {
-                  GameCell::Air => Color::from_rgb(56, 56, 56),
-                  GameCell::Worm => Color::from_rgb(243, 125, 121),
-                  GameCell::Wall => Color::RED,
-                  GameCell::Food => Color::GREEN,
-                },
-                ..Default::default()
-              }
-              .into_widget()
-            }),
-          }
-          .into_widget(),
-        ),
-        if self.is_worm_dead {
+    Column::new()
+      .align(HorizontalAlign::Center)
+      .children(
+        vec![
           Some(
-            Dialog {
-              color: Color::from_rgb(255, 128, 128),
-              header_icon: icon_name::SKULL,
-              header_title: "You Died...".to_string(),
+            Spacing {
+              height: 16.0,
               ..Default::default()
             }
             .into_widget(),
-          )
-        } else {
-          None
-        },
-      ]
-      .into_iter()
-      .flatten()
-      .collect(),
-    }
-    .into_widget()
+          ),
+          Some(
+            Text::new()
+              .text((self.worm.len() - 1).to_string())
+              .color(Color::WHITE)
+              .font_size(48.0)
+              .call()
+              .into_widget(),
+          ),
+          Some(
+            Spacing {
+              height: 16.0,
+              ..Default::default()
+            }
+            .into_widget(),
+          ),
+          Some(
+            Grid {
+              col_count: COL_COUNT,
+              row_count: ROW_COUNT,
+              gap: 2.0,
+              builder: Box::new(move |index| {
+                RectWidget {
+                  color: match grid_model.read().unwrap()[index as usize] {
+                    GameCell::Air => Color::from_rgb(56, 56, 56),
+                    GameCell::Worm => Color::from_rgb(243, 125, 121),
+                    GameCell::Wall => Color::RED,
+                    GameCell::Food => Color::GREEN,
+                  },
+                  ..Default::default()
+                }
+                .into_widget()
+              }),
+            }
+            .into_widget(),
+          ),
+          if self.is_worm_dead {
+            Some(
+              Dialog {
+                color: Color::from_rgb(255, 128, 128),
+                header_icon: icon_name::SKULL,
+                header_title: "You Died...".to_string(),
+                has_ok: true,
+                close_icon: icon_name::SENTIMENT_DISSATISFIED,
+                close_label: "Give Up".to_string(),
+                ok_icon: icon_name::RESTART_ALT,
+                ok_label: "Try Again".to_string(),
+                body: Some(
+                  Text::new()
+                    .text(format!(
+                      "You ate {} green apple{}. Want to try again?",
+                      self.worm.len() - 1,
+                      if self.worm.len() != 2 { "s" } else { "" }
+                    ))
+                    .font_size(24.0)
+                    .call()
+                    .into_widget(),
+                ),
+                ..Default::default()
+              }
+              .into_widget(),
+            )
+          } else {
+            None
+          },
+        ]
+        .into_iter()
+        .flatten()
+        .collect::<Vec<_>>(),
+      )
+      .call()
+      .into_widget()
   }
 }

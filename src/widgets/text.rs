@@ -17,16 +17,23 @@ impl Text {
   pub fn new<'a>(
     #[optarg_default] text: String,
     #[optarg("Segoe UI")] font_family: &'a str,
+    #[optarg_default] font_style: FontStyle,
     #[optarg(12.0)] font_size: f32,
     #[optarg(Color::BLACK)] color: Color,
   ) -> Self {
     let mut text_typefaces = context::TEXT_TYPEFACES.lock().unwrap();
 
     let typeface = text_typefaces
-      .entry(font_family.to_string())
-      .or_insert_with_key(|font_family| {
+      .entry(format!(
+        "FontFamily#{}#Weight#{}#Width#{}#Slant#{:?}",
+        font_family,
+        *font_style.weight(),
+        *font_style.width(),
+        font_style.slant()
+      ))
+      .or_insert_with_key(|_| {
         FontMgr::new()
-          .match_family_style(font_family, FontStyle::default())
+          .match_family_style(font_family, font_style)
           .unwrap()
       });
 
@@ -44,6 +51,10 @@ impl Text {
 }
 
 impl PainterWidget for Text {
+  fn get_size(&self) -> (f32, f32) {
+    (self.bound.width(), self.bound.height())
+  }
+
   fn draw(&self, canvas: &Canvas, constraint: Rect) {
     canvas.draw_str(
       &self.text,
@@ -54,9 +65,5 @@ impl PainterWidget for Text {
       &self.font,
       Paint::default().set_anti_alias(true).set_color(self.color),
     );
-  }
-
-  fn get_size(&self) -> (f32, f32) {
-    (self.bound.width(), self.bound.height())
   }
 }

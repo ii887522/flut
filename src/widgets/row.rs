@@ -1,22 +1,61 @@
 use super::{StackChild, StatelessWidget, Widget};
-use crate::{models::VerticalAlign, widgets::Stack};
+use crate::{
+  models::{Origin, VerticalAlign},
+  widgets::Stack,
+};
+use optarg2chain::optarg_impl;
 use rayon::prelude::*;
 use skia_safe::Rect;
-use std::mem;
+use std::{cell::OnceCell, mem};
 
 #[derive(Debug, Default)]
 pub struct Row<'a> {
-  pub align: VerticalAlign,
-  pub children: Vec<Widget<'a>>,
+  align: VerticalAlign,
+  children: Vec<Widget<'a>>,
+  size: OnceCell<(f32, f32)>,
+}
+
+#[optarg_impl]
+impl<'a> Row<'a> {
+  #[optarg_method(RowNewBuilder, call)]
+  pub fn new(
+    #[optarg_default] align: VerticalAlign,
+    #[optarg_default] children: Vec<Widget<'a>>,
+  ) -> Self {
+    Self {
+      align,
+      children,
+      size: OnceCell::new(),
+    }
+  }
 }
 
 impl<'a> StatelessWidget<'a> for Row<'a> {
+  fn get_size(&self) -> (f32, f32) {
+    *self.size.get_or_init(|| {
+      self
+        .children
+        .iter()
+        .try_fold((0.0, 0.0), |acc, child| {
+          let child_size = child.get_size();
+
+          if child_size.0 < 0.0 {
+            Err(())
+          } else {
+            Ok((child_size.0 + acc.0, child_size.1.max(acc.1)))
+          }
+        })
+        .unwrap_or((-1.0, -1.0))
+    })
+  }
+
   fn build(&mut self, constraint: Rect) -> Widget<'a> {
     let mut children = mem::take(&mut self.children)
       .into_par_iter()
       .map(|child| StackChild {
         position: (0.0, 0.0),
         size: (0.0, 0.0),
+        origin: Origin::TopLeft,
         child: Some(child),
       })
       .collect::<Vec<_>>();
@@ -47,7 +86,7 @@ impl<'a> StatelessWidget<'a> for Row<'a> {
         if child_index == unknown_width_child_index {
           // Last child to process where it's width is unknown. Can calculate this child width by filling the
           // remaining space
-          let width = x - stack_child.position.0;
+          let width = x - stack_child.get_position().0;
           stack_child.size = (width, height);
           break;
         }

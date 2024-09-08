@@ -1,4 +1,5 @@
 pub(super) mod buildable;
+pub mod button;
 pub mod column;
 pub mod dialog;
 pub mod grid;
@@ -15,6 +16,7 @@ pub mod text;
 pub mod widget;
 
 pub(super) use buildable::Buildable;
+pub use button::Button;
 pub use column::Column;
 pub use dialog::Dialog;
 pub use grid::Grid;

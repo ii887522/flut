@@ -8,11 +8,11 @@ pub struct Spacing {
 }
 
 impl PainterWidget for Spacing {
-  fn draw(&self, _canvas: &Canvas, _constraint: Rect) {
-    // This widget is served for the purpose of separating between widgets for better visual
-  }
-
   fn get_size(&self) -> (f32, f32) {
     (self.width, self.height)
+  }
+
+  fn draw(&self, _canvas: &Canvas, _constraint: Rect) {
+    // This widget is served for the purpose of separating between widgets for better visual
   }
 }
