@@ -186,41 +186,46 @@ pub fn run(app: App<'_>) {
   let mut now = Instant::now();
 
   'running: loop {
-    for event in event_pump.poll_iter() {
+    // Hot loop
+    while !context::POWER_SAVING.load(Ordering::Relaxed) {
+      for event in event_pump.poll_iter() {
+        if let Event::Quit { .. } = event {
+          break 'running;
+        }
+
+        widget_tree.process_event(&event);
+      }
+
+      let mut tick_count = 0;
+      let mut frame_time = now.elapsed().as_secs_f32();
+      now = Instant::now();
+
+      while frame_time > 0.0 && tick_count < MAX_FRAME_TICK_COUNT {
+        let dt = frame_time.min(1.0 / TPS);
+        widget_tree.update(dt);
+        frame_time -= dt;
+        tick_count += 1;
+      }
+
+      canvas.clear(Color::BLACK);
+      widget_tree.draw(canvas);
+      gr_ctx.flush_and_submit();
+      window.gl_swap_window();
+    }
+
+    // Cold loop
+    for event in event_pump.wait_iter() {
       if let Event::Quit { .. } = event {
         break 'running;
       }
 
       widget_tree.process_event(&event);
+
+      if !context::POWER_SAVING.load(Ordering::Relaxed) {
+        break;
+      }
     }
-
-    let mut tick_count = 0;
-    let mut frame_time = now.elapsed().as_secs_f32();
-    now = Instant::now();
-
-    while frame_time > 0.0 && tick_count < MAX_FRAME_TICK_COUNT {
-      let dt = frame_time.min(1.0 / TPS);
-      widget_tree.update(dt);
-      frame_time -= dt;
-      tick_count += 1;
-    }
-
-    canvas.clear(Color::BLACK);
-    widget_tree.draw(canvas);
-    gr_ctx.flush_and_submit();
-    window.gl_swap_window();
   }
 
   window.hide();
-
-  // todo:
-  // for event in sdl.event_pump().unwrap().wait_iter() {
-  //   if let Event::Quit { .. } = event {
-  //     break;
-  //   }
-
-  //   canvas.clear(Color::BLACK);
-  //   gr_ctx.flush_and_submit();
-  //   window.gl_swap_window();
-  // }
 }

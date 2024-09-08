@@ -15,7 +15,7 @@ use sdl2::{event::Event, keyboard::Keycode};
 use skia_safe::{Color, Rect};
 use std::{
   collections::VecDeque,
-  sync::{Arc, RwLock},
+  sync::{atomic::Ordering, Arc, RwLock},
 };
 
 const COL_COUNT: u16 = 41;
@@ -40,12 +40,12 @@ impl<'a> StatefulWidget<'a> for GamePage {
 
         // Put top walls
         } else if index < COL_COUNT
-      // Put bottom walls
+        // Put bottom walls
         || ((COL_COUNT - 1) * ROW_COUNT..COL_COUNT * ROW_COUNT).contains(&index)
-      // Put left walls
-      || index % COL_COUNT == 0
-      // Put right walls
-      || (index + 1) % COL_COUNT == 0
+        // Put left walls
+        || index % COL_COUNT == 0
+        // Put right walls
+        || (index + 1) % COL_COUNT == 0
         {
           GameCell::Wall
         } else {
@@ -141,6 +141,7 @@ impl GamePageState {
         }
 
         self.is_worm_dead = true;
+        context::POWER_SAVING.store(true, Ordering::Relaxed);
         return;
       } else if let GameCell::Food = grid_model[new_head.position as usize] {
         drop(grid_model);

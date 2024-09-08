@@ -4,11 +4,12 @@ use skia_safe::{FontMgr, Typeface};
 use std::{
   collections::HashMap,
   fs,
-  sync::{mpsc::Sender, LazyLock, Mutex, OnceLock},
+  sync::{atomic::AtomicBool, mpsc::Sender, LazyLock, Mutex, OnceLock},
 };
 
 pub static AUDIO_TX: OnceLock<Sender<AudioTask<'_>>> = OnceLock::new();
 pub static DRAWABLE_SIZE: (AtomicF32, AtomicF32) = (AtomicF32::new(0.0), AtomicF32::new(0.0));
+pub static POWER_SAVING: AtomicBool = AtomicBool::new(false);
 
 pub static TEXT_TYPEFACES: LazyLock<Mutex<HashMap<String, Typeface>>> =
   LazyLock::new(|| Mutex::new(HashMap::new()));
