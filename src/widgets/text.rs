@@ -3,7 +3,7 @@ use crate::boot::context;
 use optarg2chain::optarg_impl;
 use skia_safe::{font::Edging, Canvas, Color, Font, FontStyle, Paint, Point, Rect};
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub struct Text {
   text: String,
   font: Font,

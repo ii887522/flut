@@ -47,6 +47,7 @@ impl Default for App<'_> {
 }
 
 pub fn run(app: App<'_>) {
+  // Fix blurry window on Windows platform
   sdl2::hint::set(
     CStr::from_bytes_with_nul(sys::SDL_HINT_WINDOWS_DPI_SCALING)
       .unwrap()
@@ -233,5 +234,6 @@ pub fn run(app: App<'_>) {
     }
   }
 
+  // Cleanup
   window.hide();
 }

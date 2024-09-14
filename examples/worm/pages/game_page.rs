@@ -15,13 +15,14 @@ use sdl2::{event::Event, keyboard::Keycode};
 use skia_safe::{Color, Rect};
 use std::{
   collections::VecDeque,
+  process,
   sync::{atomic::Ordering, Arc, RwLock},
 };
 
 const COL_COUNT: u16 = 41;
 const ROW_COUNT: u16 = 41;
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, Default, Hash, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) struct GamePage;
 
 impl<'a> StatefulWidget<'a> for GamePage {
@@ -33,6 +34,29 @@ impl<'a> StatefulWidget<'a> for GamePage {
       }
     });
 
+    let mut state = GamePageState {
+      clock: Clock::new(30.0),
+      ..Default::default()
+    };
+
+    state.init();
+    Box::new(state)
+  }
+}
+
+#[derive(Debug, Default)]
+struct GamePageState {
+  grid_model: Arc<RwLock<Vec<GameCell>>>,
+  air_indices: U16SparseSet,
+  worm: VecDeque<WormCell>, // Front is head, back is tail
+  clock: Clock,
+  next_worm_direction: Option<Direction>,
+  is_worm_dead: bool,
+}
+
+impl GamePageState {
+  fn init(&mut self) {
+    // Keep the game running
     context::ANIMATION_COUNT.fetch_add(1, Ordering::Relaxed);
 
     let grid_model = (0..COL_COUNT * ROW_COUNT)
@@ -75,33 +99,14 @@ impl<'a> StatefulWidget<'a> for GamePage {
       direction: random(),
     });
 
-    let clock = Clock::new(30.0);
-
-    let mut this = Box::new(GamePageState {
-      grid_model: Arc::new(RwLock::new(grid_model)),
-      air_indices,
-      worm,
-      clock,
-      next_worm_direction: None,
-      is_worm_dead: false,
-    });
-
-    this.spawn_food();
-    this
+    self.grid_model = Arc::new(RwLock::new(grid_model));
+    self.air_indices = air_indices;
+    self.worm = worm;
+    self.next_worm_direction = None;
+    self.is_worm_dead = false;
+    self.spawn_food();
   }
-}
 
-#[derive(Debug)]
-struct GamePageState {
-  grid_model: Arc<RwLock<Vec<GameCell>>>,
-  air_indices: U16SparseSet,
-  worm: VecDeque<WormCell>, // Front is head, back is tail
-  clock: Clock,
-  next_worm_direction: Option<Direction>,
-  is_worm_dead: bool,
-}
-
-impl GamePageState {
   fn set_grid_cell(&mut self, index: u16, cell: GameCell) {
     let mut grid_model = self.grid_model.write().unwrap();
     let old_cell = grid_model[index as usize];
@@ -120,7 +125,8 @@ impl GamePageState {
   }
 
   fn spawn_food(&mut self) {
-    self.set_grid_cell(self.air_indices.random().unwrap(), GameCell::Food);
+    let food_index = self.air_indices.random().unwrap();
+    self.set_grid_cell(food_index, GameCell::Food);
   }
 
   fn move_worm(&mut self) {
@@ -147,6 +153,8 @@ impl GamePageState {
         });
 
         self.is_worm_dead = true;
+
+        // Game can stop running after game over
         context::ANIMATION_COUNT.fetch_sub(1, Ordering::Relaxed);
         return;
       } else if let GameCell::Food = grid_model[new_head.position as usize] {
@@ -172,9 +180,10 @@ impl GamePageState {
 }
 
 impl<'a> State<'a> for GamePageState {
-  fn process_event(&mut self, event: &Event) {
+  fn process_event(&mut self, event: &Event) -> bool {
     if self.is_worm_dead {
-      return;
+      // Don't consume the event because dialog buttons might need to listen to it
+      return false;
     }
 
     let worm_head = self.worm.front().unwrap();
@@ -214,6 +223,9 @@ impl<'a> State<'a> for GamePageState {
       }
       _ => {}
     }
+
+    // Don't consume the event because dialog buttons might need to listen to it
+    false
   }
 
   fn update(&mut self, dt: f32) -> bool {
@@ -222,7 +234,8 @@ impl<'a> State<'a> for GamePageState {
     }
 
     if let Some(next_worm_direction) = self.next_worm_direction.take() {
-      self.worm.front_mut().unwrap().direction = next_worm_direction;
+      let worm_head = self.worm.front_mut().unwrap();
+      worm_head.direction = next_worm_direction;
     }
 
     self.move_worm();
@@ -231,6 +244,7 @@ impl<'a> State<'a> for GamePageState {
 
   fn build(&self, _constraint: Rect) -> Widget<'a> {
     let grid_model = Arc::clone(&self.grid_model);
+    let score = self.worm.len() - 1;
 
     Column::new()
       .align(HorizontalAlign::Center)
@@ -245,7 +259,7 @@ impl<'a> State<'a> for GamePageState {
           ),
           Some(
             Text::new()
-              .text((self.worm.len() - 1).to_string())
+              .text(score.to_string())
               .color(Color::WHITE)
               .font_size(48.0)
               .call()
@@ -264,8 +278,10 @@ impl<'a> State<'a> for GamePageState {
               row_count: ROW_COUNT,
               gap: 2.0,
               builder: Box::new(move |index| {
+                let grid_model = grid_model.read().unwrap();
+
                 RectWidget {
-                  color: match grid_model.read().unwrap()[index as usize] {
+                  color: match grid_model[index as usize] {
                     GameCell::Air => Color::from_rgb(56, 56, 56),
                     GameCell::Worm => Color::from_rgb(243, 125, 121),
                     GameCell::Wall => Color::RED,
@@ -289,12 +305,16 @@ impl<'a> State<'a> for GamePageState {
                 close_label: "Give Up".to_string(),
                 ok_icon: icon_name::RESTART_ALT,
                 ok_label: "Try Again".to_string(),
+                on_close: Some(Box::new(|| process::exit(0))),
+                on_ok: Some(Box::new(|| {
+                  // Restart the game
+                  // todo: self.init();
+                })),
                 body: Some(
                   Text::new()
                     .text(format!(
-                      "You ate {} green apple{}. Want to try again?",
-                      self.worm.len() - 1,
-                      if self.worm.len() != 2 { "s" } else { "" }
+                      "You ate {score} green apple{}. Want to try again?",
+                      if score != 1 { "s" } else { "" },
                     ))
                     .font_size(24.0)
                     .call()

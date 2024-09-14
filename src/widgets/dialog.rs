@@ -8,9 +8,11 @@ use skia_safe::{
   font_style::{Slant, Weight, Width},
   Color, FontStyle, Rect,
 };
-use std::sync::atomic::Ordering;
+use std::{
+  fmt::{self, Debug},
+  sync::atomic::Ordering,
+};
 
-#[derive(Debug)]
 pub struct Dialog<'a> {
   pub color: Color,
   pub header_icon: u16,
@@ -23,6 +25,27 @@ pub struct Dialog<'a> {
   pub ok_icon: u16,
   pub ok_label: String,
   pub has_ok: bool,
+  pub on_close: Option<Box<dyn FnMut() + 'a + Send>>,
+  pub on_ok: Option<Box<dyn FnMut() + 'a + Send>>,
+}
+
+impl Debug for Dialog<'_> {
+  fn fmt(&self, fmt: &mut fmt::Formatter<'_>) -> fmt::Result {
+    fmt
+      .debug_struct("Dialog")
+      .field("color", &self.color)
+      .field("header_icon", &self.header_icon)
+      .field("header_icon_color", &self.header_icon_color)
+      .field("header_title", &self.header_title)
+      .field("header_title_color", &self.header_title_color)
+      .field("body", &self.body)
+      .field("close_icon", &self.close_icon)
+      .field("close_label", &self.close_label)
+      .field("ok_icon", &self.ok_icon)
+      .field("ok_label", &self.ok_label)
+      .field("has_ok", &self.has_ok)
+      .finish_non_exhaustive()
+  }
 }
 
 impl Default for Dialog<'_> {
@@ -39,6 +62,8 @@ impl Default for Dialog<'_> {
       ok_icon: icon_name::CHECK,
       ok_label: "OK".to_string(),
       has_ok: false,
+      on_close: None,
+      on_ok: None,
     }
   }
 }
@@ -157,6 +182,7 @@ impl<'a> StatelessWidget<'a> for Dialog<'a> {
               bg_color: Color::RED,
               icon: self.close_icon,
               label: self.close_label.to_string(),
+              on_mouse_up: self.on_close.take(),
               ..Default::default()
             }
             .into_widget(),
@@ -175,6 +201,7 @@ impl<'a> StatelessWidget<'a> for Dialog<'a> {
                 bg_color: Color::from_rgb(0, 128, 0),
                 icon: self.ok_icon,
                 label: self.ok_label.to_string(),
+                on_mouse_up: self.on_ok.take(),
                 ..Default::default()
               }
               .into_widget(),

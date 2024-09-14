@@ -204,6 +204,7 @@ impl WidgetTree<'_> {
         .unwrap();
 
       let mut is_mouse_on_widget = false;
+      let mut is_consume_event = false;
 
       match event {
         Event::MouseMotion { x, y, .. }
@@ -224,7 +225,7 @@ impl WidgetTree<'_> {
           .as_mut()
           .unwrap();
 
-        match event {
+        is_consume_event |= match event {
           Event::MouseMotion { x, y, .. } => {
             buildable_node.on_mouse_move((*x as _, *y as _), is_mouse_on_widget)
           }
@@ -235,11 +236,13 @@ impl WidgetTree<'_> {
             mouse_btn, x, y, ..
           } => buildable_node.on_mouse_up((*x as _, *y as _), *mouse_btn),
           event => buildable_node.process_event(event),
-        }
+        };
       }
 
-      // Traverse the expanded widget tree in breadth-first order
-      widget_node_index_fifo_q.par_extend(widget_node.child_indices.par_iter());
+      if !is_consume_event {
+        // Traverse the expanded widget tree in breadth-first order
+        widget_node_index_fifo_q.par_extend(widget_node.child_indices.par_iter());
+      }
     }
   }
 
@@ -260,11 +263,11 @@ impl WidgetTree<'_> {
       let mut is_widget_rebuilt = false;
 
       for (index, &buildable_index) in widget_node.buildable_indices.iter().enumerate() {
-        if let Buildable::Stateful(state) = &mut self.buildable_nodes[buildable_index as usize]
+        let buildable_node = self.buildable_nodes[buildable_index as usize]
           .as_mut()
-          .unwrap()
-          .buildable
-        {
+          .unwrap();
+
+        if let Buildable::Stateful(state) = &mut buildable_node.buildable {
           if !state.update(dt) {
             // Widget state not changed, thus can be reused
             continue;
@@ -329,11 +332,11 @@ impl WidgetTree<'_> {
         .unwrap();
 
       for &buildable_index in &widget_node.buildable_indices {
-        match &self.buildable_nodes[buildable_index as usize]
+        let buildable_node = self.buildable_nodes[buildable_index as usize]
           .as_ref()
-          .unwrap()
-          .buildable
-        {
+          .unwrap();
+
+        match &buildable_node.buildable {
           Buildable::Stateless(widget) => {
             widget.pre_draw(canvas, widget_node.constraint);
           }
@@ -375,11 +378,11 @@ impl WidgetTree<'_> {
         let parent_widget_node = self.widget_nodes[parent_index as usize].as_ref().unwrap();
 
         for &buildable_index in parent_widget_node.buildable_indices.iter().rev() {
-          match &self.buildable_nodes[buildable_index as usize]
+          let buildable_node = self.buildable_nodes[buildable_index as usize]
             .as_ref()
-            .unwrap()
-            .buildable
-          {
+            .unwrap();
+
+          match &buildable_node.buildable {
             Buildable::Stateless(widget) => {
               widget.post_draw(canvas, parent_widget_node.constraint);
             }
@@ -396,24 +399,35 @@ impl WidgetTree<'_> {
 }
 
 impl BuildableNode<'_> {
-  fn on_mouse_move(&mut self, mouse_position: (f32, f32), is_mouse_on_this: bool) {
+  fn on_mouse_move(&mut self, mouse_position: (f32, f32), is_mouse_on_this: bool) -> bool {
     if let Buildable::Stateful(state) = &mut self.buildable {
-      if !self.is_mouse_on_this && is_mouse_on_this {
-        state.on_mouse_over(mouse_position);
-        state.on_mouse_hover(mouse_position);
+      let is_consume_event = if !self.is_mouse_on_this && is_mouse_on_this {
+        // Have to use | instead of || because || will short-circuit meaning that if state.on_mouse_over() consume event,
+        // state.on_mouse_hover() will not get called which is not expected.
+        //
+        // When event is consumed, all children of this widget will not process the event. But all associated
+        // state.on_xxx() of this widget will still get called regardless of event consumption.
+        state.on_mouse_over(mouse_position) | state.on_mouse_hover(mouse_position)
       } else if self.is_mouse_on_this && !is_mouse_on_this {
-        state.on_mouse_out(mouse_position);
+        let mut is_consume_event = state.on_mouse_out(mouse_position);
 
         if self.downed_mouse_button != MouseButton::Unknown {
-          state.on_mouse_up(mouse_position, self.downed_mouse_button);
+          is_consume_event |= state.on_mouse_up(mouse_position, self.downed_mouse_button);
           self.downed_mouse_button = MouseButton::Unknown;
         }
+
+        is_consume_event
       } else if is_mouse_on_this {
-        state.on_mouse_hover(mouse_position);
-      }
+        state.on_mouse_hover(mouse_position)
+      } else {
+        false
+      };
 
       self.is_mouse_on_this = is_mouse_on_this;
+      return is_consume_event;
     }
+
+    false
   }
 
   fn on_mouse_down(
@@ -421,27 +435,33 @@ impl BuildableNode<'_> {
     mouse_position: (f32, f32),
     mouse_button: MouseButton,
     is_mouse_on_this: bool,
-  ) {
+  ) -> bool {
     if let Buildable::Stateful(state) = &mut self.buildable {
       if is_mouse_on_this {
-        state.on_mouse_down(mouse_position, mouse_button);
         self.downed_mouse_button = mouse_button;
+        return state.on_mouse_down(mouse_position, mouse_button);
       }
     }
+
+    false
   }
 
-  fn on_mouse_up(&mut self, mouse_position: (f32, f32), mouse_button: MouseButton) {
+  fn on_mouse_up(&mut self, mouse_position: (f32, f32), mouse_button: MouseButton) -> bool {
     if let Buildable::Stateful(state) = &mut self.buildable {
       if mouse_button == self.downed_mouse_button {
-        state.on_mouse_up(mouse_position, mouse_button);
         self.downed_mouse_button = MouseButton::Unknown;
+        return state.on_mouse_up(mouse_position, mouse_button);
       }
     }
+
+    false
   }
 
-  fn process_event(&mut self, event: &Event) {
+  fn process_event(&mut self, event: &Event) -> bool {
     if let Buildable::Stateful(state) = &mut self.buildable {
-      state.process_event(event);
+      return state.process_event(event);
     }
+
+    false
   }
 }

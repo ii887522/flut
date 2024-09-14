@@ -3,7 +3,7 @@ use crate::boot::context;
 use optarg2chain::optarg_impl;
 use skia_safe::{font::Edging, Canvas, Color, Font, Paint, Point, Rect};
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub struct Icon {
   name: String,
   font: Font,

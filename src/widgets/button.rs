@@ -91,11 +91,11 @@ struct ButtonState<'a> {
   icon_color: Color,
   label: String,
   label_color: Color,
-  dirty_count: u32,
   on_mouse_over: Option<Box<dyn FnMut() + 'a + Send>>,
   on_mouse_out: Option<Box<dyn FnMut() + 'a + Send>>,
   on_mouse_down: Option<Box<dyn FnMut() + 'a + Send>>,
   on_mouse_up: Option<Box<dyn FnMut() + 'a + Send>>,
+  dirty_count: u32,
 }
 
 impl Debug for ButtonState<'_> {
@@ -110,30 +110,34 @@ impl Debug for ButtonState<'_> {
       .field("label", &self.label)
       .field("label_color", &self.label_color)
       .field("dirty_count", &self.dirty_count)
-      .finish()
+      .finish_non_exhaustive()
   }
 }
 
 impl<'a> State<'a> for ButtonState<'_> {
-  fn on_mouse_over(&mut self, _mouse_position: (f32, f32)) {
+  fn on_mouse_over(&mut self, _mouse_position: (f32, f32)) -> bool {
     context::HAND_CURSOR.with(|hand_cursor| hand_cursor.set());
 
     if let Some(on_mouse_over) = &mut self.on_mouse_over {
       on_mouse_over();
     }
+
+    true
   }
 
-  fn on_mouse_out(&mut self, _mouse_position: (f32, f32)) {
+  fn on_mouse_out(&mut self, _mouse_position: (f32, f32)) -> bool {
     context::ARROW_CURSOR.with(|arrow_cursor| arrow_cursor.set());
 
     if let Some(on_mouse_out) = &mut self.on_mouse_out {
       on_mouse_out();
     }
+
+    true
   }
 
-  fn on_mouse_down(&mut self, _mouse_position: (f32, f32), mouse_button: MouseButton) {
+  fn on_mouse_down(&mut self, _mouse_position: (f32, f32), mouse_button: MouseButton) -> bool {
     if mouse_button != MouseButton::Left {
-      return;
+      return true;
     }
 
     self.is_elevated = false;
@@ -143,11 +147,13 @@ impl<'a> State<'a> for ButtonState<'_> {
     if let Some(on_mouse_down) = &mut self.on_mouse_down {
       on_mouse_down();
     }
+
+    true
   }
 
-  fn on_mouse_up(&mut self, _mouse_position: (f32, f32), mouse_button: MouseButton) {
+  fn on_mouse_up(&mut self, _mouse_position: (f32, f32), mouse_button: MouseButton) -> bool {
     if mouse_button != MouseButton::Left {
-      return;
+      return true;
     }
 
     self.is_elevated = true;
@@ -157,6 +163,8 @@ impl<'a> State<'a> for ButtonState<'_> {
     if let Some(on_mouse_up) = &mut self.on_mouse_up {
       on_mouse_up();
     }
+
+    true
   }
 
   fn update(&mut self, _dt: f32) -> bool {

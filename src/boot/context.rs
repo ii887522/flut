@@ -19,12 +19,8 @@ thread_local! {
   // Font typefaces
   pub static TEXT_TYPEFACES: RefCell<HashMap<String, Typeface>> = RefCell::new(HashMap::new());
   pub static ICON_TYPEFACE: Typeface = FONT_MGR.with(|font_mgr| {
-    font_mgr
-      .new_from_data(
-        &fs::read("assets/fonts/MaterialSymbolsOutlined[FILL,GRAD,opsz,wght].ttf").unwrap(),
-        None,
-      )
-      .unwrap()
+    let icon_font_data = fs::read("assets/fonts/MaterialSymbolsOutlined[FILL,GRAD,opsz,wght].ttf").unwrap();
+    font_mgr.new_from_data(&icon_font_data, None).unwrap()
   });
 
   // Mouse cursors

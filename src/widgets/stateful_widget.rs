@@ -12,12 +12,29 @@ pub trait StatefulWidget<'a>: Debug + Send {
 }
 
 pub trait State<'a>: Debug {
-  fn on_mouse_over(&mut self, _mouse_position: (f32, f32)) {}
-  fn on_mouse_hover(&mut self, _mouse_position: (f32, f32)) {}
-  fn on_mouse_out(&mut self, _mouse_position: (f32, f32)) {}
-  fn on_mouse_down(&mut self, _mouse_position: (f32, f32), _mouse_button: MouseButton) {}
-  fn on_mouse_up(&mut self, _mouse_position: (f32, f32), _mouse_button: MouseButton) {}
-  fn process_event(&mut self, _event: &Event) {}
+  fn on_mouse_over(&mut self, _mouse_position: (f32, f32)) -> bool {
+    false
+  }
+
+  fn on_mouse_hover(&mut self, _mouse_position: (f32, f32)) -> bool {
+    false
+  }
+
+  fn on_mouse_out(&mut self, _mouse_position: (f32, f32)) -> bool {
+    false
+  }
+
+  fn on_mouse_down(&mut self, _mouse_position: (f32, f32), _mouse_button: MouseButton) -> bool {
+    false
+  }
+
+  fn on_mouse_up(&mut self, _mouse_position: (f32, f32), _mouse_button: MouseButton) -> bool {
+    false
+  }
+
+  fn process_event(&mut self, _event: &Event) -> bool {
+    false
+  }
 
   fn update(&mut self, _dt: f32) -> bool {
     false
