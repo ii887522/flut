@@ -16,7 +16,7 @@ impl Icon {
   #[optarg_method(IconNewBuilder, call)]
   pub fn new(name: u16, #[optarg(12.0)] size: f32, #[optarg(Color::BLACK)] color: Color) -> Self {
     let name = String::from_utf16_lossy(&[name]);
-    let mut font = Font::new(&*context::ICON_TYPEFACE, size);
+    let mut font = context::ICON_TYPEFACE.with(|icon_typeface| Font::new(icon_typeface, size));
     font.set_edging(Edging::AntiAlias);
     let (_, bound) = font.measure_str(&name, None);
 

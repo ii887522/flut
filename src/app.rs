@@ -59,7 +59,7 @@ pub fn run(app: App<'_>) {
 
   if app.use_audio {
     let (audio_tx, audio_rx) = mpsc::channel();
-    context::AUDIO_TX.set(audio_tx).unwrap();
+    context::AUDIO_TX.with(|ctx_audio_tx| ctx_audio_tx.set(audio_tx).unwrap());
     thread::spawn(|| audio::main(audio_rx));
   }
 
@@ -182,12 +182,18 @@ pub fn run(app: App<'_>) {
     .store(drawable_size.1, Ordering::Relaxed);
 
   let mut event_pump = sdl.event_pump().unwrap();
-  let mut widget_tree = WidgetTree::new(app.child, Rect::from_wh(drawable_size.0, drawable_size.1));
+
+  let mut widget_tree = WidgetTree::new(
+    app.child,
+    Rect::from_wh(drawable_size.0, drawable_size.1),
+    (app.size.0 as _, app.size.1 as _),
+  );
+
   let mut now = Instant::now();
 
   'running: loop {
     // Hot loop
-    while !context::POWER_SAVING.load(Ordering::Relaxed) {
+    while context::ANIMATION_COUNT.load(Ordering::Relaxed) > 0 {
       for event in event_pump.poll_iter() {
         if let Event::Quit { .. } = event {
           break 'running;
@@ -221,7 +227,7 @@ pub fn run(app: App<'_>) {
 
       widget_tree.process_event(&event);
 
-      if !context::POWER_SAVING.load(Ordering::Relaxed) {
+      if context::ANIMATION_COUNT.load(Ordering::Relaxed) > 0 {
         break;
       }
     }

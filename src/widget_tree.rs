@@ -1,15 +1,22 @@
-use crate::widgets::{Buildable, Widget};
+use crate::{
+  boot::context,
+  widgets::{Buildable, Widget},
+};
 use rayon::prelude::*;
-use sdl2::event::Event;
-use skia_safe::{Canvas, Rect};
-use std::collections::{HashMap, VecDeque};
+use sdl2::{event::Event, mouse::MouseButton};
+use skia_safe::{Canvas, Contains, Point, Rect};
+use std::{
+  collections::{HashMap, VecDeque},
+  sync::atomic::Ordering,
+};
 
 #[derive(Debug)]
 pub(super) struct WidgetTree<'a> {
+  app_size: (f32, f32),
   widget_nodes: Vec<Option<WidgetNode<'a>>>,
-  buildables: Vec<Option<Buildable<'a>>>,
+  buildable_nodes: Vec<Option<BuildableNode<'a>>>,
   empty_widget_node_indices: Vec<u32>,
-  empty_buildable_indices: Vec<u32>,
+  empty_buildable_node_indices: Vec<u32>,
 }
 
 #[derive(Debug)]
@@ -20,13 +27,25 @@ struct WidgetNode<'a> {
   buildable_indices: Vec<u32>,
 }
 
+#[derive(Debug)]
+struct BuildableNode<'a> {
+  buildable: Buildable<'a>,
+  is_mouse_on_this: bool,
+  downed_mouse_button: MouseButton,
+}
+
 impl WidgetTree<'_> {
-  pub(super) fn new<'a>(root: Option<Widget<'a>>, constraint: Rect) -> WidgetTree<'a> {
+  pub(super) fn new<'a>(
+    root: Option<Widget<'a>>,
+    constraint: Rect,
+    app_size: (f32, f32),
+  ) -> WidgetTree<'a> {
     let mut this = WidgetTree {
+      app_size,
       widget_nodes: vec![],
-      buildables: vec![],
+      buildable_nodes: vec![],
       empty_widget_node_indices: vec![],
-      empty_buildable_indices: vec![],
+      empty_buildable_node_indices: vec![],
     };
 
     if let Some(root) = root {
@@ -58,32 +77,50 @@ impl WidgetTree<'_> {
         Widget::Stateless(mut widget) => {
           widget_node.widget = widget.build(widget_node.constraint);
 
-          if let Some(buildable_index) = self.empty_buildable_indices.pop() {
+          if let Some(buildable_index) = self.empty_buildable_node_indices.pop() {
             widget_node.buildable_indices.push(buildable_index);
-            self.buildables[buildable_index as usize] = Some(Buildable::Stateless(widget));
+
+            self.buildable_nodes[buildable_index as usize] = Some(BuildableNode {
+              buildable: Buildable::Stateless(widget),
+              is_mouse_on_this: false,
+              downed_mouse_button: MouseButton::Unknown,
+            });
           } else {
             widget_node
               .buildable_indices
-              .push(self.buildables.len() as _);
+              .push(self.buildable_nodes.len() as _);
 
-            self.buildables.push(Some(Buildable::Stateless(widget)));
+            self.buildable_nodes.push(Some(BuildableNode {
+              buildable: Buildable::Stateless(widget),
+              is_mouse_on_this: false,
+              downed_mouse_button: MouseButton::Unknown,
+            }));
           }
 
           widget_node_index_lifo_q.push(widget_node_index);
         }
-        Widget::Stateful(widget) => {
+        Widget::Stateful(mut widget) => {
           let state = widget.new_state();
           widget_node.widget = state.build(widget_node.constraint);
 
-          if let Some(buildable_index) = self.empty_buildable_indices.pop() {
+          if let Some(buildable_index) = self.empty_buildable_node_indices.pop() {
             widget_node.buildable_indices.push(buildable_index);
-            self.buildables[buildable_index as usize] = Some(Buildable::Stateful(state));
+
+            self.buildable_nodes[buildable_index as usize] = Some(BuildableNode {
+              buildable: Buildable::Stateful(state),
+              is_mouse_on_this: false,
+              downed_mouse_button: MouseButton::Unknown,
+            });
           } else {
             widget_node
               .buildable_indices
-              .push(self.buildables.len() as _);
+              .push(self.buildable_nodes.len() as _);
 
-            self.buildables.push(Some(Buildable::Stateful(state)));
+            self.buildable_nodes.push(Some(BuildableNode {
+              buildable: Buildable::Stateful(state),
+              is_mouse_on_this: false,
+              downed_mouse_button: MouseButton::Unknown,
+            }));
           }
 
           widget_node_index_lifo_q.push(widget_node_index);
@@ -155,10 +192,54 @@ impl WidgetTree<'_> {
   }
 
   pub(super) fn process_event(&mut self, event: &Event) {
-    for buildable in self.buildables.iter_mut().flatten() {
-      if let Buildable::Stateful(state) = buildable {
-        state.process_event(event);
+    let mut widget_node_index_fifo_q = VecDeque::new();
+
+    if !self.widget_nodes.is_empty() {
+      widget_node_index_fifo_q.push_back(0);
+    }
+
+    while let Some(widget_node_index) = widget_node_index_fifo_q.pop_front() {
+      let widget_node = self.widget_nodes[widget_node_index as usize]
+        .as_ref()
+        .unwrap();
+
+      let mut is_mouse_on_widget = false;
+
+      match event {
+        Event::MouseMotion { x, y, .. }
+        | Event::MouseButtonDown { x, y, .. }
+        | Event::MouseButtonUp { x, y, .. } => {
+          if widget_node.constraint.contains(Point::new(
+            *x as f32 * context::DRAWABLE_SIZE.0.load(Ordering::Relaxed) / self.app_size.0,
+            *y as f32 * context::DRAWABLE_SIZE.1.load(Ordering::Relaxed) / self.app_size.1,
+          )) {
+            is_mouse_on_widget = true;
+          }
+        }
+        _ => {}
       }
+
+      for &buildable_index in &widget_node.buildable_indices {
+        let buildable_node = self.buildable_nodes[buildable_index as usize]
+          .as_mut()
+          .unwrap();
+
+        match event {
+          Event::MouseMotion { x, y, .. } => {
+            buildable_node.on_mouse_move((*x as _, *y as _), is_mouse_on_widget)
+          }
+          Event::MouseButtonDown {
+            mouse_btn, x, y, ..
+          } => buildable_node.on_mouse_down((*x as _, *y as _), *mouse_btn, is_mouse_on_widget),
+          Event::MouseButtonUp {
+            mouse_btn, x, y, ..
+          } => buildable_node.on_mouse_up((*x as _, *y as _), *mouse_btn),
+          event => buildable_node.process_event(event),
+        }
+      }
+
+      // Traverse the expanded widget tree in breadth-first order
+      widget_node_index_fifo_q.par_extend(widget_node.child_indices.par_iter());
     }
   }
 
@@ -179,8 +260,10 @@ impl WidgetTree<'_> {
       let mut is_widget_rebuilt = false;
 
       for (index, &buildable_index) in widget_node.buildable_indices.iter().enumerate() {
-        if let Buildable::Stateful(state) =
-          self.buildables[buildable_index as usize].as_mut().unwrap()
+        if let Buildable::Stateful(state) = &mut self.buildable_nodes[buildable_index as usize]
+          .as_mut()
+          .unwrap()
+          .buildable
         {
           if !state.update(dt) {
             // Widget state not changed, thus can be reused
@@ -204,12 +287,12 @@ impl WidgetTree<'_> {
           }
 
           self
-            .empty_buildable_indices
+            .empty_buildable_node_indices
             .reserve(buildable_indices.len());
 
           for buildable_index in buildable_indices {
-            self.buildables[buildable_index as usize] = None;
-            self.empty_buildable_indices.push(buildable_index);
+            self.buildable_nodes[buildable_index as usize] = None;
+            self.empty_buildable_node_indices.push(buildable_index);
           }
 
           is_widget_rebuilt = true;
@@ -246,7 +329,11 @@ impl WidgetTree<'_> {
         .unwrap();
 
       for &buildable_index in &widget_node.buildable_indices {
-        match self.buildables[buildable_index as usize].as_ref().unwrap() {
+        match &self.buildable_nodes[buildable_index as usize]
+          .as_ref()
+          .unwrap()
+          .buildable
+        {
           Buildable::Stateless(widget) => {
             widget.pre_draw(canvas, widget_node.constraint);
           }
@@ -288,7 +375,11 @@ impl WidgetTree<'_> {
         let parent_widget_node = self.widget_nodes[parent_index as usize].as_ref().unwrap();
 
         for &buildable_index in parent_widget_node.buildable_indices.iter().rev() {
-          match self.buildables[buildable_index as usize].as_ref().unwrap() {
+          match &self.buildable_nodes[buildable_index as usize]
+            .as_ref()
+            .unwrap()
+            .buildable
+          {
             Buildable::Stateless(widget) => {
               widget.post_draw(canvas, parent_widget_node.constraint);
             }
@@ -300,6 +391,57 @@ impl WidgetTree<'_> {
 
         last_child_index = parent_index;
       }
+    }
+  }
+}
+
+impl BuildableNode<'_> {
+  fn on_mouse_move(&mut self, mouse_position: (f32, f32), is_mouse_on_this: bool) {
+    if let Buildable::Stateful(state) = &mut self.buildable {
+      if !self.is_mouse_on_this && is_mouse_on_this {
+        state.on_mouse_over(mouse_position);
+        state.on_mouse_hover(mouse_position);
+      } else if self.is_mouse_on_this && !is_mouse_on_this {
+        state.on_mouse_out(mouse_position);
+
+        if self.downed_mouse_button != MouseButton::Unknown {
+          state.on_mouse_up(mouse_position, self.downed_mouse_button);
+          self.downed_mouse_button = MouseButton::Unknown;
+        }
+      } else if is_mouse_on_this {
+        state.on_mouse_hover(mouse_position);
+      }
+
+      self.is_mouse_on_this = is_mouse_on_this;
+    }
+  }
+
+  fn on_mouse_down(
+    &mut self,
+    mouse_position: (f32, f32),
+    mouse_button: MouseButton,
+    is_mouse_on_this: bool,
+  ) {
+    if let Buildable::Stateful(state) = &mut self.buildable {
+      if is_mouse_on_this {
+        state.on_mouse_down(mouse_position, mouse_button);
+        self.downed_mouse_button = mouse_button;
+      }
+    }
+  }
+
+  fn on_mouse_up(&mut self, mouse_position: (f32, f32), mouse_button: MouseButton) {
+    if let Buildable::Stateful(state) = &mut self.buildable {
+      if mouse_button == self.downed_mouse_button {
+        state.on_mouse_up(mouse_position, mouse_button);
+        self.downed_mouse_button = MouseButton::Unknown;
+      }
+    }
+  }
+
+  fn process_event(&mut self, event: &Event) {
+    if let Buildable::Stateful(state) = &mut self.buildable {
+      state.process_event(event);
     }
   }
 }

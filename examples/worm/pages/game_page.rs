@@ -25,11 +25,15 @@ const ROW_COUNT: u16 = 41;
 pub(crate) struct GamePage;
 
 impl<'a> StatefulWidget<'a> for GamePage {
-  fn new_state(&self) -> Box<dyn State<'a> + 'a> {
-    if let Some(audio_tx) = context::AUDIO_TX.get() {
-      let _ = audio_tx.send(AudioTask::LoadSound("assets/audio/dead.wav"));
-      let _ = audio_tx.send(AudioTask::LoadSound("assets/audio/eat.wav"));
-    }
+  fn new_state(&mut self) -> Box<dyn State<'a> + 'a> {
+    context::AUDIO_TX.with(|audio_tx| {
+      if let Some(audio_tx) = audio_tx.get() {
+        let _ = audio_tx.send(AudioTask::LoadSound("assets/audio/dead.wav"));
+        let _ = audio_tx.send(AudioTask::LoadSound("assets/audio/eat.wav"));
+      }
+    });
+
+    context::ANIMATION_COUNT.fetch_add(1, Ordering::Relaxed);
 
     let grid_model = (0..COL_COUNT * ROW_COUNT)
       .into_par_iter()
@@ -136,19 +140,23 @@ impl GamePageState {
       let grid_model = self.grid_model.read().unwrap();
 
       if let GameCell::Wall | GameCell::Worm = grid_model[new_head.position as usize] {
-        if let Some(audio_tx) = context::AUDIO_TX.get() {
-          let _ = audio_tx.send(AudioTask::PlaySound("assets/audio/dead.wav"));
-        }
+        context::AUDIO_TX.with(|audio_tx| {
+          if let Some(audio_tx) = audio_tx.get() {
+            let _ = audio_tx.send(AudioTask::PlaySound("assets/audio/dead.wav"));
+          }
+        });
 
         self.is_worm_dead = true;
-        context::POWER_SAVING.store(true, Ordering::Relaxed);
+        context::ANIMATION_COUNT.fetch_sub(1, Ordering::Relaxed);
         return;
       } else if let GameCell::Food = grid_model[new_head.position as usize] {
         drop(grid_model);
 
-        if let Some(audio_tx) = context::AUDIO_TX.get() {
-          let _ = audio_tx.send(AudioTask::PlaySound("assets/audio/eat.wav"));
-        }
+        context::AUDIO_TX.with(|audio_tx| {
+          if let Some(audio_tx) = audio_tx.get() {
+            let _ = audio_tx.send(AudioTask::PlaySound("assets/audio/eat.wav"));
+          }
+        });
 
         self.spawn_food();
       } else {

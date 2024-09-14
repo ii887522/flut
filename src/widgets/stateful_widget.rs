@@ -1,5 +1,5 @@
 use super::Widget;
-use sdl2::event::Event;
+use sdl2::{event::Event, mouse::MouseButton};
 use skia_safe::{Canvas, Rect};
 use std::fmt::Debug;
 
@@ -8,10 +8,15 @@ pub trait StatefulWidget<'a>: Debug + Send {
     (-1.0, -1.0)
   }
 
-  fn new_state(&self) -> Box<dyn State<'a> + 'a>;
+  fn new_state(&mut self) -> Box<dyn State<'a> + 'a>;
 }
 
 pub trait State<'a>: Debug {
+  fn on_mouse_over(&mut self, _mouse_position: (f32, f32)) {}
+  fn on_mouse_hover(&mut self, _mouse_position: (f32, f32)) {}
+  fn on_mouse_out(&mut self, _mouse_position: (f32, f32)) {}
+  fn on_mouse_down(&mut self, _mouse_position: (f32, f32), _mouse_button: MouseButton) {}
+  fn on_mouse_up(&mut self, _mouse_position: (f32, f32), _mouse_button: MouseButton) {}
   fn process_event(&mut self, _event: &Event) {}
 
   fn update(&mut self, _dt: f32) -> bool {
