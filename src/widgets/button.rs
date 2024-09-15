@@ -114,6 +114,12 @@ impl Debug for ButtonState<'_> {
   }
 }
 
+impl Drop for ButtonState<'_> {
+  fn drop(&mut self) {
+    context::ANIMATION_COUNT.fetch_sub(self.dirty_count, Ordering::Relaxed);
+  }
+}
+
 impl<'a> State<'a> for ButtonState<'_> {
   fn on_mouse_over(&mut self, _mouse_position: (f32, f32)) -> bool {
     context::HAND_CURSOR.with(|hand_cursor| hand_cursor.set());
@@ -127,6 +133,10 @@ impl<'a> State<'a> for ButtonState<'_> {
 
   fn on_mouse_out(&mut self, _mouse_position: (f32, f32)) -> bool {
     context::ARROW_CURSOR.with(|arrow_cursor| arrow_cursor.set());
+
+    self.is_elevated = true;
+    self.dirty_count += 1;
+    context::ANIMATION_COUNT.fetch_add(1, Ordering::Relaxed);
 
     if let Some(on_mouse_out) = &mut self.on_mouse_out {
       on_mouse_out();

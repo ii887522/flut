@@ -3,10 +3,11 @@ use crate::{
   widgets::{Buildable, Widget},
 };
 use rayon::prelude::*;
-use sdl2::{event::Event, mouse::MouseButton};
+use sdl2::{event::Event, mouse::MouseButton, EventPump};
 use skia_safe::{Canvas, Contains, Point, Rect};
 use std::{
   collections::{HashMap, VecDeque},
+  fmt::Debug,
   sync::atomic::Ordering,
 };
 
@@ -246,7 +247,7 @@ impl WidgetTree<'_> {
     }
   }
 
-  pub(super) fn update(&mut self, dt: f32) {
+  pub(super) fn update(&mut self, dt: f32, event_pump: &EventPump) {
     let mut widget_node_index_fifo_q = VecDeque::new();
 
     if !self.widget_nodes.is_empty() {
@@ -294,7 +295,14 @@ impl WidgetTree<'_> {
             .reserve(buildable_indices.len());
 
           for buildable_index in buildable_indices {
-            self.buildable_nodes[buildable_index as usize] = None;
+            let mut buildable_node = self.buildable_nodes[buildable_index as usize]
+              .take()
+              .unwrap();
+
+            // This widget will be removed and if mouse cursor still hover on this, it is considered as cursor leaving
+            // this widget (mouse_out)
+            buildable_node.on_mouse_out(event_pump, self.app_size);
+
             self.empty_buildable_node_indices.push(buildable_index);
           }
 
@@ -409,14 +417,8 @@ impl BuildableNode<'_> {
         // state.on_xxx() of this widget will still get called regardless of event consumption.
         state.on_mouse_over(mouse_position) | state.on_mouse_hover(mouse_position)
       } else if self.is_mouse_on_this && !is_mouse_on_this {
-        let mut is_consume_event = state.on_mouse_out(mouse_position);
-
-        if self.downed_mouse_button != MouseButton::Unknown {
-          is_consume_event |= state.on_mouse_up(mouse_position, self.downed_mouse_button);
-          self.downed_mouse_button = MouseButton::Unknown;
-        }
-
-        is_consume_event
+        self.downed_mouse_button = MouseButton::Unknown;
+        state.on_mouse_out(mouse_position)
       } else if is_mouse_on_this {
         state.on_mouse_hover(mouse_position)
       } else {
@@ -430,28 +432,50 @@ impl BuildableNode<'_> {
     false
   }
 
+  // This method is called when this widget is removed and mouse cursor still hover on this
+  fn on_mouse_out(&mut self, event_pump: &EventPump, app_size: (f32, f32)) {
+    if !self.is_mouse_on_this {
+      return;
+    }
+
+    if let Buildable::Stateful(state) = &mut self.buildable {
+      let mouse_state = event_pump.mouse_state();
+
+      state.on_mouse_out((
+        mouse_state.x() as f32 * context::DRAWABLE_SIZE.0.load(Ordering::Relaxed) / app_size.0,
+        mouse_state.y() as f32 * context::DRAWABLE_SIZE.1.load(Ordering::Relaxed) / app_size.1,
+      ));
+
+      self.is_mouse_on_this = false;
+    }
+  }
+
   fn on_mouse_down(
     &mut self,
     mouse_position: (f32, f32),
     mouse_button: MouseButton,
     is_mouse_on_this: bool,
   ) -> bool {
+    if !is_mouse_on_this {
+      return false;
+    }
+
     if let Buildable::Stateful(state) = &mut self.buildable {
-      if is_mouse_on_this {
-        self.downed_mouse_button = mouse_button;
-        return state.on_mouse_down(mouse_position, mouse_button);
-      }
+      self.downed_mouse_button = mouse_button;
+      return state.on_mouse_down(mouse_position, mouse_button);
     }
 
     false
   }
 
   fn on_mouse_up(&mut self, mouse_position: (f32, f32), mouse_button: MouseButton) -> bool {
+    if mouse_button != self.downed_mouse_button {
+      return false;
+    }
+
     if let Buildable::Stateful(state) = &mut self.buildable {
-      if mouse_button == self.downed_mouse_button {
-        self.downed_mouse_button = MouseButton::Unknown;
-        return state.on_mouse_up(mouse_position, mouse_button);
-      }
+      self.downed_mouse_button = MouseButton::Unknown;
+      return state.on_mouse_up(mouse_position, mouse_button);
     }
 
     false

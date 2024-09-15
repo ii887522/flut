@@ -34,27 +34,35 @@ impl<'a> StatefulWidget<'a> for GamePage {
       }
     });
 
-    let mut state = GamePageState {
+    Box::new(GamePageState {
       clock: Clock::new(30.0),
-      ..Default::default()
-    };
-
-    state.init();
-    Box::new(state)
+      inner: Arc::new(RwLock::new(GamePageStateInner::new())),
+    })
   }
 }
 
-#[derive(Debug, Default)]
-struct GamePageState {
-  grid_model: Arc<RwLock<Vec<GameCell>>>,
+#[derive(Debug, Default, Hash, PartialEq, Eq, PartialOrd, Ord)]
+struct GamePageStateInner {
+  grid_model: Vec<GameCell>,
   air_indices: U16SparseSet,
   worm: VecDeque<WormCell>, // Front is head, back is tail
-  clock: Clock,
   next_worm_direction: Option<Direction>,
   is_worm_dead: bool,
 }
 
-impl GamePageState {
+#[derive(Debug, Default)]
+struct GamePageState {
+  clock: Clock,
+  inner: Arc<RwLock<GamePageStateInner>>,
+}
+
+impl GamePageStateInner {
+  fn new() -> Self {
+    let mut this = Self::default();
+    this.init();
+    this
+  }
+
   fn init(&mut self) {
     // Keep the game running
     context::ANIMATION_COUNT.fetch_add(1, Ordering::Relaxed);
@@ -68,12 +76,12 @@ impl GamePageState {
 
         // Put top walls
         } else if index < COL_COUNT
-        // Put bottom walls
-        || ((COL_COUNT - 1) * ROW_COUNT..COL_COUNT * ROW_COUNT).contains(&index)
-        // Put left walls
-        || index % COL_COUNT == 0
-        // Put right walls
-        || (index + 1) % COL_COUNT == 0
+    // Put bottom walls
+    || ((COL_COUNT - 1) * ROW_COUNT..COL_COUNT * ROW_COUNT).contains(&index)
+    // Put left walls
+    || index % COL_COUNT == 0
+    // Put right walls
+    || (index + 1) % COL_COUNT == 0
         {
           GameCell::Wall
         } else {
@@ -99,7 +107,7 @@ impl GamePageState {
       direction: random(),
     });
 
-    self.grid_model = Arc::new(RwLock::new(grid_model));
+    self.grid_model = grid_model;
     self.air_indices = air_indices;
     self.worm = worm;
     self.next_worm_direction = None;
@@ -108,14 +116,13 @@ impl GamePageState {
   }
 
   fn set_grid_cell(&mut self, index: u16, cell: GameCell) {
-    let mut grid_model = self.grid_model.write().unwrap();
-    let old_cell = grid_model[index as usize];
+    let old_cell = self.grid_model[index as usize];
 
     if old_cell == cell {
       return;
     }
 
-    grid_model[index as usize] = cell;
+    self.grid_model[index as usize] = cell;
 
     if old_cell == GameCell::Air {
       self.air_indices.swap_remove(index);
@@ -142,36 +149,29 @@ impl GamePageState {
       direction: head.direction,
     };
 
-    {
-      let grid_model = self.grid_model.read().unwrap();
+    if let GameCell::Wall | GameCell::Worm = self.grid_model[new_head.position as usize] {
+      context::AUDIO_TX.with(|audio_tx| {
+        if let Some(audio_tx) = audio_tx.get() {
+          let _ = audio_tx.send(AudioTask::PlaySound("assets/audio/dead.wav"));
+        }
+      });
 
-      if let GameCell::Wall | GameCell::Worm = grid_model[new_head.position as usize] {
-        context::AUDIO_TX.with(|audio_tx| {
-          if let Some(audio_tx) = audio_tx.get() {
-            let _ = audio_tx.send(AudioTask::PlaySound("assets/audio/dead.wav"));
-          }
-        });
+      self.is_worm_dead = true;
 
-        self.is_worm_dead = true;
+      // Game can stop running after game over
+      context::ANIMATION_COUNT.fetch_sub(1, Ordering::Relaxed);
+      return;
+    } else if let GameCell::Food = self.grid_model[new_head.position as usize] {
+      context::AUDIO_TX.with(|audio_tx| {
+        if let Some(audio_tx) = audio_tx.get() {
+          let _ = audio_tx.send(AudioTask::PlaySound("assets/audio/eat.wav"));
+        }
+      });
 
-        // Game can stop running after game over
-        context::ANIMATION_COUNT.fetch_sub(1, Ordering::Relaxed);
-        return;
-      } else if let GameCell::Food = grid_model[new_head.position as usize] {
-        drop(grid_model);
-
-        context::AUDIO_TX.with(|audio_tx| {
-          if let Some(audio_tx) = audio_tx.get() {
-            let _ = audio_tx.send(AudioTask::PlaySound("assets/audio/eat.wav"));
-          }
-        });
-
-        self.spawn_food();
-      } else {
-        drop(grid_model);
-        let tail = self.worm.pop_back().unwrap();
-        self.set_grid_cell(tail.position, GameCell::Air);
-      }
+      self.spawn_food();
+    } else {
+      let tail = self.worm.pop_back().unwrap();
+      self.set_grid_cell(tail.position, GameCell::Air);
     }
 
     self.worm.push_front(new_head);
@@ -181,12 +181,14 @@ impl GamePageState {
 
 impl<'a> State<'a> for GamePageState {
   fn process_event(&mut self, event: &Event) -> bool {
-    if self.is_worm_dead {
+    let mut state = self.inner.write().unwrap();
+
+    if state.is_worm_dead {
       // Don't consume the event because dialog buttons might need to listen to it
       return false;
     }
 
-    let worm_head = self.worm.front().unwrap();
+    let worm_head = state.worm.front().unwrap();
 
     match event {
       Event::KeyDown {
@@ -194,7 +196,7 @@ impl<'a> State<'a> for GamePageState {
         ..
       } => {
         if worm_head.direction != Direction::Down {
-          self.next_worm_direction = Some(Direction::Up);
+          state.next_worm_direction = Some(Direction::Up);
         }
       }
       Event::KeyDown {
@@ -202,7 +204,7 @@ impl<'a> State<'a> for GamePageState {
         ..
       } => {
         if worm_head.direction != Direction::Left {
-          self.next_worm_direction = Some(Direction::Right);
+          state.next_worm_direction = Some(Direction::Right);
         }
       }
       Event::KeyDown {
@@ -210,7 +212,7 @@ impl<'a> State<'a> for GamePageState {
         ..
       } => {
         if worm_head.direction != Direction::Up {
-          self.next_worm_direction = Some(Direction::Down);
+          state.next_worm_direction = Some(Direction::Down);
         }
       }
       Event::KeyDown {
@@ -218,7 +220,7 @@ impl<'a> State<'a> for GamePageState {
         ..
       } => {
         if worm_head.direction != Direction::Right {
-          self.next_worm_direction = Some(Direction::Left);
+          state.next_worm_direction = Some(Direction::Left);
         }
       }
       _ => {}
@@ -229,22 +231,26 @@ impl<'a> State<'a> for GamePageState {
   }
 
   fn update(&mut self, dt: f32) -> bool {
-    if !self.clock.update(dt) || self.is_worm_dead {
+    let mut state = self.inner.write().unwrap();
+
+    if !self.clock.update(dt) || state.is_worm_dead {
       return false;
     }
 
-    if let Some(next_worm_direction) = self.next_worm_direction.take() {
-      let worm_head = self.worm.front_mut().unwrap();
+    if let Some(next_worm_direction) = state.next_worm_direction.take() {
+      let worm_head = state.worm.front_mut().unwrap();
       worm_head.direction = next_worm_direction;
     }
 
-    self.move_worm();
+    state.move_worm();
     true
   }
 
   fn build(&self, _constraint: Rect) -> Widget<'a> {
-    let grid_model = Arc::clone(&self.grid_model);
-    let score = self.worm.len() - 1;
+    let state_arc_1 = Arc::clone(&self.inner);
+    let state_arc_2 = Arc::clone(&self.inner);
+    let state = self.inner.read().unwrap();
+    let score = state.worm.len() - 1;
 
     Column::new()
       .align(HorizontalAlign::Center)
@@ -278,10 +284,10 @@ impl<'a> State<'a> for GamePageState {
               row_count: ROW_COUNT,
               gap: 2.0,
               builder: Box::new(move |index| {
-                let grid_model = grid_model.read().unwrap();
+                let state = state_arc_1.read().unwrap();
 
                 RectWidget {
-                  color: match grid_model[index as usize] {
+                  color: match state.grid_model[index as usize] {
                     GameCell::Air => Color::from_rgb(56, 56, 56),
                     GameCell::Worm => Color::from_rgb(243, 125, 121),
                     GameCell::Wall => Color::RED,
@@ -294,7 +300,7 @@ impl<'a> State<'a> for GamePageState {
             }
             .into_widget(),
           ),
-          if self.is_worm_dead {
+          if state.is_worm_dead {
             Some(
               Dialog {
                 color: Color::from_rgb(255, 128, 128),
@@ -306,9 +312,10 @@ impl<'a> State<'a> for GamePageState {
                 ok_icon: icon_name::RESTART_ALT,
                 ok_label: "Try Again".to_string(),
                 on_close: Some(Box::new(|| process::exit(0))),
-                on_ok: Some(Box::new(|| {
+                on_ok: Some(Box::new(move || {
                   // Restart the game
-                  // todo: self.init();
+                  let mut state = state_arc_2.write().unwrap();
+                  state.init();
                 })),
                 body: Some(
                   Text::new()

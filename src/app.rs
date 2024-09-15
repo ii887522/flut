@@ -209,7 +209,7 @@ pub fn run(app: App<'_>) {
 
       while frame_time > 0.0 && tick_count < MAX_FRAME_TICK_COUNT {
         let dt = frame_time.min(1.0 / TPS);
-        widget_tree.update(dt);
+        widget_tree.update(dt, &event_pump);
         frame_time -= dt;
         tick_count += 1;
       }
