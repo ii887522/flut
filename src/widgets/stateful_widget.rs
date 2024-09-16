@@ -41,6 +41,6 @@ pub trait State<'a>: Debug {
   }
 
   fn pre_draw(&self, _canvas: &Canvas, _constraint: Rect) {}
-  fn build(&self, constraint: Rect) -> Widget<'a>;
+  fn build(&mut self, constraint: Rect) -> Widget<'a>;
   fn post_draw(&self, _canvas: &Canvas, _constraint: Rect) {}
 }

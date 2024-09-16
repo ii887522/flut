@@ -75,8 +75,8 @@ impl WidgetTree<'_> {
         .unwrap();
 
       match widget_node.widget {
-        Widget::Stateless(mut widget) => {
-          widget_node.widget = widget.build(widget_node.constraint);
+        Widget::Stateless(widget) => {
+          widget_node.widget = widget.lock().unwrap().build(widget_node.constraint);
 
           if let Some(buildable_index) = self.empty_buildable_node_indices.pop() {
             widget_node.buildable_indices.push(buildable_index);
@@ -100,8 +100,8 @@ impl WidgetTree<'_> {
 
           widget_node_index_lifo_q.push(widget_node_index);
         }
-        Widget::Stateful(mut widget) => {
-          let state = widget.new_state();
+        Widget::Stateful(widget) => {
+          let mut state = widget.lock().unwrap().new_state();
           widget_node.widget = state.build(widget_node.constraint);
 
           if let Some(buildable_index) = self.empty_buildable_node_indices.pop() {
@@ -126,8 +126,8 @@ impl WidgetTree<'_> {
 
           widget_node_index_lifo_q.push(widget_node_index);
         }
-        Widget::Stack(mut stack) => {
-          for stack_child in stack.children.drain(..) {
+        Widget::Stack(stack) => {
+          for stack_child in stack.lock().unwrap().children.drain(..) {
             let stack_child_position = stack_child.get_position();
             let stack_child_size = stack_child.get_size();
 
@@ -346,7 +346,10 @@ impl WidgetTree<'_> {
 
         match &buildable_node.buildable {
           Buildable::Stateless(widget) => {
-            widget.pre_draw(canvas, widget_node.constraint);
+            widget
+              .lock()
+              .unwrap()
+              .pre_draw(canvas, widget_node.constraint);
           }
           Buildable::Stateful(state) => {
             state.pre_draw(canvas, widget_node.constraint);
@@ -392,7 +395,10 @@ impl WidgetTree<'_> {
 
           match &buildable_node.buildable {
             Buildable::Stateless(widget) => {
-              widget.post_draw(canvas, parent_widget_node.constraint);
+              widget
+                .lock()
+                .unwrap()
+                .post_draw(canvas, parent_widget_node.constraint);
             }
             Buildable::Stateful(state) => {
               state.post_draw(canvas, parent_widget_node.constraint);

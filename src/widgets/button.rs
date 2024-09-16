@@ -13,7 +13,7 @@ use skia_safe::{
 };
 use std::{
   fmt::{self, Debug, Formatter},
-  sync::atomic::Ordering,
+  sync::{atomic::Ordering, Arc, Mutex},
 };
 
 pub struct Button<'a> {
@@ -24,10 +24,10 @@ pub struct Button<'a> {
   pub icon_color: Color,
   pub label: String,
   pub label_color: Color,
-  pub on_mouse_over: Option<Box<dyn FnMut() + 'a + Send>>,
-  pub on_mouse_out: Option<Box<dyn FnMut() + 'a + Send>>,
-  pub on_mouse_down: Option<Box<dyn FnMut() + 'a + Send>>,
-  pub on_mouse_up: Option<Box<dyn FnMut() + 'a + Send>>,
+  pub on_mouse_over: Option<Arc<Mutex<dyn FnMut() + 'a + Send>>>,
+  pub on_mouse_out: Option<Arc<Mutex<dyn FnMut() + 'a + Send>>>,
+  pub on_mouse_down: Option<Arc<Mutex<dyn FnMut() + 'a + Send>>>,
+  pub on_mouse_up: Option<Arc<Mutex<dyn FnMut() + 'a + Send>>>,
 }
 
 impl Debug for Button<'_> {
@@ -91,10 +91,10 @@ struct ButtonState<'a> {
   icon_color: Color,
   label: String,
   label_color: Color,
-  on_mouse_over: Option<Box<dyn FnMut() + 'a + Send>>,
-  on_mouse_out: Option<Box<dyn FnMut() + 'a + Send>>,
-  on_mouse_down: Option<Box<dyn FnMut() + 'a + Send>>,
-  on_mouse_up: Option<Box<dyn FnMut() + 'a + Send>>,
+  on_mouse_over: Option<Arc<Mutex<dyn FnMut() + 'a + Send>>>,
+  on_mouse_out: Option<Arc<Mutex<dyn FnMut() + 'a + Send>>>,
+  on_mouse_down: Option<Arc<Mutex<dyn FnMut() + 'a + Send>>>,
+  on_mouse_up: Option<Arc<Mutex<dyn FnMut() + 'a + Send>>>,
   dirty_count: u32,
 }
 
@@ -125,7 +125,7 @@ impl<'a> State<'a> for ButtonState<'_> {
     context::HAND_CURSOR.with(|hand_cursor| hand_cursor.set());
 
     if let Some(on_mouse_over) = &mut self.on_mouse_over {
-      on_mouse_over();
+      on_mouse_over.lock().unwrap()();
     }
 
     true
@@ -139,7 +139,7 @@ impl<'a> State<'a> for ButtonState<'_> {
     context::ANIMATION_COUNT.fetch_add(1, Ordering::Relaxed);
 
     if let Some(on_mouse_out) = &mut self.on_mouse_out {
-      on_mouse_out();
+      on_mouse_out.lock().unwrap()();
     }
 
     true
@@ -155,7 +155,7 @@ impl<'a> State<'a> for ButtonState<'_> {
     context::ANIMATION_COUNT.fetch_add(1, Ordering::Relaxed);
 
     if let Some(on_mouse_down) = &mut self.on_mouse_down {
-      on_mouse_down();
+      on_mouse_down.lock().unwrap()();
     }
 
     true
@@ -171,7 +171,7 @@ impl<'a> State<'a> for ButtonState<'_> {
     context::ANIMATION_COUNT.fetch_add(1, Ordering::Relaxed);
 
     if let Some(on_mouse_up) = &mut self.on_mouse_up {
-      on_mouse_up();
+      on_mouse_up.lock().unwrap()();
     }
 
     true
@@ -187,7 +187,7 @@ impl<'a> State<'a> for ButtonState<'_> {
     false
   }
 
-  fn build(&self, constraint: Rect) -> Widget<'a> {
+  fn build(&mut self, constraint: Rect) -> Widget<'a> {
     Stack {
       children: vec![
         StackChild {

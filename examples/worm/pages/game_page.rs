@@ -16,7 +16,7 @@ use skia_safe::{Color, Rect};
 use std::{
   collections::VecDeque,
   process,
-  sync::{atomic::Ordering, Arc, RwLock},
+  sync::{atomic::Ordering, Arc, Mutex, RwLock},
 };
 
 const COL_COUNT: u16 = 41;
@@ -246,7 +246,7 @@ impl<'a> State<'a> for GamePageState {
     true
   }
 
-  fn build(&self, _constraint: Rect) -> Widget<'a> {
+  fn build(&mut self, _constraint: Rect) -> Widget<'a> {
     let state_arc_1 = Arc::clone(&self.inner);
     let state_arc_2 = Arc::clone(&self.inner);
     let state = self.inner.read().unwrap();
@@ -311,12 +311,12 @@ impl<'a> State<'a> for GamePageState {
                 close_label: "Give Up".to_string(),
                 ok_icon: icon_name::RESTART_ALT,
                 ok_label: "Try Again".to_string(),
-                on_close: Some(Box::new(|| process::exit(0))),
-                on_ok: Some(Box::new(move || {
+                on_close: Some(Arc::new(Mutex::new(|| process::exit(0)))),
+                on_ok: Some(Arc::new(Mutex::new(move || {
                   // Restart the game
                   let mut state = state_arc_2.write().unwrap();
                   state.init();
-                })),
+                }))),
                 body: Some(
                   Text::new()
                     .text(format!(

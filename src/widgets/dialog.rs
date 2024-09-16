@@ -1,4 +1,6 @@
-use super::{widget::*, RectWidget, Stack, StackChild, StatelessWidget, Widget};
+use super::{
+  stateful_widget::State, widget::*, RectWidget, Stack, StackChild, StatefulWidget, Widget,
+};
 use crate::{
   boot::context,
   models::{icon_name, Origin},
@@ -9,8 +11,8 @@ use skia_safe::{
   Color, FontStyle, Rect,
 };
 use std::{
-  fmt::{self, Debug},
-  sync::atomic::Ordering,
+  fmt::{self, Debug, Formatter},
+  sync::{atomic::Ordering, Arc, Mutex},
 };
 
 pub struct Dialog<'a> {
@@ -19,14 +21,14 @@ pub struct Dialog<'a> {
   pub header_icon_color: Color,
   pub header_title: String,
   pub header_title_color: Color,
-  pub body: Option<Widget<'a>>,
   pub close_icon: u16,
   pub close_label: String,
   pub ok_icon: u16,
   pub ok_label: String,
   pub has_ok: bool,
-  pub on_close: Option<Box<dyn FnMut() + 'a + Send>>,
-  pub on_ok: Option<Box<dyn FnMut() + 'a + Send>>,
+  pub on_close: Option<Arc<Mutex<dyn FnMut() + 'a + Send>>>,
+  pub on_ok: Option<Arc<Mutex<dyn FnMut() + 'a + Send>>>,
+  pub body: Option<Widget<'a>>,
 }
 
 impl Debug for Dialog<'_> {
@@ -38,12 +40,12 @@ impl Debug for Dialog<'_> {
       .field("header_icon_color", &self.header_icon_color)
       .field("header_title", &self.header_title)
       .field("header_title_color", &self.header_title_color)
-      .field("body", &self.body)
       .field("close_icon", &self.close_icon)
       .field("close_label", &self.close_label)
       .field("ok_icon", &self.ok_icon)
       .field("ok_label", &self.ok_label)
       .field("has_ok", &self.has_ok)
+      .field("body", &self.body)
       .finish_non_exhaustive()
   }
 }
@@ -68,13 +70,68 @@ impl Default for Dialog<'_> {
   }
 }
 
-impl<'a> StatelessWidget<'a> for Dialog<'a> {
+impl<'a> StatefulWidget<'a> for Dialog<'a> {
+  fn new_state(&mut self) -> Box<dyn State<'a> + 'a> {
+    Box::new(DialogState {
+      color: self.color,
+      header_icon: self.header_icon,
+      header_icon_color: self.header_icon_color,
+      header_title: self.header_title.to_string(),
+      header_title_color: self.header_title_color,
+      close_icon: self.close_icon,
+      close_label: self.close_label.to_string(),
+      ok_icon: self.ok_icon,
+      ok_label: self.ok_label.to_string(),
+      has_ok: self.has_ok,
+      on_close: self.on_close.take(),
+      on_ok: self.on_ok.take(),
+      body: self.body.take(),
+    })
+  }
+
   fn get_size(&self) -> (f32, f32) {
     // (0.0, 0.0) so that this widget can be inserted in Column or Row or any other layout widget.
     // Size is ignored and this widget always cover the whole app
     (0.0, 0.0)
   }
+}
 
+struct DialogState<'a> {
+  color: Color,
+  header_icon: u16,
+  header_icon_color: Color,
+  header_title: String,
+  header_title_color: Color,
+  close_icon: u16,
+  close_label: String,
+  ok_icon: u16,
+  ok_label: String,
+  has_ok: bool,
+  on_close: Option<Arc<Mutex<dyn FnMut() + 'a + Send>>>,
+  on_ok: Option<Arc<Mutex<dyn FnMut() + 'a + Send>>>,
+  body: Option<Widget<'a>>,
+}
+
+impl Debug for DialogState<'_> {
+  fn fmt(&self, fmt: &mut Formatter<'_>) -> fmt::Result {
+    fmt
+      .debug_struct("DialogState")
+      .field("color", &self.color)
+      .field("header_icon", &self.header_icon)
+      .field("header_icon_color", &self.header_icon_color)
+      .field("header_title", &self.header_title)
+      .field("header_title_color", &self.header_title_color)
+      .field("close_icon", &self.close_icon)
+      .field("close_label", &self.close_label)
+      .field("ok_icon", &self.ok_icon)
+      .field("ok_label", &self.ok_label)
+      .field("has_ok", &self.has_ok)
+      .field("body", &self.body)
+      .finish_non_exhaustive()
+  }
+}
+
+impl<'a> State<'a> for DialogState<'a> {
   fn build(&mut self, _constraint: Rect) -> Widget<'a> {
     // _constraint is unused since this dialog will cover the whole app
 
@@ -157,11 +214,11 @@ impl<'a> StatelessWidget<'a> for Dialog<'a> {
             ),
           })
         },
-        self.body.take().map(|body| StackChild {
+        self.body.as_ref().map(|body| StackChild {
           position: (position.0 + 16.0, position.1 + 88.0),
           size: (SIZE.0 - 32.0, SIZE.1 - 184.0),
           origin: Origin::TopLeft,
-          child: Some(body),
+          child: Some(Widget::clone(body)),
         }),
         Some(StackChild {
           position: (
@@ -182,7 +239,7 @@ impl<'a> StatelessWidget<'a> for Dialog<'a> {
               bg_color: Color::RED,
               icon: self.close_icon,
               label: self.close_label.to_string(),
-              on_mouse_up: self.on_close.take(),
+              on_mouse_up: self.on_close.as_ref().map(Arc::clone),
               ..Default::default()
             }
             .into_widget(),
@@ -201,7 +258,7 @@ impl<'a> StatelessWidget<'a> for Dialog<'a> {
                 bg_color: Color::from_rgb(0, 128, 0),
                 icon: self.ok_icon,
                 label: self.ok_label.to_string(),
-                on_mouse_up: self.on_ok.take(),
+                on_mouse_up: self.on_ok.as_ref().map(Arc::clone),
                 ..Default::default()
               }
               .into_widget(),

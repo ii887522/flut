@@ -6,13 +6,13 @@ use crate::{
 use optarg2chain::optarg_impl;
 use rayon::prelude::*;
 use skia_safe::Rect;
-use std::{cell::OnceCell, mem};
+use std::{mem, sync::OnceLock};
 
 #[derive(Debug, Default)]
 pub struct Column<'a> {
   align: HorizontalAlign,
   children: Vec<Widget<'a>>,
-  size: OnceCell<(f32, f32)>,
+  size: OnceLock<(f32, f32)>,
 }
 
 #[optarg_impl]
@@ -25,7 +25,7 @@ impl<'a> Column<'a> {
     Self {
       align,
       children,
-      size: OnceCell::new(),
+      size: OnceLock::new(),
     }
   }
 }
