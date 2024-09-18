@@ -119,7 +119,7 @@ impl<'a> State<'a> for ButtonState<'_> {
   fn on_mouse_over(&mut self, _mouse_position: (f32, f32)) -> bool {
     context::HAND_CURSOR.with(|hand_cursor| hand_cursor.set());
 
-    if let Some(on_mouse_over) = &mut self.on_mouse_over {
+    if let Some(on_mouse_over) = &self.on_mouse_over {
       on_mouse_over.lock().unwrap()();
     }
 
@@ -132,7 +132,7 @@ impl<'a> State<'a> for ButtonState<'_> {
     self.is_elevated = true;
     self.animation_count.incr();
 
-    if let Some(on_mouse_out) = &mut self.on_mouse_out {
+    if let Some(on_mouse_out) = &self.on_mouse_out {
       on_mouse_out.lock().unwrap()();
     }
 
@@ -147,7 +147,7 @@ impl<'a> State<'a> for ButtonState<'_> {
     self.is_elevated = false;
     self.animation_count.incr();
 
-    if let Some(on_mouse_down) = &mut self.on_mouse_down {
+    if let Some(on_mouse_down) = &self.on_mouse_down {
       on_mouse_down.lock().unwrap()();
     }
 
@@ -162,7 +162,7 @@ impl<'a> State<'a> for ButtonState<'_> {
     self.is_elevated = true;
     self.animation_count.incr();
 
-    if let Some(on_mouse_up) = &mut self.on_mouse_up {
+    if let Some(on_mouse_up) = &self.on_mouse_up {
       on_mouse_up.lock().unwrap()();
     }
 
