@@ -365,6 +365,9 @@ impl WidgetTree<'_> {
             // Traverse the expanded widget tree in depth-first order
             widget_node_index_lifo_q.par_extend(widget_node.child_indices.par_iter().rev());
           }
+
+          // Skip the below post_draw() code as there are still more stack_child children yet to be drawn
+          continue;
         }
         Widget::StackChild(_) => {
           if let Some(&first_child_index) = widget_node.child_indices.first() {
