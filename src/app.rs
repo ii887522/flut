@@ -1,5 +1,6 @@
 use crate::{
   boot::{audio, context},
+  helpers::AnimationCount,
   widgets::Widget,
   WidgetTree,
 };
@@ -194,7 +195,7 @@ pub fn run(app: App<'_>) {
 
   'running: loop {
     // Hot loop
-    while context::ANIMATION_COUNT.load(Ordering::Relaxed) > 0 {
+    while AnimationCount::get() > 0 {
       for event in event_pump.poll_iter() {
         if let Event::Quit { .. } = event {
           break 'running;
@@ -228,7 +229,7 @@ pub fn run(app: App<'_>) {
 
       widget_tree.process_event(&event);
 
-      if context::ANIMATION_COUNT.load(Ordering::Relaxed) > 0 {
+      if AnimationCount::get() > 0 {
         break;
       }
     }

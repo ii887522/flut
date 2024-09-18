@@ -3,13 +3,13 @@ use super::{
 };
 use crate::{
   boot::context,
-  helpers::Animation,
+  helpers::{Animation, AnimationCount},
   models::{icon_name, Origin},
   widgets::{Button, Icon, Text},
 };
 use skia_safe::{
   font_style::{Slant, Weight, Width},
-  Color, FontStyle, Rect,
+  Canvas, Color, FontStyle, Rect,
 };
 use std::{
   fmt::{self, Debug, Formatter},
@@ -74,7 +74,8 @@ impl Default for Dialog<'_> {
 impl<'a> StatefulWidget<'a> for Dialog<'a> {
   fn new_state(&mut self) -> Box<dyn State<'a> + 'a> {
     // Start pop up dialog animation
-    context::ANIMATION_COUNT.fetch_add(1, Ordering::Relaxed);
+    let mut animation_count = AnimationCount::new();
+    animation_count.incr();
 
     Box::new(DialogState {
       color: self.color,
@@ -90,7 +91,9 @@ impl<'a> StatefulWidget<'a> for Dialog<'a> {
       on_close: self.on_close.take(),
       on_ok: self.on_ok.take(),
       body: self.body.take(),
+      animation_count,
       background_alpha: Animation::new(0.0, 128.0, 0.125),
+      scale: Animation::new(0.0, 1.0, 0.125),
     })
   }
 
@@ -115,7 +118,9 @@ struct DialogState<'a> {
   on_close: Option<Arc<Mutex<dyn FnMut() + 'a + Send>>>,
   on_ok: Option<Arc<Mutex<dyn FnMut() + 'a + Send>>>,
   body: Option<Widget<'a>>,
+  animation_count: AnimationCount,
   background_alpha: Animation<f32>,
+  scale: Animation<f32>,
 }
 
 impl Debug for DialogState<'_> {
@@ -134,20 +139,33 @@ impl Debug for DialogState<'_> {
       .field("has_ok", &self.has_ok)
       .field("body", &self.body)
       .field("background_alpha", &self.background_alpha)
+      .field("scale", &self.scale)
       .finish_non_exhaustive()
   }
 }
 
 impl<'a> State<'a> for DialogState<'a> {
   fn update(&mut self, dt: f32) -> bool {
-    let is_dirty = self.background_alpha.update(dt);
+    let is_dirty = self.background_alpha.update(dt) | self.scale.update(dt);
 
     if self.background_alpha.is_just_ended() {
       // Pop up dialog animation done
-      context::ANIMATION_COUNT.fetch_sub(1, Ordering::Relaxed);
+      self.animation_count = AnimationCount::new();
     }
 
     is_dirty
+  }
+
+  fn pre_draw(&self, canvas: &Canvas, _constraint: Rect) {
+    let drawable_size = (
+      context::DRAWABLE_SIZE.0.load(Ordering::Relaxed),
+      context::DRAWABLE_SIZE.1.load(Ordering::Relaxed),
+    );
+
+    canvas.save();
+    canvas.translate((drawable_size.0 * 0.5, drawable_size.1 * 0.5));
+    canvas.scale((0.5, 0.5));
+    canvas.translate((-drawable_size.0 * 0.5, -drawable_size.1 * 0.5));
   }
 
   fn build(&mut self, _constraint: Rect) -> Widget<'a> {
@@ -293,5 +311,9 @@ impl<'a> State<'a> for DialogState<'a> {
       .collect(),
     }
     .into()
+  }
+
+  fn post_draw(&self, canvas: &Canvas, _constraint: Rect) {
+    canvas.restore();
   }
 }

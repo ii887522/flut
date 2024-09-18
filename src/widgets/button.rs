@@ -4,6 +4,7 @@ use super::{
 };
 use crate::{
   boot::context,
+  helpers::AnimationCount,
   models::{Origin, VerticalAlign},
 };
 use sdl2::mouse::MouseButton;
@@ -13,7 +14,7 @@ use skia_safe::{
 };
 use std::{
   fmt::{self, Debug, Formatter},
-  sync::{atomic::Ordering, Arc, Mutex},
+  sync::{Arc, Mutex},
 };
 
 pub struct Button<'a> {
@@ -77,7 +78,7 @@ impl<'a> StatefulWidget<'a> for Button<'a> {
       on_mouse_out: self.on_mouse_out.take(),
       on_mouse_down: self.on_mouse_down.take(),
       on_mouse_up: self.on_mouse_up.take(),
-      dirty_count: 0,
+      animation_count: AnimationCount::new(),
     })
   }
 }
@@ -95,7 +96,7 @@ struct ButtonState<'a> {
   on_mouse_out: Option<Arc<Mutex<dyn FnMut() + 'a + Send>>>,
   on_mouse_down: Option<Arc<Mutex<dyn FnMut() + 'a + Send>>>,
   on_mouse_up: Option<Arc<Mutex<dyn FnMut() + 'a + Send>>>,
-  dirty_count: u32,
+  animation_count: AnimationCount,
 }
 
 impl Debug for ButtonState<'_> {
@@ -109,14 +110,8 @@ impl Debug for ButtonState<'_> {
       .field("icon_color", &self.icon_color)
       .field("label", &self.label)
       .field("label_color", &self.label_color)
-      .field("dirty_count", &self.dirty_count)
+      .field("animation_count", &self.animation_count)
       .finish_non_exhaustive()
-  }
-}
-
-impl Drop for ButtonState<'_> {
-  fn drop(&mut self) {
-    context::ANIMATION_COUNT.fetch_sub(self.dirty_count, Ordering::Relaxed);
   }
 }
 
@@ -135,8 +130,7 @@ impl<'a> State<'a> for ButtonState<'_> {
     context::ARROW_CURSOR.with(|arrow_cursor| arrow_cursor.set());
 
     self.is_elevated = true;
-    self.dirty_count += 1;
-    context::ANIMATION_COUNT.fetch_add(1, Ordering::Relaxed);
+    self.animation_count.incr();
 
     if let Some(on_mouse_out) = &mut self.on_mouse_out {
       on_mouse_out.lock().unwrap()();
@@ -151,8 +145,7 @@ impl<'a> State<'a> for ButtonState<'_> {
     }
 
     self.is_elevated = false;
-    self.dirty_count += 1;
-    context::ANIMATION_COUNT.fetch_add(1, Ordering::Relaxed);
+    self.animation_count.incr();
 
     if let Some(on_mouse_down) = &mut self.on_mouse_down {
       on_mouse_down.lock().unwrap()();
@@ -167,8 +160,7 @@ impl<'a> State<'a> for ButtonState<'_> {
     }
 
     self.is_elevated = true;
-    self.dirty_count += 1;
-    context::ANIMATION_COUNT.fetch_add(1, Ordering::Relaxed);
+    self.animation_count.incr();
 
     if let Some(on_mouse_up) = &mut self.on_mouse_up {
       on_mouse_up.lock().unwrap()();
@@ -178,9 +170,8 @@ impl<'a> State<'a> for ButtonState<'_> {
   }
 
   fn update(&mut self, _dt: f32) -> bool {
-    if self.dirty_count > 0 {
-      context::ANIMATION_COUNT.fetch_sub(self.dirty_count, Ordering::Relaxed);
-      self.dirty_count = 0;
+    if *self.animation_count > 0 {
+      self.animation_count = AnimationCount::new();
       return true;
     }
 

@@ -2,7 +2,7 @@ use crate::models::{Direction, GameCell, WormCell};
 use flut::{
   boot::context,
   collections::U16SparseSet,
-  helpers::Clock,
+  helpers::{AnimationCount, Clock},
   models::{icon_name, AudioTask, HorizontalAlign},
   widgets::{
     stateful_widget::State, widget::*, Column, Dialog, Grid, RectWidget, Spacing, StatefulWidget,
@@ -16,7 +16,7 @@ use skia_safe::{Color, Rect};
 use std::{
   collections::VecDeque,
   process,
-  sync::{atomic::Ordering, Arc, Mutex, RwLock},
+  sync::{Arc, Mutex, RwLock},
 };
 
 const COL_COUNT: u16 = 41;
@@ -48,6 +48,7 @@ struct GamePageStateInner {
   worm: VecDeque<WormCell>, // Front is head, back is tail
   next_worm_direction: Option<Direction>,
   is_worm_dead: bool,
+  animation_count: AnimationCount,
 }
 
 #[derive(Debug, Default)]
@@ -65,7 +66,7 @@ impl GamePageStateInner {
 
   fn init(&mut self) {
     // Keep the game running
-    context::ANIMATION_COUNT.fetch_add(1, Ordering::Relaxed);
+    self.animation_count.incr();
 
     let grid_model = (0..COL_COUNT * ROW_COUNT)
       .into_par_iter()
@@ -159,7 +160,7 @@ impl GamePageStateInner {
       self.is_worm_dead = true;
 
       // Game can stop running after game over
-      context::ANIMATION_COUNT.fetch_sub(1, Ordering::Relaxed);
+      self.animation_count = AnimationCount::new();
       return;
     } else if let GameCell::Food = self.grid_model[new_head.position as usize] {
       context::AUDIO_TX.with(|audio_tx| {

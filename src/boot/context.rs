@@ -6,11 +6,10 @@ use std::{
   cell::{OnceCell, RefCell},
   collections::HashMap,
   fs,
-  sync::{atomic::AtomicU32, mpsc::Sender},
+  sync::mpsc::Sender,
 };
 
 pub static DRAWABLE_SIZE: (AtomicF32, AtomicF32) = (AtomicF32::new(0.0), AtomicF32::new(0.0));
-pub static ANIMATION_COUNT: AtomicU32 = AtomicU32::new(0);
 
 thread_local! {
   pub static AUDIO_TX: OnceCell<Sender<AudioTask<'static>>> = const { OnceCell::new() };
