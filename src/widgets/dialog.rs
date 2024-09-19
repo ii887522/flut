@@ -1,5 +1,6 @@
 use super::{
-  stateful_widget::State, widget::*, RectWidget, Stack, StackChild, StatefulWidget, Widget,
+  stateful_widget::State, widget::*, RectWidget, Stack, StackChild, StatefulWidget,
+  StatelessWidget, Widget,
 };
 use crate::{
   boot::context,
@@ -156,6 +157,99 @@ impl<'a> State<'a> for DialogState<'a> {
     is_dirty
   }
 
+  fn build(&mut self, _constraint: Rect) -> Widget<'a> {
+    // _constraint is unused since this dialog will cover the whole app
+
+    let drawable_size = (
+      context::DRAWABLE_SIZE.0.load(Ordering::Relaxed),
+      context::DRAWABLE_SIZE.1.load(Ordering::Relaxed),
+    );
+
+    Stack {
+      children: vec![
+        // Background
+        StackChild {
+          position: (0.0, 0.0),
+          size: drawable_size,
+          origin: Origin::TopLeft,
+          child: Some(
+            RectWidget {
+              color: Color::from_argb(self.background_alpha.get_now() as _, 0, 0, 0),
+              ..Default::default()
+            }
+            .into_widget(),
+          ),
+        },
+        // Foreground
+        StackChild {
+          position: (0.0, 0.0),
+          size: drawable_size,
+          origin: Origin::TopLeft,
+          child: Some(
+            DialogInner {
+              color: self.color,
+              header_icon: self.header_icon,
+              header_icon_color: self.header_icon_color,
+              header_title: self.header_title.to_string(),
+              header_title_color: self.header_title_color,
+              close_icon: self.close_icon,
+              close_label: self.close_label.to_string(),
+              ok_icon: self.ok_icon,
+              ok_label: self.ok_label.to_string(),
+              has_ok: self.has_ok,
+              on_close: self.on_close.as_ref().map(Arc::clone),
+              on_ok: self.on_ok.as_ref().map(Arc::clone),
+              #[allow(clippy::useless_asref)]
+              body: self.body.as_ref().map(Widget::clone),
+              scale: self.scale.get_now(),
+            }
+            .into_widget(),
+          ),
+        },
+      ],
+    }
+    .into()
+  }
+}
+
+struct DialogInner<'a> {
+  color: Color,
+  header_icon: u16,
+  header_icon_color: Color,
+  header_title: String,
+  header_title_color: Color,
+  close_icon: u16,
+  close_label: String,
+  ok_icon: u16,
+  ok_label: String,
+  has_ok: bool,
+  on_close: Option<Arc<Mutex<dyn FnMut() + 'a + Send>>>,
+  on_ok: Option<Arc<Mutex<dyn FnMut() + 'a + Send>>>,
+  body: Option<Widget<'a>>,
+  scale: f32,
+}
+
+impl Debug for DialogInner<'_> {
+  fn fmt(&self, fmt: &mut Formatter<'_>) -> fmt::Result {
+    fmt
+      .debug_struct("DialogInner")
+      .field("color", &self.color)
+      .field("header_icon", &self.header_icon)
+      .field("header_icon_color", &self.header_icon_color)
+      .field("header_title", &self.header_title)
+      .field("header_title_color", &self.header_title_color)
+      .field("close_icon", &self.close_icon)
+      .field("close_label", &self.close_label)
+      .field("ok_icon", &self.ok_icon)
+      .field("ok_label", &self.ok_label)
+      .field("has_ok", &self.has_ok)
+      .field("body", &self.body)
+      .field("scale", &self.scale)
+      .finish_non_exhaustive()
+  }
+}
+
+impl<'a> StatelessWidget<'a> for DialogInner<'a> {
   fn pre_draw(&self, canvas: &Canvas, _constraint: Rect) {
     let drawable_size = (
       context::DRAWABLE_SIZE.0.load(Ordering::Relaxed),
@@ -164,7 +258,7 @@ impl<'a> State<'a> for DialogState<'a> {
 
     canvas.save();
     canvas.translate((drawable_size.0 * 0.5, drawable_size.1 * 0.5));
-    canvas.scale((0.5, 0.5));
+    canvas.scale((self.scale, self.scale));
     canvas.translate((-drawable_size.0 * 0.5, -drawable_size.1 * 0.5));
   }
 
@@ -187,20 +281,6 @@ impl<'a> State<'a> for DialogState<'a> {
 
     Stack {
       children: vec![
-        // Background
-        Some(StackChild {
-          position: (0.0, 0.0),
-          size: drawable_size,
-          origin: Origin::TopLeft,
-          child: Some(
-            RectWidget {
-              color: Color::from_argb(self.background_alpha.get_now() as _, 0, 0, 0),
-              ..Default::default()
-            }
-            .into_widget(),
-          ),
-        }),
-        // Foreground
         Some(StackChild {
           position,
           size: SIZE,
