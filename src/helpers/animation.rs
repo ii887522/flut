@@ -41,7 +41,7 @@ impl<T: Copy + Mul<f32>> Animation<T> {
   pub fn update(&mut self, dt: f32) -> bool
   where
     <T as Mul<f32>>::Output: Add,
-    T: From<<<T as Mul<f32>>::Output as Add>::Output>,
+    <<T as Mul<f32>>::Output as Add>::Output: Into<T>,
   {
     self.old_accumulator = self.new_accumulator;
     self.new_accumulator = (self.new_accumulator + dt).min(self.duration);

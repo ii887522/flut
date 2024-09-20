@@ -8,14 +8,24 @@ use crate::{
   models::{icon_name, Origin},
   widgets::{Button, Icon, Text},
 };
+use sdl2::mouse::MouseButton;
 use skia_safe::{
   font_style::{Slant, Weight, Width},
-  Canvas, Color, FontStyle, Rect,
+  Canvas, Color, Contains, FontStyle, Point, Rect,
 };
 use std::{
   fmt::{self, Debug, Formatter},
   sync::{atomic::Ordering, Arc, Mutex},
 };
+
+const SIZE: (f32, f32) = (512.0, 256.0);
+
+thread_local! {
+  static POSITION: (f32, f32) = (
+    (context::DRAWABLE_SIZE.0.load(Ordering::Relaxed) - SIZE.0) * 0.5,
+    (context::DRAWABLE_SIZE.1.load(Ordering::Relaxed) - SIZE.1) * 0.5,
+  );
+}
 
 pub struct Dialog<'a> {
   pub color: Color,
@@ -74,10 +84,6 @@ impl Default for Dialog<'_> {
 
 impl<'a> StatefulWidget<'a> for Dialog<'a> {
   fn new_state(&mut self) -> Box<dyn State<'a> + 'a> {
-    // Start pop up dialog animation
-    let mut animation_count = AnimationCount::new();
-    animation_count.incr();
-
     Box::new(DialogState {
       color: self.color,
       header_icon: self.header_icon,
@@ -92,9 +98,8 @@ impl<'a> StatefulWidget<'a> for Dialog<'a> {
       on_close: self.on_close.take(),
       on_ok: self.on_ok.take(),
       body: self.body.take(),
-      animation_count,
-      background_alpha: Animation::new(0.0, 128.0, 0.125),
-      scale: Animation::new(0.0, 1.0, 0.125),
+      animation_sm: DialogAnimationSM::new(),
+      is_pressed_outside_dialog: false,
     })
   }
 
@@ -119,9 +124,8 @@ struct DialogState<'a> {
   on_close: Option<Arc<Mutex<dyn FnMut() + 'a + Send>>>,
   on_ok: Option<Arc<Mutex<dyn FnMut() + 'a + Send>>>,
   body: Option<Widget<'a>>,
-  animation_count: AnimationCount,
-  background_alpha: Animation<f32>,
-  scale: Animation<f32>,
+  animation_sm: DialogAnimationSM,
+  is_pressed_outside_dialog: bool,
 }
 
 impl Debug for DialogState<'_> {
@@ -139,22 +143,54 @@ impl Debug for DialogState<'_> {
       .field("ok_label", &self.ok_label)
       .field("has_ok", &self.has_ok)
       .field("body", &self.body)
-      .field("background_alpha", &self.background_alpha)
-      .field("scale", &self.scale)
+      .field("animation_sm", &self.animation_sm)
+      .field("is_pressed_outside_dialog", &self.is_pressed_outside_dialog)
       .finish_non_exhaustive()
   }
 }
 
 impl<'a> State<'a> for DialogState<'a> {
-  fn update(&mut self, dt: f32) -> bool {
-    let is_dirty = self.background_alpha.update(dt) | self.scale.update(dt);
-
-    if self.background_alpha.is_just_ended() {
-      // Pop up dialog animation done
-      self.animation_count = AnimationCount::new();
+  fn on_mouse_down(&mut self, mouse_position: (f32, f32), mouse_button: MouseButton) -> bool {
+    if mouse_button != MouseButton::Left {
+      // Don't consume the event because dialog buttons might need to listen to it
+      return false;
     }
 
-    is_dirty
+    if !POSITION
+      .with(|position| Rect::from_xywh(position.0, position.1, SIZE.0, SIZE.1))
+      .contains(Point::new(mouse_position.0, mouse_position.1))
+    {
+      // User pressed outside the dialog
+      self.is_pressed_outside_dialog = true;
+    }
+
+    // Don't consume the event because dialog buttons might need to listen to it
+    false
+  }
+
+  fn on_mouse_up(&mut self, mouse_position: (f32, f32), mouse_button: MouseButton) -> bool {
+    if mouse_button != MouseButton::Left {
+      // Don't consume the event because dialog buttons might need to listen to it
+      return false;
+    }
+
+    if self.is_pressed_outside_dialog
+      && !POSITION
+        .with(|position| Rect::from_xywh(position.0, position.1, SIZE.0, SIZE.1))
+        .contains(Point::new(mouse_position.0, mouse_position.1))
+    {
+      // User click outside the dialog
+      self.animation_sm.vibrate();
+    }
+
+    self.is_pressed_outside_dialog = false;
+
+    // Don't consume the event because dialog buttons might need to listen to it
+    false
+  }
+
+  fn update(&mut self, dt: f32) -> bool {
+    self.animation_sm.update(dt)
   }
 
   fn build(&mut self, _constraint: Rect) -> Widget<'a> {
@@ -174,7 +210,7 @@ impl<'a> State<'a> for DialogState<'a> {
           origin: Origin::TopLeft,
           child: Some(
             RectWidget {
-              color: Color::from_argb(self.background_alpha.get_now() as _, 0, 0, 0),
+              color: Color::from_argb(self.animation_sm.background_alpha.get_now() as _, 0, 0, 0),
               ..Default::default()
             }
             .into_widget(),
@@ -201,7 +237,7 @@ impl<'a> State<'a> for DialogState<'a> {
               on_ok: self.on_ok.as_ref().map(Arc::clone),
               #[allow(clippy::useless_asref)]
               body: self.body.as_ref().map(Widget::clone),
-              scale: self.scale.get_now(),
+              scale: self.animation_sm.scale.get_now(),
             }
             .into_widget(),
           ),
@@ -209,6 +245,68 @@ impl<'a> State<'a> for DialogState<'a> {
       ],
     }
     .into()
+  }
+}
+
+#[derive(Clone, Copy, Debug, Default, Hash, PartialEq, Eq, PartialOrd, Ord)]
+enum DialogAnimationState {
+  #[default]
+  PopUp,
+  Wait,
+
+  // Vibrate states
+  ScaleDown,
+  ScaleUp,
+}
+
+#[derive(Debug, Default, PartialEq, PartialOrd)]
+struct DialogAnimationSM {
+  animation_count: AnimationCount,
+  background_alpha: Animation<f32>,
+  scale: Animation<f32>,
+  state: DialogAnimationState,
+}
+
+impl DialogAnimationSM {
+  fn new() -> Self {
+    // Start pop up animation
+    let mut animation_count = AnimationCount::new();
+    animation_count.incr();
+
+    Self {
+      animation_count,
+      background_alpha: Animation::new(0.0, 128.0, 0.125),
+      scale: Animation::new(0.0, 1.0, 0.125),
+      state: DialogAnimationState::PopUp,
+    }
+  }
+
+  fn update(&mut self, dt: f32) -> bool {
+    let is_dirty = self.background_alpha.update(dt) | self.scale.update(dt);
+
+    if self.background_alpha.is_just_ended() || self.scale.is_just_ended() {
+      if self.state == DialogAnimationState::ScaleDown {
+        // Now scale back up to original to simulate vibration
+        self.scale = Animation::new(0.95, 1.0, 0.0625);
+        self.state = DialogAnimationState::ScaleUp;
+      } else {
+        // Pop up animation done, wait for start vibrate (ScaleDown -> ScaleUp) animation
+        self.animation_count = AnimationCount::new();
+        self.state = DialogAnimationState::Wait;
+      }
+    }
+
+    is_dirty
+  }
+
+  fn vibrate(&mut self) {
+    if self.state != DialogAnimationState::Wait {
+      return;
+    }
+
+    self.animation_count.incr();
+    self.scale = Animation::new(1.0, 0.95, 0.0625);
+    self.state = DialogAnimationState::ScaleDown;
   }
 }
 
@@ -265,7 +363,6 @@ impl<'a> StatelessWidget<'a> for DialogInner<'a> {
   fn build(&mut self, _constraint: Rect) -> Widget<'a> {
     // _constraint is unused since this dialog will cover the whole app
 
-    const SIZE: (f32, f32) = (512.0, 256.0);
     const BUTTON_SIZE: (f32, f32) = (208.0, 64.0);
     const BUTTON_GAP: f32 = 32.0;
 
@@ -274,15 +371,10 @@ impl<'a> StatelessWidget<'a> for DialogInner<'a> {
       context::DRAWABLE_SIZE.1.load(Ordering::Relaxed),
     );
 
-    let position = (
-      (drawable_size.0 - SIZE.0) * 0.5,
-      (drawable_size.1 - SIZE.1) * 0.5,
-    );
-
     Stack {
       children: vec![
         Some(StackChild {
-          position,
+          position: POSITION.with(|position| *position),
           size: SIZE,
           origin: Origin::TopLeft,
           child: Some(
@@ -298,7 +390,7 @@ impl<'a> StatelessWidget<'a> for DialogInner<'a> {
           None
         } else {
           Some(StackChild {
-            position: (position.0 + 16.0, position.1 + 16.0),
+            position: POSITION.with(|position| (position.0 + 16.0, position.1 + 16.0)),
             size: (0.0, 0.0),
             origin: Origin::TopLeft,
             child: Some(
@@ -314,7 +406,7 @@ impl<'a> StatelessWidget<'a> for DialogInner<'a> {
           None
         } else {
           Some(StackChild {
-            position: (position.0 + 88.0, position.1 + 32.0),
+            position: POSITION.with(|position| (position.0 + 88.0, position.1 + 32.0)),
             size: (0.0, 0.0),
             origin: Origin::TopLeft,
             child: Some(
@@ -333,7 +425,7 @@ impl<'a> StatelessWidget<'a> for DialogInner<'a> {
           })
         },
         self.body.as_ref().map(|body| StackChild {
-          position: (position.0 + 16.0, position.1 + 88.0),
+          position: POSITION.with(|position| (position.0 + 16.0, position.1 + 88.0)),
           size: (SIZE.0 - 32.0, SIZE.1 - 184.0),
           origin: Origin::TopLeft,
           child: Some(Widget::clone(body)),
@@ -348,7 +440,7 @@ impl<'a> StatelessWidget<'a> for DialogInner<'a> {
                 0.0
               })
               * 0.5,
-            position.1 + SIZE.1 - 80.0,
+            POSITION.with(|position| position.1) + SIZE.1 - 80.0,
           ),
           size: BUTTON_SIZE,
           origin: Origin::TopLeft,
@@ -367,7 +459,7 @@ impl<'a> StatelessWidget<'a> for DialogInner<'a> {
           Some(StackChild {
             position: (
               (drawable_size.0 + BUTTON_GAP) * 0.5,
-              position.1 + SIZE.1 - 80.0,
+              POSITION.with(|position| position.1) + SIZE.1 - 80.0,
             ),
             size: BUTTON_SIZE,
             origin: Origin::TopLeft,

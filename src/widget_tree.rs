@@ -206,15 +206,23 @@ impl WidgetTree<'_> {
 
       let mut is_mouse_on_widget = false;
       let mut is_consume_event = false;
+      let mut mouse_position = (-1.0, -1.0);
 
       match event {
         Event::MouseMotion { x, y, .. }
         | Event::MouseButtonDown { x, y, .. }
         | Event::MouseButtonUp { x, y, .. } => {
-          if widget_node.constraint.contains(Point::new(
+          mouse_position = (
             *x as f32 * context::DRAWABLE_SIZE.0.load(Ordering::Relaxed) / self.app_size.0,
             *y as f32 * context::DRAWABLE_SIZE.1.load(Ordering::Relaxed) / self.app_size.1,
-          )) {
+          );
+
+          if widget_node
+            .constraint
+            .contains(Point::new(mouse_position.0, mouse_position.1))
+            // Dialog reported size is zero but actually cover the whole app, will consider mouse always on the dialog
+            || widget_node.constraint.size().is_empty()
+          {
             is_mouse_on_widget = true;
           }
         }
@@ -227,15 +235,15 @@ impl WidgetTree<'_> {
           .unwrap();
 
         is_consume_event |= match event {
-          Event::MouseMotion { x, y, .. } => {
-            buildable_node.on_mouse_move((*x as _, *y as _), is_mouse_on_widget)
+          Event::MouseMotion { .. } => {
+            buildable_node.on_mouse_move(mouse_position, is_mouse_on_widget)
           }
-          Event::MouseButtonDown {
-            mouse_btn, x, y, ..
-          } => buildable_node.on_mouse_down((*x as _, *y as _), *mouse_btn, is_mouse_on_widget),
-          Event::MouseButtonUp {
-            mouse_btn, x, y, ..
-          } => buildable_node.on_mouse_up((*x as _, *y as _), *mouse_btn),
+          Event::MouseButtonDown { mouse_btn, .. } => {
+            buildable_node.on_mouse_down(mouse_position, *mouse_btn, is_mouse_on_widget)
+          }
+          Event::MouseButtonUp { mouse_btn, .. } => {
+            buildable_node.on_mouse_up(mouse_position, *mouse_btn)
+          }
           event => buildable_node.process_event(event),
         };
       }
