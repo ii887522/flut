@@ -191,6 +191,11 @@ pub fn run(app: App<'_>) {
     (app.size.0 as _, app.size.1 as _),
   );
 
+  // Purposefully increment animation count so that inside the hot loop can get executed and present widgets to the user.
+  // In reality, animation might not exists in the app
+  let mut animation_count = AnimationCount::new();
+  animation_count.incr();
+
   let mut now = Instant::now();
 
   'running: loop {
@@ -219,6 +224,13 @@ pub fn run(app: App<'_>) {
       widget_tree.draw(canvas);
       gr_ctx.flush_and_submit();
       window.gl_swap_window();
+
+      // After widgets presentation, the purpose of animation_count is fulfilled, thus can be dropped to
+      // conserve system resources
+      #[allow(unused_assignments)]
+      {
+        animation_count = AnimationCount::new();
+      }
     }
 
     // Cold loop

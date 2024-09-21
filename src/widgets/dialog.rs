@@ -5,7 +5,7 @@ use super::{
 use crate::{
   boot::context,
   helpers::{Animation, AnimationCount},
-  models::{icon_name, Origin},
+  models::{icon_name, Origin, VerticalAlign},
   widgets::{Button, Icon, Text},
 };
 use sdl2::mouse::MouseButton;
@@ -453,6 +453,7 @@ impl<'a> StatelessWidget<'a> for DialogInner<'a> {
               bg_color: Color::RED,
               icon: self.close_icon,
               label: self.close_label.to_string(),
+              child_align: VerticalAlign::Bottom,
               on_mouse_up: self.on_close.as_ref().map(Arc::clone),
               ..Default::default()
             }
@@ -472,6 +473,7 @@ impl<'a> StatelessWidget<'a> for DialogInner<'a> {
                 bg_color: Color::from_rgb(0, 128, 0),
                 icon: self.ok_icon,
                 label: self.ok_label.to_string(),
+                child_align: VerticalAlign::Bottom,
                 on_mouse_up: self.on_ok.as_ref().map(Arc::clone),
                 ..Default::default()
               }

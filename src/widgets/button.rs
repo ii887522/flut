@@ -25,6 +25,8 @@ pub struct Button<'a> {
   pub icon_color: Color,
   pub label: String,
   pub label_color: Color,
+  pub size: (f32, f32),
+  pub child_align: VerticalAlign,
   pub on_mouse_over: Option<Arc<Mutex<dyn FnMut() + 'a + Send>>>,
   pub on_mouse_out: Option<Arc<Mutex<dyn FnMut() + 'a + Send>>>,
   pub on_mouse_down: Option<Arc<Mutex<dyn FnMut() + 'a + Send>>>,
@@ -42,6 +44,8 @@ impl Debug for Button<'_> {
       .field("icon_color", &self.icon_color)
       .field("label", &self.label)
       .field("label_color", &self.label_color)
+      .field("size", &self.size)
+      .field("child_align", &self.child_align)
       .finish_non_exhaustive()
   }
 }
@@ -56,6 +60,8 @@ impl Default for Button<'_> {
       icon_color: Color::BLACK,
       label: "".to_string(),
       label_color: Color::BLACK,
+      size: (-1.0, -1.0),
+      child_align: VerticalAlign::Middle,
       on_mouse_over: None,
       on_mouse_out: None,
       on_mouse_down: None,
@@ -65,15 +71,21 @@ impl Default for Button<'_> {
 }
 
 impl<'a> StatefulWidget<'a> for Button<'a> {
+  fn get_size(&self) -> (f32, f32) {
+    self.size
+  }
+
   fn new_state(&mut self) -> Box<dyn State<'a> + 'a> {
     Box::new(ButtonState {
       bg_color: self.bg_color,
       border_radius: self.border_radius,
+      req_is_elevated: self.is_elevated,
       is_elevated: self.is_elevated,
       icon: self.icon,
       icon_color: self.icon_color,
       label: self.label.to_string(),
       label_color: self.label_color,
+      child_align: self.child_align,
       on_mouse_over: self.on_mouse_over.take(),
       on_mouse_out: self.on_mouse_out.take(),
       on_mouse_down: self.on_mouse_down.take(),
@@ -88,11 +100,13 @@ impl<'a> StatefulWidget<'a> for Button<'a> {
 struct ButtonState<'a> {
   bg_color: Color,
   border_radius: f32,
+  req_is_elevated: bool,
   is_elevated: bool,
   icon: u16,
   icon_color: Color,
   label: String,
   label_color: Color,
+  child_align: VerticalAlign,
   on_mouse_over: Option<Arc<Mutex<dyn FnMut() + 'a + Send>>>,
   on_mouse_out: Option<Arc<Mutex<dyn FnMut() + 'a + Send>>>,
   on_mouse_down: Option<Arc<Mutex<dyn FnMut() + 'a + Send>>>,
@@ -107,11 +121,13 @@ impl Debug for ButtonState<'_> {
       .debug_struct("ButtonState")
       .field("bg_color", &self.bg_color)
       .field("border_radius", &self.border_radius)
+      .field("req_is_elevated", &self.req_is_elevated)
       .field("is_elevated", &self.is_elevated)
       .field("icon", &self.icon)
       .field("icon_color", &self.icon_color)
       .field("label", &self.label)
       .field("label_color", &self.label_color)
+      .field("child_align", &self.child_align)
       .field("animation_sm", &self.animation_sm)
       .field("mouse_down_position", &self.mouse_down_position)
       .finish_non_exhaustive()
@@ -132,7 +148,7 @@ impl<'a> State<'a> for ButtonState<'_> {
   fn on_mouse_out(&mut self, _mouse_position: (f32, f32)) -> bool {
     context::ARROW_CURSOR.with(|arrow_cursor| arrow_cursor.set());
 
-    self.is_elevated = true;
+    self.is_elevated = self.req_is_elevated;
     self.animation_sm.fade_out();
 
     if let Some(on_mouse_out) = &self.on_mouse_out {
@@ -163,7 +179,7 @@ impl<'a> State<'a> for ButtonState<'_> {
       return true;
     }
 
-    self.is_elevated = true;
+    self.is_elevated = self.req_is_elevated;
     self.animation_sm.fade_out();
 
     if let Some(on_mouse_up) = &self.on_mouse_up {
@@ -204,9 +220,7 @@ impl<'a> State<'a> for ButtonState<'_> {
           origin: Origin::Center,
           child: Some(
             Row::new()
-              // Somehow VerticalAlign::Middle looks like align slightly towards the top,
-              // have to use VerticalAlign::Bottom as the workaround
-              .align(VerticalAlign::Bottom)
+              .align(self.child_align)
               .children(
                 vec![
                   if self.icon == 0 {

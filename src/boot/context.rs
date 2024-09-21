@@ -1,7 +1,7 @@
 use crate::models::AudioTask;
 use atomic_float::AtomicF32;
 use sdl2::mouse::{Cursor, SystemCursor};
-use skia_safe::{FontMgr, Typeface};
+use skia_safe::{FontMgr, Image, Typeface};
 use std::{
   cell::{OnceCell, RefCell},
   collections::HashMap,
@@ -25,4 +25,7 @@ thread_local! {
   // Mouse cursors
   pub static ARROW_CURSOR: Cursor = Cursor::from_system(SystemCursor::Arrow).unwrap();
   pub static HAND_CURSOR: Cursor = Cursor::from_system(SystemCursor::Hand).unwrap();
+
+  // Images
+  pub static IMAGES: RefCell<HashMap<&'static str, Image>> = RefCell::new(HashMap::new());
 }

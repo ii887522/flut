@@ -30,7 +30,7 @@ impl Text {
           *font_style.width(),
           font_style.slant()
         ))
-        .or_insert_with_key(|_| {
+        .or_insert_with(|| {
           context::FONT_MGR.with(|font_mgr| {
             font_mgr
               .match_family_style(font_family, font_style)

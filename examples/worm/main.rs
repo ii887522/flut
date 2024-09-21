@@ -5,13 +5,13 @@ mod models;
 mod pages;
 
 use flut::{app, widgets::widget::*, App};
-use pages::GamePage;
+use pages::{GamePage, HomePage};
 
 fn main() {
   app::run(App {
     title: "Worm",
     size: (660, 720),
     use_audio: true,
-    child: Some(GamePage.into_widget()),
+    child: Some(HomePage.into_widget()),
   });
 }
