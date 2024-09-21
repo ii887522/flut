@@ -5,8 +5,8 @@ use flut::{
   helpers::{AnimationCount, Clock},
   models::{icon_name, AudioTask, HorizontalAlign},
   widgets::{
-    stateful_widget::State, widget::*, Column, Dialog, Grid, RectWidget, Spacing, StatefulWidget,
-    Text, Widget,
+    router::Navigator, stateful_widget::State, widget::*, Column, Dialog, Grid, RectWidget,
+    Spacing, StatefulWidget, Text, Widget,
   },
 };
 use rand::prelude::*;
@@ -15,15 +15,16 @@ use sdl2::{event::Event, keyboard::Keycode};
 use skia_safe::{Color, Rect};
 use std::{
   collections::VecDeque,
-  process,
   sync::{Arc, Mutex, RwLock},
 };
 
 const COL_COUNT: u16 = 41;
 const ROW_COUNT: u16 = 41;
 
-#[derive(Clone, Copy, Debug, Default, Hash, PartialEq, Eq, PartialOrd, Ord)]
-pub(crate) struct GamePage;
+#[derive(Debug)]
+pub(crate) struct GamePage {
+  pub(crate) navigator: Arc<Mutex<Navigator>>,
+}
 
 impl<'a> StatefulWidget<'a> for GamePage {
   fn new_state(&mut self) -> Box<dyn State<'a> + 'a> {
@@ -36,6 +37,7 @@ impl<'a> StatefulWidget<'a> for GamePage {
 
     Box::new(GamePageState {
       clock: Clock::new(30.0),
+      navigator: Arc::clone(&self.navigator),
       inner: Arc::new(RwLock::new(GamePageStateInner::new())),
     })
   }
@@ -54,6 +56,7 @@ struct GamePageStateInner {
 #[derive(Debug, Default)]
 struct GamePageState {
   clock: Clock,
+  navigator: Arc<Mutex<Navigator>>,
   inner: Arc<RwLock<GamePageStateInner>>,
 }
 
@@ -252,6 +255,7 @@ impl<'a> State<'a> for GamePageState {
     let state_arc_2 = Arc::clone(&self.inner);
     let state = self.inner.read().unwrap();
     let score = state.worm.len() - 1;
+    let navigator = Arc::clone(&self.navigator);
 
     Column::new()
       .align(HorizontalAlign::Center)
@@ -312,7 +316,10 @@ impl<'a> State<'a> for GamePageState {
                 close_label: "Give Up".to_string(),
                 ok_icon: icon_name::RESTART_ALT,
                 ok_label: "Try Again".to_string(),
-                on_close: Some(Arc::new(Mutex::new(|| process::exit(0)))),
+                on_close: Some(Arc::new(Mutex::new(move || {
+                  let mut navigator = navigator.lock().unwrap();
+                  navigator.go("/".to_string());
+                }))),
                 on_ok: Some(Arc::new(Mutex::new(move || {
                   // Restart the game
                   let mut state = state_arc_2.write().unwrap();

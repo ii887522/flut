@@ -32,7 +32,7 @@ impl PainterWidget for ImageWidget {
   fn draw(&self, canvas: &Canvas, constraint: Rect) {
     context::IMAGES.with_borrow(|images| {
       canvas.draw_image_rect(
-        images.get(self.file_path).unwrap(),
+        &images[self.file_path],
         None,
         Rect::from_xywh(
           constraint.x(),

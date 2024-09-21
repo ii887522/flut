@@ -12,6 +12,10 @@ pub(crate) fn main(rx: Receiver<AudioTask<'_>>) {
   while let Ok(task) = rx.recv() {
     match task {
       AudioTask::LoadSound(file_path) => {
+        if chunk_map.contains_key(file_path) {
+          continue;
+        }
+
         if let Ok(chunk) = Chunk::from_file(file_path) {
           chunk_map.insert(file_path, chunk);
         }
