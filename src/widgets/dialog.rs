@@ -285,14 +285,18 @@ impl DialogAnimationSM {
     let is_dirty = self.background_alpha.update(dt) | self.scale.update(dt);
 
     if self.background_alpha.is_just_ended() || self.scale.is_just_ended() {
-      if self.state == DialogAnimationState::ScaleDown {
-        // Now scale back up to original to simulate vibration
-        self.scale = Animation::new(0.95, 1.0, 0.0625);
-        self.state = DialogAnimationState::ScaleUp;
-      } else {
-        // Pop up animation done, wait for start vibrate (ScaleDown -> ScaleUp) animation
-        self.animation_count = AnimationCount::new();
-        self.state = DialogAnimationState::Wait;
+      match self.state {
+        DialogAnimationState::PopUp | DialogAnimationState::ScaleUp => {
+          // PopUp animation done, wait for start vibrate (ScaleDown -> ScaleUp) animation
+          self.animation_count = AnimationCount::new();
+          self.state = DialogAnimationState::Wait;
+        }
+        DialogAnimationState::ScaleDown => {
+          // Now scale back up to original to simulate vibration
+          self.scale = Animation::new(0.95, 1.0, 0.0625);
+          self.state = DialogAnimationState::ScaleUp;
+        }
+        DialogAnimationState::Wait => panic!("Animating while in Wait state which is unexpected"),
       }
     }
 

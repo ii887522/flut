@@ -45,8 +45,14 @@ impl<T: Copy + Mul<f32>> Animation<T> {
   {
     self.old_accumulator = self.new_accumulator;
     self.new_accumulator = (self.new_accumulator + dt).min(self.duration);
-    let t = self.new_accumulator / self.duration;
-    self.now = (self.start * (1.0 - t) + self.end * t).into();
+
+    self.now = if self.duration > 0.0 {
+      let t = self.new_accumulator / self.duration;
+      (self.start * (1.0 - t) + self.end * t).into()
+    } else {
+      self.end
+    };
+
     self.old_accumulator != self.new_accumulator
   }
 }

@@ -4,17 +4,17 @@ use super::{
 };
 use crate::{
   boot::context,
-  helpers::AnimationCount,
+  helpers::{Animation, AnimationCount},
   models::{Origin, VerticalAlign},
 };
 use sdl2::mouse::MouseButton;
 use skia_safe::{
   font_style::{Slant, Weight, Width},
-  Color, FontStyle, Rect,
+  BlurStyle, Canvas, ClipOp, Color, FontStyle, MaskFilter, Paint, RRect, Rect,
 };
 use std::{
   fmt::{self, Debug, Formatter},
-  sync::{Arc, Mutex},
+  sync::{atomic::Ordering, Arc, Mutex},
 };
 
 pub struct Button<'a> {
@@ -78,7 +78,8 @@ impl<'a> StatefulWidget<'a> for Button<'a> {
       on_mouse_out: self.on_mouse_out.take(),
       on_mouse_down: self.on_mouse_down.take(),
       on_mouse_up: self.on_mouse_up.take(),
-      animation_count: AnimationCount::new(),
+      animation_sm: ButtonAnimationSM::new(),
+      mouse_down_position: (-1.0, -1.0),
     })
   }
 }
@@ -96,7 +97,8 @@ struct ButtonState<'a> {
   on_mouse_out: Option<Arc<Mutex<dyn FnMut() + 'a + Send>>>,
   on_mouse_down: Option<Arc<Mutex<dyn FnMut() + 'a + Send>>>,
   on_mouse_up: Option<Arc<Mutex<dyn FnMut() + 'a + Send>>>,
-  animation_count: AnimationCount,
+  animation_sm: ButtonAnimationSM,
+  mouse_down_position: (f32, f32),
 }
 
 impl Debug for ButtonState<'_> {
@@ -110,7 +112,8 @@ impl Debug for ButtonState<'_> {
       .field("icon_color", &self.icon_color)
       .field("label", &self.label)
       .field("label_color", &self.label_color)
-      .field("animation_count", &self.animation_count)
+      .field("animation_sm", &self.animation_sm)
+      .field("mouse_down_position", &self.mouse_down_position)
       .finish_non_exhaustive()
   }
 }
@@ -130,7 +133,7 @@ impl<'a> State<'a> for ButtonState<'_> {
     context::ARROW_CURSOR.with(|arrow_cursor| arrow_cursor.set());
 
     self.is_elevated = true;
-    self.animation_count.incr();
+    self.animation_sm.fade_out();
 
     if let Some(on_mouse_out) = &self.on_mouse_out {
       on_mouse_out.lock().unwrap()();
@@ -139,13 +142,14 @@ impl<'a> State<'a> for ButtonState<'_> {
     true
   }
 
-  fn on_mouse_down(&mut self, _mouse_position: (f32, f32), mouse_button: MouseButton) -> bool {
+  fn on_mouse_down(&mut self, mouse_position: (f32, f32), mouse_button: MouseButton) -> bool {
     if mouse_button != MouseButton::Left {
       return true;
     }
 
     self.is_elevated = false;
-    self.animation_count.incr();
+    self.mouse_down_position = mouse_position;
+    self.animation_sm.ripple();
 
     if let Some(on_mouse_down) = &self.on_mouse_down {
       on_mouse_down.lock().unwrap()();
@@ -160,7 +164,7 @@ impl<'a> State<'a> for ButtonState<'_> {
     }
 
     self.is_elevated = true;
-    self.animation_count.incr();
+    self.animation_sm.fade_out();
 
     if let Some(on_mouse_up) = &self.on_mouse_up {
       on_mouse_up.lock().unwrap()();
@@ -169,16 +173,13 @@ impl<'a> State<'a> for ButtonState<'_> {
     true
   }
 
-  fn update(&mut self, _dt: f32) -> bool {
-    if *self.animation_count > 0 {
-      self.animation_count = AnimationCount::new();
-      return true;
-    }
-
-    false
+  fn update(&mut self, dt: f32) -> bool {
+    self.animation_sm.update(dt)
   }
 
   fn build(&mut self, constraint: Rect) -> Widget<'a> {
+    self.animation_sm.constraint = constraint;
+
     Stack {
       children: vec![
         StackChild {
@@ -259,5 +260,134 @@ impl<'a> State<'a> for ButtonState<'_> {
       ],
     }
     .into()
+  }
+
+  fn post_draw(&self, canvas: &Canvas, constraint: Rect) {
+    if self.animation_sm.ripple_radius.get_now() <= 0.0
+      || self.animation_sm.ripple_alpha.get_now() <= 0.0
+    {
+      return;
+    }
+
+    canvas.save();
+
+    // Ensure ripple won't draw outside button
+    canvas.clip_rrect(
+      RRect::new_rect_xy(constraint, self.border_radius, self.border_radius),
+      ClipOp::Intersect,
+      true,
+    );
+
+    // Draw ripple
+    canvas.draw_circle(
+      self.mouse_down_position,
+      self.animation_sm.ripple_radius.get_now(),
+      Paint::default()
+        .set_anti_alias(true)
+        .set_color(Color::from_argb(
+          self.animation_sm.ripple_alpha.get_now() as _,
+          255,
+          255,
+          255,
+        ))
+        .set_mask_filter(MaskFilter::blur(BlurStyle::Normal, 2.0, false)),
+    );
+
+    canvas.restore();
+  }
+}
+
+#[derive(Clone, Copy, Debug, Default, Hash, PartialEq, Eq, PartialOrd, Ord)]
+enum ButtonAnimationState {
+  #[default]
+  Start,
+  Ripple,
+  Wait,
+  FadeOut,
+}
+
+#[derive(Debug, Default, PartialEq)]
+struct ButtonAnimationSM {
+  animation_count: AnimationCount,
+  ripple_radius: Animation<f32>,
+  ripple_alpha: Animation<f32>,
+  state: ButtonAnimationState,
+  constraint: Rect,
+}
+
+impl ButtonAnimationSM {
+  fn new() -> Self {
+    Self {
+      animation_count: AnimationCount::new(),
+      ripple_radius: Animation::new(0.0, 0.0, 0.0),
+      ripple_alpha: Animation::new(0.0, 0.0, 0.0),
+      state: ButtonAnimationState::Start,
+      constraint: Rect::from_size((
+        context::DRAWABLE_SIZE.0.load(Ordering::Relaxed),
+        context::DRAWABLE_SIZE.1.load(Ordering::Relaxed),
+      )),
+    }
+  }
+
+  fn update(&mut self, dt: f32) -> bool {
+    let is_dirty = self.ripple_radius.update(dt) | self.ripple_alpha.update(dt);
+
+    if self.ripple_radius.is_just_ended() || self.ripple_alpha.is_just_ended() {
+      match self.state {
+        ButtonAnimationState::Ripple => {
+          self.animation_count = AnimationCount::new();
+          self.state = ButtonAnimationState::Wait;
+        }
+        ButtonAnimationState::FadeOut => {
+          self.animation_count = AnimationCount::new();
+          self.state = ButtonAnimationState::Start;
+        }
+        state @ (ButtonAnimationState::Start | ButtonAnimationState::Wait) => {
+          panic!("Animating while in {state:?} state which is unexpected")
+        }
+      }
+    }
+
+    is_dirty
+  }
+
+  fn ripple(&mut self) {
+    if !matches!(
+      self.state,
+      ButtonAnimationState::Start | ButtonAnimationState::FadeOut
+    ) {
+      return;
+    }
+
+    self.animation_count.incr();
+
+    self.ripple_radius = Animation::new(
+      0.0,
+      self.constraint.width().max(self.constraint.height()),
+      1.0,
+    );
+
+    self.ripple_alpha = Animation::new(64.0, 64.0, 0.0);
+    self.state = ButtonAnimationState::Ripple;
+  }
+
+  fn fade_out(&mut self) {
+    if !matches!(
+      self.state,
+      ButtonAnimationState::Ripple | ButtonAnimationState::Wait
+    ) {
+      return;
+    }
+
+    self.animation_count.incr();
+
+    self.ripple_radius = Animation::new(
+      self.ripple_radius.get_now(),
+      self.ripple_radius.get_now(),
+      0.0,
+    );
+
+    self.ripple_alpha = Animation::new(64.0, 0.0, 0.5);
+    self.state = ButtonAnimationState::FadeOut;
   }
 }
