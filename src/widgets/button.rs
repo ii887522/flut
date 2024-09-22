@@ -27,10 +27,10 @@ pub struct Button<'a> {
   pub label_color: Color,
   pub size: (f32, f32),
   pub child_align: VerticalAlign,
-  pub on_mouse_over: Option<Arc<Mutex<dyn FnMut() + 'a + Send>>>,
-  pub on_mouse_out: Option<Arc<Mutex<dyn FnMut() + 'a + Send>>>,
-  pub on_mouse_down: Option<Arc<Mutex<dyn FnMut() + 'a + Send>>>,
-  pub on_mouse_up: Option<Arc<Mutex<dyn FnMut() + 'a + Send>>>,
+  pub on_mouse_over: Arc<Mutex<dyn FnMut() + 'a + Send>>,
+  pub on_mouse_out: Arc<Mutex<dyn FnMut() + 'a + Send>>,
+  pub on_mouse_down: Arc<Mutex<dyn FnMut() + 'a + Send>>,
+  pub on_mouse_up: Arc<Mutex<dyn FnMut() + 'a + Send>>,
 }
 
 impl Debug for Button<'_> {
@@ -62,10 +62,10 @@ impl Default for Button<'_> {
       label_color: Color::BLACK,
       size: (-1.0, -1.0),
       child_align: VerticalAlign::Middle,
-      on_mouse_over: None,
-      on_mouse_out: None,
-      on_mouse_down: None,
-      on_mouse_up: None,
+      on_mouse_over: Arc::new(Mutex::new(|| {})),
+      on_mouse_out: Arc::new(Mutex::new(|| {})),
+      on_mouse_down: Arc::new(Mutex::new(|| {})),
+      on_mouse_up: Arc::new(Mutex::new(|| {})),
     }
   }
 }
@@ -86,17 +86,16 @@ impl<'a> StatefulWidget<'a> for Button<'a> {
       label: self.label.to_string(),
       label_color: self.label_color,
       child_align: self.child_align,
-      on_mouse_over: self.on_mouse_over.take(),
-      on_mouse_out: self.on_mouse_out.take(),
-      on_mouse_down: self.on_mouse_down.take(),
-      on_mouse_up: self.on_mouse_up.take(),
+      on_mouse_over: Arc::clone(&self.on_mouse_over),
+      on_mouse_out: Arc::clone(&self.on_mouse_out),
+      on_mouse_down: Arc::clone(&self.on_mouse_down),
+      on_mouse_up: Arc::clone(&self.on_mouse_up),
       animation_sm: ButtonAnimationSM::new(),
       mouse_down_position: (-1.0, -1.0),
     })
   }
 }
 
-#[derive(Default)]
 struct ButtonState<'a> {
   bg_color: Color,
   border_radius: f32,
@@ -107,10 +106,10 @@ struct ButtonState<'a> {
   label: String,
   label_color: Color,
   child_align: VerticalAlign,
-  on_mouse_over: Option<Arc<Mutex<dyn FnMut() + 'a + Send>>>,
-  on_mouse_out: Option<Arc<Mutex<dyn FnMut() + 'a + Send>>>,
-  on_mouse_down: Option<Arc<Mutex<dyn FnMut() + 'a + Send>>>,
-  on_mouse_up: Option<Arc<Mutex<dyn FnMut() + 'a + Send>>>,
+  on_mouse_over: Arc<Mutex<dyn FnMut() + 'a + Send>>,
+  on_mouse_out: Arc<Mutex<dyn FnMut() + 'a + Send>>,
+  on_mouse_down: Arc<Mutex<dyn FnMut() + 'a + Send>>,
+  on_mouse_up: Arc<Mutex<dyn FnMut() + 'a + Send>>,
   animation_sm: ButtonAnimationSM,
   mouse_down_position: (f32, f32),
 }
@@ -137,24 +136,15 @@ impl Debug for ButtonState<'_> {
 impl<'a> State<'a> for ButtonState<'_> {
   fn on_mouse_over(&mut self, _mouse_position: (f32, f32)) -> bool {
     context::HAND_CURSOR.with(|hand_cursor| hand_cursor.set());
-
-    if let Some(on_mouse_over) = &self.on_mouse_over {
-      on_mouse_over.lock().unwrap()();
-    }
-
+    self.on_mouse_over.lock().unwrap()();
     true
   }
 
   fn on_mouse_out(&mut self, _mouse_position: (f32, f32)) -> bool {
     context::ARROW_CURSOR.with(|arrow_cursor| arrow_cursor.set());
-
     self.is_elevated = self.req_is_elevated;
     self.animation_sm.fade_out();
-
-    if let Some(on_mouse_out) = &self.on_mouse_out {
-      on_mouse_out.lock().unwrap()();
-    }
-
+    self.on_mouse_out.lock().unwrap()();
     true
   }
 
@@ -166,11 +156,7 @@ impl<'a> State<'a> for ButtonState<'_> {
     self.is_elevated = false;
     self.mouse_down_position = mouse_position;
     self.animation_sm.ripple();
-
-    if let Some(on_mouse_down) = &self.on_mouse_down {
-      on_mouse_down.lock().unwrap()();
-    }
-
+    self.on_mouse_down.lock().unwrap()();
     true
   }
 
@@ -181,11 +167,7 @@ impl<'a> State<'a> for ButtonState<'_> {
 
     self.is_elevated = self.req_is_elevated;
     self.animation_sm.fade_out();
-
-    if let Some(on_mouse_up) = &self.on_mouse_up {
-      on_mouse_up.lock().unwrap()();
-    }
-
+    self.on_mouse_up.lock().unwrap()();
     true
   }
 
@@ -357,7 +339,7 @@ impl ButtonAnimationSM {
           self.state = ButtonAnimationState::Start;
         }
         state @ (ButtonAnimationState::Start | ButtonAnimationState::Wait) => {
-          panic!("Animating while in {state:?} state which is unexpected")
+          panic!("Animating while in {state:?} state which is unexpected");
         }
       }
     }

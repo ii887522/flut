@@ -15,6 +15,7 @@ pub mod stack_child;
 pub mod stateful_widget;
 pub mod stateless_widget;
 pub mod text;
+pub mod translation;
 pub mod widget;
 
 pub(super) use buildable::Buildable;
@@ -34,4 +35,5 @@ pub use stack_child::StackChild;
 pub use stateful_widget::StatefulWidget;
 pub use stateless_widget::StatelessWidget;
 pub use text::Text;
+pub use translation::Translation;
 pub use widget::Widget;

@@ -59,10 +59,10 @@ impl<'a> StatelessWidget<'a> for HomePage {
           icon: icon_name::PLAY_ARROW,
           label: "Start Game".to_string(),
           size: (256.0, 64.0),
-          on_mouse_up: Some(Arc::new(Mutex::new(move || {
+          on_mouse_up: Arc::new(Mutex::new(move || {
             let mut navigator = navigator.lock().unwrap();
             navigator.go("/game".to_string());
-          }))),
+          })),
           ..Default::default()
         }
         .into_widget(),
@@ -76,7 +76,7 @@ impl<'a> StatelessWidget<'a> for HomePage {
           icon: icon_name::LOGOUT,
           label: "Exit Game".to_string(),
           size: (256.0, 64.0),
-          on_mouse_up: Some(Arc::new(Mutex::new(|| process::exit(0)))),
+          on_mouse_up: Arc::new(Mutex::new(|| process::exit(0))),
           ..Default::default()
         }
         .into_widget(),

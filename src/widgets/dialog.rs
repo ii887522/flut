@@ -38,8 +38,8 @@ pub struct Dialog<'a> {
   pub ok_icon: u16,
   pub ok_label: String,
   pub has_ok: bool,
-  pub on_close: Option<Arc<Mutex<dyn FnMut() + 'a + Send>>>,
-  pub on_ok: Option<Arc<Mutex<dyn FnMut() + 'a + Send>>>,
+  pub on_close: Arc<Mutex<dyn FnMut() + 'a + Send>>,
+  pub on_ok: Arc<Mutex<dyn FnMut() + 'a + Send>>,
   pub body: Option<Widget<'a>>,
 }
 
@@ -76,8 +76,8 @@ impl Default for Dialog<'_> {
       ok_icon: icon_name::CHECK,
       ok_label: "OK".to_string(),
       has_ok: false,
-      on_close: None,
-      on_ok: None,
+      on_close: Arc::new(Mutex::new(|| {})),
+      on_ok: Arc::new(Mutex::new(|| {})),
     }
   }
 }
@@ -95,9 +95,10 @@ impl<'a> StatefulWidget<'a> for Dialog<'a> {
       ok_icon: self.ok_icon,
       ok_label: self.ok_label.to_string(),
       has_ok: self.has_ok,
-      on_close: self.on_close.take(),
-      on_ok: self.on_ok.take(),
-      body: self.body.take(),
+      on_close: Arc::clone(&self.on_close),
+      on_ok: Arc::clone(&self.on_ok),
+      #[allow(clippy::useless_asref)]
+      body: self.body.as_ref().map(Widget::clone),
       animation_sm: DialogAnimationSM::new(),
       is_pressed_outside_dialog: false,
     })
@@ -121,8 +122,8 @@ struct DialogState<'a> {
   ok_icon: u16,
   ok_label: String,
   has_ok: bool,
-  on_close: Option<Arc<Mutex<dyn FnMut() + 'a + Send>>>,
-  on_ok: Option<Arc<Mutex<dyn FnMut() + 'a + Send>>>,
+  on_close: Arc<Mutex<dyn FnMut() + 'a + Send>>,
+  on_ok: Arc<Mutex<dyn FnMut() + 'a + Send>>,
   body: Option<Widget<'a>>,
   animation_sm: DialogAnimationSM,
   is_pressed_outside_dialog: bool,
@@ -233,8 +234,8 @@ impl<'a> State<'a> for DialogState<'a> {
               ok_icon: self.ok_icon,
               ok_label: self.ok_label.to_string(),
               has_ok: self.has_ok,
-              on_close: self.on_close.as_ref().map(Arc::clone),
-              on_ok: self.on_ok.as_ref().map(Arc::clone),
+              on_close: Arc::clone(&self.on_close),
+              on_ok: Arc::clone(&self.on_ok),
               #[allow(clippy::useless_asref)]
               body: self.body.as_ref().map(Widget::clone),
               scale: self.animation_sm.scale.get_now(),
@@ -260,7 +261,7 @@ enum DialogAnimationState {
 }
 
 #[derive(Debug, Default, PartialEq, PartialOrd)]
-struct DialogAnimationSM {
+pub struct DialogAnimationSM {
   animation_count: AnimationCount,
   background_alpha: Animation<f32>,
   scale: Animation<f32>,
@@ -268,7 +269,7 @@ struct DialogAnimationSM {
 }
 
 impl DialogAnimationSM {
-  fn new() -> Self {
+  pub fn new() -> Self {
     // Start pop up animation
     let mut animation_count = AnimationCount::new();
     animation_count.incr();
@@ -325,8 +326,8 @@ struct DialogInner<'a> {
   ok_icon: u16,
   ok_label: String,
   has_ok: bool,
-  on_close: Option<Arc<Mutex<dyn FnMut() + 'a + Send>>>,
-  on_ok: Option<Arc<Mutex<dyn FnMut() + 'a + Send>>>,
+  on_close: Arc<Mutex<dyn FnMut() + 'a + Send>>,
+  on_ok: Arc<Mutex<dyn FnMut() + 'a + Send>>,
   body: Option<Widget<'a>>,
   scale: f32,
 }
@@ -454,7 +455,7 @@ impl<'a> StatelessWidget<'a> for DialogInner<'a> {
               icon: self.close_icon,
               label: self.close_label.to_string(),
               child_align: VerticalAlign::Bottom,
-              on_mouse_up: self.on_close.as_ref().map(Arc::clone),
+              on_mouse_up: Arc::clone(&self.on_close),
               ..Default::default()
             }
             .into_widget(),
@@ -474,7 +475,7 @@ impl<'a> StatelessWidget<'a> for DialogInner<'a> {
                 icon: self.ok_icon,
                 label: self.ok_label.to_string(),
                 child_align: VerticalAlign::Bottom,
-                on_mouse_up: self.on_ok.as_ref().map(Arc::clone),
+                on_mouse_up: Arc::clone(&self.on_ok),
                 ..Default::default()
               }
               .into_widget(),

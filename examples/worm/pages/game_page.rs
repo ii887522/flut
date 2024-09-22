@@ -2,11 +2,11 @@ use crate::models::{Direction, GameCell, WormCell};
 use flut::{
   boot::context,
   collections::U16SparseSet,
-  helpers::{AnimationCount, Clock},
+  helpers::{AnimationCount, Clock, ShakeAnimationSM},
   models::{icon_name, AudioTask, HorizontalAlign},
   widgets::{
     router::Navigator, stateful_widget::State, widget::*, Column, Dialog, Grid, RectWidget,
-    Spacing, StatefulWidget, Text, Widget,
+    Spacing, StatefulWidget, Text, Translation, Widget,
   },
 };
 use rand::prelude::*;
@@ -43,7 +43,7 @@ impl<'a> StatefulWidget<'a> for GamePage {
   }
 }
 
-#[derive(Debug, Default, Hash, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Default, PartialEq, PartialOrd)]
 struct GamePageStateInner {
   grid_model: Vec<GameCell>,
   air_indices: U16SparseSet,
@@ -51,6 +51,7 @@ struct GamePageStateInner {
   next_worm_direction: Option<Direction>,
   is_worm_dead: bool,
   animation_count: AnimationCount,
+  shake_animation_sm: ShakeAnimationSM,
 }
 
 #[derive(Debug, Default)]
@@ -111,11 +112,17 @@ impl GamePageStateInner {
       direction: random(),
     });
 
+    let shake_animation_sm = ShakeAnimationSM::new()
+      .magnitude(32.0)
+      .duration(0.25)
+      .call();
+
     self.grid_model = grid_model;
     self.air_indices = air_indices;
     self.worm = worm;
     self.next_worm_direction = None;
     self.is_worm_dead = false;
+    self.shake_animation_sm = shake_animation_sm;
     self.spawn_food();
   }
 
@@ -164,6 +171,8 @@ impl GamePageStateInner {
 
       // Game can stop running after game over
       self.animation_count = AnimationCount::new();
+
+      self.shake_animation_sm.shake();
       return;
     } else if let GameCell::Food = self.grid_model[new_head.position as usize] {
       context::AUDIO_TX.with(|audio_tx| {
@@ -238,7 +247,7 @@ impl<'a> State<'a> for GamePageState {
     let mut state = self.inner.write().unwrap();
 
     if !self.clock.update(dt) || state.is_worm_dead {
-      return false;
+      return state.shake_animation_sm.update(dt);
     }
 
     if let Some(next_worm_direction) = state.next_worm_direction.take() {
@@ -258,50 +267,53 @@ impl<'a> State<'a> for GamePageState {
     let navigator = Arc::clone(&self.navigator);
 
     Column::new()
-      .align(HorizontalAlign::Center)
       .children(
         vec![
           Some(
-            Spacing {
-              height: 16.0,
-              ..Default::default()
-            }
-            .into_widget(),
-          ),
-          Some(
-            Text::new()
-              .text(score.to_string())
-              .color(Color::WHITE)
-              .font_size(48.0)
-              .call()
-              .into_widget(),
-          ),
-          Some(
-            Spacing {
-              height: 16.0,
-              ..Default::default()
-            }
-            .into_widget(),
-          ),
-          Some(
-            Grid {
-              col_count: COL_COUNT,
-              row_count: ROW_COUNT,
-              gap: 2.0,
-              builder: Box::new(move |index| {
-                let state = state_arc_1.read().unwrap();
+            Translation {
+              translation: state.shake_animation_sm.get_current_translation(),
+              child: Column::new()
+                .align(HorizontalAlign::Center)
+                .children(vec![
+                  Spacing {
+                    height: 16.0,
+                    ..Default::default()
+                  }
+                  .into_widget(),
+                  Text::new()
+                    .text(score.to_string())
+                    .color(Color::WHITE)
+                    .font_size(48.0)
+                    .call()
+                    .into_widget(),
+                  Spacing {
+                    height: 16.0,
+                    ..Default::default()
+                  }
+                  .into_widget(),
+                  Grid {
+                    col_count: COL_COUNT,
+                    row_count: ROW_COUNT,
+                    gap: 2.0,
+                    builder: Box::new(move |index| {
+                      let state = state_arc_1.read().unwrap();
 
-                RectWidget {
-                  color: match state.grid_model[index as usize] {
-                    GameCell::Air => Color::from_rgb(56, 56, 56),
-                    GameCell::Worm => Color::from_rgb(243, 125, 121),
-                    GameCell::Wall => Color::RED,
-                    GameCell::Food => Color::GREEN,
-                  },
-                  ..Default::default()
-                }
-                .into_widget()
-              }),
+                      RectWidget {
+                        color: match state.grid_model[index as usize] {
+                          GameCell::Air => Color::from_rgb(56, 56, 56),
+                          GameCell::Worm => Color::from_rgb(243, 125, 121),
+                          GameCell::Wall => Color::RED,
+                          GameCell::Food => Color::GREEN,
+                        },
+                        ..Default::default()
+                      }
+                      .into_widget()
+                    }),
+                  }
+                  .into_widget(),
+                ])
+                .call()
+                .into_widget(),
             }
             .into_widget(),
           ),
@@ -316,15 +328,15 @@ impl<'a> State<'a> for GamePageState {
                 close_label: "Give Up".to_string(),
                 ok_icon: icon_name::RESTART_ALT,
                 ok_label: "Try Again".to_string(),
-                on_close: Some(Arc::new(Mutex::new(move || {
+                on_close: Arc::new(Mutex::new(move || {
                   let mut navigator = navigator.lock().unwrap();
                   navigator.go("/".to_string());
-                }))),
-                on_ok: Some(Arc::new(Mutex::new(move || {
+                })),
+                on_ok: Arc::new(Mutex::new(move || {
                   // Restart the game
                   let mut state = state_arc_2.write().unwrap();
                   state.init();
-                }))),
+                })),
                 body: Some(
                   Text::new()
                     .text(format!(
