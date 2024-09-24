@@ -16,7 +16,7 @@ impl Text {
   #[optarg_method(TextNewBuilder, call)]
   pub fn new<'a>(
     #[optarg_default] text: String,
-    #[optarg("Segoe UI")] font_family: &'a str,
+    #[optarg("Arial")] font_family: &'a str,
     #[optarg_default] font_style: FontStyle,
     #[optarg(12.0)] font_size: f32,
     #[optarg(Color::BLACK)] color: Color,

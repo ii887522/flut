@@ -68,6 +68,8 @@ pub fn run(app: App<'_>) {
   let vid_subsys = sdl.video().unwrap();
   let gl_attr = vid_subsys.gl_attr();
   let mut ctx_flags_builder = gl_attr.set_context_flags();
+  // Actually ctx_flags_builder needs to be mutable for assignment in #[cfg(debug_assertions)] block
+  #[allow(unused_mut)]
   let mut ctx_flags_builder = ctx_flags_builder.forward_compatible();
 
   #[cfg(debug_assertions)]
@@ -83,6 +85,11 @@ pub fn run(app: App<'_>) {
   }
 
   gl_attr.set_context_profile(GLProfile::Core);
+
+  #[cfg(target_os = "macos")]
+  gl_attr.set_context_version(4, 1);
+
+  #[cfg(not(target_os = "macos"))]
   gl_attr.set_context_version(4, 6);
 
   let mut window = vid_subsys
