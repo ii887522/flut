@@ -5,7 +5,7 @@ use super::{
 use crate::{
   boot::context,
   helpers::{Animation, AnimationCount},
-  models::{icon_name, Origin, VerticalAlign},
+  models::{icon_name, Origin},
   widgets::{Button, Icon, Text},
 };
 use sdl2::mouse::MouseButton;
