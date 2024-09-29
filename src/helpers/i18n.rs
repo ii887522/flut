@@ -52,7 +52,7 @@ impl I18n {
       |captures: &Captures<'_>| {
         if let Some(pluralization_placeholder) = captures.get(2) {
           let placeholder = pluralization_placeholder.as_str();
-          let mut words = placeholder.split_terminator(&['{', ':', '|', '}'][..]);
+          let mut words = placeholder.split_terminator(['{', ':', '|', '}']);
 
           // split_terminator() did not skip the leading empty string, so manually skip it then we can get the
           // message_arg_key in the next words.next() invocation
