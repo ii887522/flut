@@ -35,7 +35,7 @@ impl U16SparseSet {
     let dense_index: u16 = self.sparse[value as usize];
 
     if self.dense[dense_index as usize] != value {
-      panic!("{value} does not exist")
+      panic!("{value} does not exist");
     }
 
     self.dense.swap_remove(dense_index as _);

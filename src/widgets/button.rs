@@ -13,6 +13,7 @@ use skia_safe::{
   BlurStyle, Canvas, ClipOp, Color, FontStyle, MaskFilter, Paint, RRect, Rect,
 };
 use std::{
+  borrow::Cow,
   fmt::{self, Debug, Formatter},
   sync::{atomic::Ordering, Arc, Mutex},
 };
@@ -23,7 +24,8 @@ pub struct Button<'a> {
   pub is_elevated: bool,
   pub icon: u16,
   pub icon_color: Color,
-  pub label: String,
+  pub label: Cow<'static, str>,
+  pub label_font_family: &'static str,
   pub label_color: Color,
   pub size: (f32, f32),
   pub child_align: VerticalAlign,
@@ -43,6 +45,7 @@ impl Debug for Button<'_> {
       .field("icon", &self.icon)
       .field("icon_color", &self.icon_color)
       .field("label", &self.label)
+      .field("label_font_family", &self.label_font_family)
       .field("label_color", &self.label_color)
       .field("size", &self.size)
       .field("child_align", &self.child_align)
@@ -58,7 +61,8 @@ impl Default for Button<'_> {
       is_elevated: true,
       icon: 0,
       icon_color: Color::BLACK,
-      label: "".to_string(),
+      label: Cow::Borrowed(""),
+      label_font_family: "Arial",
       label_color: Color::BLACK,
       size: (-1.0, -1.0),
       child_align: VerticalAlign::Middle,
@@ -84,6 +88,7 @@ impl<'a> StatefulWidget<'a> for Button<'a> {
       icon: self.icon,
       icon_color: self.icon_color,
       label: self.label.to_string(),
+      label_font_family: self.label_font_family,
       label_color: self.label_color,
       child_align: self.child_align,
       on_mouse_over: Arc::clone(&self.on_mouse_over),
@@ -104,6 +109,7 @@ struct ButtonState<'a> {
   icon: u16,
   icon_color: Color,
   label: String,
+  label_font_family: &'static str,
   label_color: Color,
   child_align: VerticalAlign,
   on_mouse_over: Arc<Mutex<dyn FnMut() + 'a + Send>>,
@@ -125,6 +131,7 @@ impl Debug for ButtonState<'_> {
       .field("icon", &self.icon)
       .field("icon_color", &self.icon_color)
       .field("label", &self.label)
+      .field("label_font_family", &self.label_font_family)
       .field("label_color", &self.label_color)
       .field("child_align", &self.child_align)
       .field("animation_sm", &self.animation_sm)
@@ -233,6 +240,7 @@ impl<'a> State<'a> for ButtonState<'_> {
                     Some(
                       Text::new()
                         .text(self.label.to_string())
+                        .font_family(self.label_font_family)
                         .font_size(28.0)
                         .font_style(FontStyle::new(
                           Weight::SEMI_BOLD,
@@ -339,7 +347,7 @@ impl ButtonAnimationSM {
           self.state = ButtonAnimationState::Start;
         }
         state @ (ButtonAnimationState::Start | ButtonAnimationState::Wait) => {
-          panic!("Animating while in {state:?} state which is unexpected");
+          unreachable!("Animating while in {state:?} state which is unexpected");
         }
       }
     }
@@ -360,7 +368,7 @@ impl ButtonAnimationSM {
     self.ripple_radius = Animation::new(
       0.0,
       self.constraint.width().max(self.constraint.height()),
-      1.0,
+      0.25,
     );
 
     self.ripple_alpha = Animation::new(64.0, 64.0, 0.0);

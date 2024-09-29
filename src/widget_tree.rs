@@ -390,7 +390,7 @@ impl WidgetTree<'_> {
         widget => {
           // By right after expanded all widgets, should no longer have buildable widgets like StatelessWidget,
           // StatefulWidget, else something wrong in the build logic
-          panic!("Cannot draw widget: {widget:?}");
+          unreachable!("Cannot draw widget: {widget:?}");
         }
       }
 

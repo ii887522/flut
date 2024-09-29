@@ -14,6 +14,7 @@ use skia_safe::{
   Canvas, Color, Contains, FontStyle, Point, Rect,
 };
 use std::{
+  borrow::Cow,
   fmt::{self, Debug, Formatter},
   sync::{atomic::Ordering, Arc, Mutex},
 };
@@ -31,12 +32,15 @@ pub struct Dialog<'a> {
   pub color: Color,
   pub header_icon: u16,
   pub header_icon_color: Color,
-  pub header_title: String,
+  pub header_title: Cow<'static, str>,
+  pub header_title_font_family: &'static str,
   pub header_title_color: Color,
   pub close_icon: u16,
-  pub close_label: String,
+  pub close_label: Cow<'static, str>,
+  pub close_label_font_family: &'static str,
   pub ok_icon: u16,
-  pub ok_label: String,
+  pub ok_label: Cow<'static, str>,
+  pub ok_label_font_family: &'static str,
   pub has_ok: bool,
   pub on_close: Arc<Mutex<dyn FnMut() + 'a + Send>>,
   pub on_ok: Arc<Mutex<dyn FnMut() + 'a + Send>>,
@@ -44,18 +48,21 @@ pub struct Dialog<'a> {
 }
 
 impl Debug for Dialog<'_> {
-  fn fmt(&self, fmt: &mut fmt::Formatter<'_>) -> fmt::Result {
+  fn fmt(&self, fmt: &mut Formatter<'_>) -> fmt::Result {
     fmt
       .debug_struct("Dialog")
       .field("color", &self.color)
       .field("header_icon", &self.header_icon)
       .field("header_icon_color", &self.header_icon_color)
       .field("header_title", &self.header_title)
+      .field("header_title_font_family", &self.header_title_font_family)
       .field("header_title_color", &self.header_title_color)
       .field("close_icon", &self.close_icon)
       .field("close_label", &self.close_label)
+      .field("close_label_font_family", &self.close_label_font_family)
       .field("ok_icon", &self.ok_icon)
       .field("ok_label", &self.ok_label)
+      .field("ok_label_font_family", &self.ok_label_font_family)
       .field("has_ok", &self.has_ok)
       .field("body", &self.body)
       .finish_non_exhaustive()
@@ -68,13 +75,16 @@ impl Default for Dialog<'_> {
       color: Color::BLACK,
       header_icon: 0,
       header_icon_color: Color::BLACK,
-      header_title: "".to_string(),
+      header_title: Cow::Borrowed(""),
+      header_title_font_family: "Arial",
       header_title_color: Color::BLACK,
       body: None,
       close_icon: icon_name::CLOSE,
-      close_label: "Close".to_string(),
+      close_label: Cow::Borrowed("Close"),
+      close_label_font_family: "Arial",
       ok_icon: icon_name::CHECK,
-      ok_label: "OK".to_string(),
+      ok_label: Cow::Borrowed("OK"),
+      ok_label_font_family: "Arial",
       has_ok: false,
       on_close: Arc::new(Mutex::new(|| {})),
       on_ok: Arc::new(Mutex::new(|| {})),
@@ -89,11 +99,14 @@ impl<'a> StatefulWidget<'a> for Dialog<'a> {
       header_icon: self.header_icon,
       header_icon_color: self.header_icon_color,
       header_title: self.header_title.to_string(),
+      header_title_font_family: self.header_title_font_family,
       header_title_color: self.header_title_color,
       close_icon: self.close_icon,
       close_label: self.close_label.to_string(),
+      close_label_font_family: self.close_label_font_family,
       ok_icon: self.ok_icon,
       ok_label: self.ok_label.to_string(),
+      ok_label_font_family: self.ok_label_font_family,
       has_ok: self.has_ok,
       on_close: Arc::clone(&self.on_close),
       on_ok: Arc::clone(&self.on_ok),
@@ -116,11 +129,14 @@ struct DialogState<'a> {
   header_icon: u16,
   header_icon_color: Color,
   header_title: String,
+  header_title_font_family: &'static str,
   header_title_color: Color,
   close_icon: u16,
   close_label: String,
+  close_label_font_family: &'static str,
   ok_icon: u16,
   ok_label: String,
+  ok_label_font_family: &'static str,
   has_ok: bool,
   on_close: Arc<Mutex<dyn FnMut() + 'a + Send>>,
   on_ok: Arc<Mutex<dyn FnMut() + 'a + Send>>,
@@ -137,11 +153,14 @@ impl Debug for DialogState<'_> {
       .field("header_icon", &self.header_icon)
       .field("header_icon_color", &self.header_icon_color)
       .field("header_title", &self.header_title)
+      .field("header_title_font_family", &self.header_title_font_family)
       .field("header_title_color", &self.header_title_color)
       .field("close_icon", &self.close_icon)
       .field("close_label", &self.close_label)
+      .field("close_label_font_family", &self.close_label_font_family)
       .field("ok_icon", &self.ok_icon)
       .field("ok_label", &self.ok_label)
+      .field("ok_label_font_family", &self.ok_label_font_family)
       .field("has_ok", &self.has_ok)
       .field("body", &self.body)
       .field("animation_sm", &self.animation_sm)
@@ -228,11 +247,14 @@ impl<'a> State<'a> for DialogState<'a> {
               header_icon: self.header_icon,
               header_icon_color: self.header_icon_color,
               header_title: self.header_title.to_string(),
+              header_title_font_family: self.header_title_font_family,
               header_title_color: self.header_title_color,
               close_icon: self.close_icon,
               close_label: self.close_label.to_string(),
+              close_label_font_family: self.close_label_font_family,
               ok_icon: self.ok_icon,
               ok_label: self.ok_label.to_string(),
+              ok_label_font_family: self.ok_label_font_family,
               has_ok: self.has_ok,
               on_close: Arc::clone(&self.on_close),
               on_ok: Arc::clone(&self.on_ok),
@@ -297,7 +319,9 @@ impl DialogAnimationSM {
           self.scale = Animation::new(0.95, 1.0, 0.0625);
           self.state = DialogAnimationState::ScaleUp;
         }
-        DialogAnimationState::Wait => panic!("Animating while in Wait state which is unexpected"),
+        DialogAnimationState::Wait => {
+          unreachable!("Animating while in Wait state which is unexpected");
+        }
       }
     }
 
@@ -320,11 +344,14 @@ struct DialogInner<'a> {
   header_icon: u16,
   header_icon_color: Color,
   header_title: String,
+  header_title_font_family: &'static str,
   header_title_color: Color,
   close_icon: u16,
   close_label: String,
+  close_label_font_family: &'static str,
   ok_icon: u16,
   ok_label: String,
+  ok_label_font_family: &'static str,
   has_ok: bool,
   on_close: Arc<Mutex<dyn FnMut() + 'a + Send>>,
   on_ok: Arc<Mutex<dyn FnMut() + 'a + Send>>,
@@ -340,11 +367,14 @@ impl Debug for DialogInner<'_> {
       .field("header_icon", &self.header_icon)
       .field("header_icon_color", &self.header_icon_color)
       .field("header_title", &self.header_title)
+      .field("header_title_font_family", &self.header_title_font_family)
       .field("header_title_color", &self.header_title_color)
       .field("close_icon", &self.close_icon)
       .field("close_label", &self.close_label)
+      .field("close_label_font_family", &self.close_label_font_family)
       .field("ok_icon", &self.ok_icon)
       .field("ok_label", &self.ok_label)
+      .field("ok_label_font_family", &self.ok_label_font_family)
       .field("has_ok", &self.has_ok)
       .field("body", &self.body)
       .field("scale", &self.scale)
@@ -411,12 +441,13 @@ impl<'a> StatelessWidget<'a> for DialogInner<'a> {
           None
         } else {
           Some(StackChild {
-            position: POSITION.with(|position| (position.0 + 88.0, position.1 + 32.0)),
+            position: POSITION.with(|position| (position.0 + 88.0, position.1 + 44.0)),
             size: (0.0, 0.0),
-            origin: Origin::TopLeft,
+            origin: Origin::Left,
             child: Some(
               Text::new()
-                .text(&self.header_title)
+                .text(self.header_title.to_string())
+                .font_family(self.header_title_font_family)
                 .font_style(FontStyle::new(
                   Weight::SEMI_BOLD,
                   Width::NORMAL,
@@ -453,8 +484,8 @@ impl<'a> StatelessWidget<'a> for DialogInner<'a> {
             Button {
               bg_color: Color::RED,
               icon: self.close_icon,
-              label: self.close_label.to_string(),
-              child_align: VerticalAlign::Bottom,
+              label: Cow::Owned(self.close_label.to_string()),
+              label_font_family: self.close_label_font_family,
               on_mouse_up: Arc::clone(&self.on_close),
               ..Default::default()
             }
@@ -473,8 +504,8 @@ impl<'a> StatelessWidget<'a> for DialogInner<'a> {
               Button {
                 bg_color: Color::from_rgb(0, 128, 0),
                 icon: self.ok_icon,
-                label: self.ok_label.to_string(),
-                child_align: VerticalAlign::Bottom,
+                label: Cow::Owned(self.ok_label.to_string()),
+                label_font_family: self.ok_label_font_family,
                 on_mouse_up: Arc::clone(&self.on_ok),
                 ..Default::default()
               }

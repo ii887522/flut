@@ -68,7 +68,9 @@ impl ShakeAnimationSM {
             self.state = ShakeAnimationState::Move { count: count + 1 };
           }
         }
-        ShakeAnimationState::Start => panic!("Animating while in Start state which is unexpected"),
+        ShakeAnimationState::Start => {
+          unreachable!("Animating while in Start state which is unexpected");
+        }
       }
     }
 

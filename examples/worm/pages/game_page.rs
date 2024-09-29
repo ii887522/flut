@@ -1,9 +1,12 @@
-use crate::models::{Direction, GameCell, WormCell};
+use crate::{
+  i18n::I18N,
+  models::{Direction, GameCell, WormCell},
+};
 use flut::{
   boot::context,
   collections::U16SparseSet,
   helpers::{AnimationCount, Clock, ShakeAnimationSM},
-  models::{icon_name, AudioTask, HorizontalAlign},
+  models::{icon_name, AudioTask, HorizontalAlign, Value},
   widgets::{
     router::Navigator, stateful_widget::State, widget::*, Column, Dialog, Grid, RectWidget,
     Spacing, StatefulWidget, Text, Translation, Widget,
@@ -22,11 +25,11 @@ const COL_COUNT: u16 = 41;
 const ROW_COUNT: u16 = 41;
 
 #[derive(Debug)]
-pub(crate) struct GamePage {
-  pub(crate) navigator: Arc<Mutex<Navigator>>,
+pub(crate) struct GamePage<'a> {
+  pub(crate) navigator: Arc<Mutex<Navigator<'a>>>,
 }
 
-impl<'a> StatefulWidget<'a> for GamePage {
+impl<'a> StatefulWidget<'a> for GamePage<'a> {
   fn new_state(&mut self) -> Box<dyn State<'a> + 'a> {
     context::AUDIO_TX.with(|audio_tx| {
       if let Some(audio_tx) = audio_tx.get() {
@@ -55,9 +58,9 @@ struct GamePageStateInner {
 }
 
 #[derive(Debug, Default)]
-struct GamePageState {
+struct GamePageState<'a> {
   clock: Clock,
-  navigator: Arc<Mutex<Navigator>>,
+  navigator: Arc<Mutex<Navigator<'a>>>,
   inner: Arc<RwLock<GamePageStateInner>>,
 }
 
@@ -192,7 +195,7 @@ impl GamePageStateInner {
   }
 }
 
-impl<'a> State<'a> for GamePageState {
+impl<'a> State<'a> for GamePageState<'a> {
   fn process_event(&mut self, event: &Event) -> bool {
     let mut state = self.inner.write().unwrap();
 
@@ -322,15 +325,18 @@ impl<'a> State<'a> for GamePageState {
               Dialog {
                 color: Color::from_rgb(255, 128, 128),
                 header_icon: icon_name::SKULL,
-                header_title: "You Died...".to_string(),
+                header_title: I18N.with(|i18n| i18n.t("you_died").call()),
+                header_title_font_family: I18N.with(|i18n| i18n.get_default_font_family()),
                 has_ok: true,
                 close_icon: icon_name::SENTIMENT_DISSATISFIED,
-                close_label: "Give Up".to_string(),
+                close_label: I18N.with(|i18n| i18n.t("give_up").call()),
+                close_label_font_family: I18N.with(|i18n| i18n.get_default_font_family()),
                 ok_icon: icon_name::RESTART_ALT,
-                ok_label: "Try Again".to_string(),
+                ok_label: I18N.with(|i18n| i18n.t("try_again").call()),
+                ok_label_font_family: I18N.with(|i18n| i18n.get_default_font_family()),
                 on_close: Arc::new(Mutex::new(move || {
                   let mut navigator = navigator.lock().unwrap();
-                  navigator.go("/".to_string());
+                  navigator.go("/");
                 })),
                 on_ok: Arc::new(Mutex::new(move || {
                   // Restart the game
@@ -339,10 +345,13 @@ impl<'a> State<'a> for GamePageState {
                 })),
                 body: Some(
                   Text::new()
-                    .text(format!(
-                      "You ate {score} green apple{}. Want to try again?",
-                      if score != 1 { "s" } else { "" },
-                    ))
+                    .text(I18N.with(|i18n| {
+                      i18n
+                        .t("you_died_desc")
+                        .message_args([("score", Value::Uint(score as _))].as_slice())
+                        .call()
+                    }))
+                    .font_family(I18N.with(|i18n| i18n.get_default_font_family()))
                     .font_size(24.0)
                     .call()
                     .into_widget(),

@@ -10,14 +10,14 @@ use std::{
 
 #[derive(Debug)]
 pub struct Router<'a> {
-  navigator: Arc<Mutex<Navigator>>,
-  children: HashMap<String, Widget<'a>>,
+  navigator: Arc<Mutex<Navigator<'a>>>,
+  children: HashMap<&'a str, Widget<'a>>,
 }
 
 impl<'a> Router<'a> {
   pub fn new(
-    initial_route: String,
-    children: impl Fn(Arc<Mutex<Navigator>>) -> HashMap<String, Widget<'a>> + 'a + Send,
+    initial_route: &'a str,
+    children: impl Fn(Arc<Mutex<Navigator<'a>>>) -> HashMap<&str, Widget<'a>> + 'a + Send,
   ) -> Self {
     let navigator = Arc::new(Mutex::new(Navigator::new(initial_route)));
 
@@ -39,8 +39,8 @@ impl<'a> StatefulWidget<'a> for Router<'a> {
 
 #[derive(Debug)]
 struct RouterState<'a> {
-  navigator: Arc<Mutex<Navigator>>,
-  children: HashMap<String, Widget<'a>>,
+  navigator: Arc<Mutex<Navigator<'a>>>,
+  children: HashMap<&'a str, Widget<'a>>,
 }
 
 impl<'a> State<'a> for RouterState<'a> {
@@ -62,20 +62,20 @@ impl<'a> State<'a> for RouterState<'a> {
 }
 
 #[derive(Debug, Default, Hash, PartialEq, Eq, PartialOrd, Ord)]
-pub struct Navigator {
-  current_route: String,
+pub struct Navigator<'a> {
+  current_route: &'a str,
   animation_count: AnimationCount,
 }
 
-impl Navigator {
-  const fn new(initial_route: String) -> Self {
+impl<'a> Navigator<'a> {
+  const fn new(initial_route: &'a str) -> Self {
     Self {
       current_route: initial_route,
       animation_count: AnimationCount::new(),
     }
   }
 
-  pub fn go(&mut self, route: String) {
+  pub fn go(&mut self, route: &'a str) {
     self.current_route = route;
 
     // To wake up router state to trigger rebuild

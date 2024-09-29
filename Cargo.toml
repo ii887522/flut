@@ -31,11 +31,17 @@ flut_codegen = { path = "flut_codegen" }
 gl = { version = "0.14", default-features = false }
 optarg2chain = { version = "0.1", default-features = false }
 rayon = { version = "1.10", default-features = false }
+sys-locale = { version = "0.3.1", default-features = false }
 
 [dependencies.rand]
 version = "0.8"
 default-features = false
 features = ["std", "std_rng"]
+
+[dependencies.regex]
+version = "1.10"
+default-features = false
+features = ["std", "perf", "unicode-perl"]
 
 [dependencies.sdl2]
 version = "0.37"

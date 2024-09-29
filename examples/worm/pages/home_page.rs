@@ -1,3 +1,4 @@
+use crate::i18n::I18N;
 use flut::{
   models::{icon_name, HorizontalAlign, VerticalAlign},
   widgets::{
@@ -12,11 +13,11 @@ use std::{
 };
 
 #[derive(Debug)]
-pub(crate) struct HomePage {
-  pub(crate) navigator: Arc<Mutex<Navigator>>,
+pub(crate) struct HomePage<'a> {
+  pub(crate) navigator: Arc<Mutex<Navigator<'a>>>,
 }
 
-impl<'a> StatelessWidget<'a> for HomePage {
+impl<'a> StatelessWidget<'a> for HomePage<'a> {
   fn build(&mut self, _constraint: Rect) -> Widget<'a> {
     let navigator = Arc::clone(&self.navigator);
 
@@ -41,7 +42,8 @@ impl<'a> StatelessWidget<'a> for HomePage {
             }
             .into_widget(),
             Text::new()
-              .text("Worm".to_string())
+              .text(I18N.with(|i18n| i18n.t("worm").call()))
+              .font_family(I18N.with(|i18n| i18n.get_default_font_family()))
               .color(Color::from_rgb(243, 125, 121))
               .font_size(64.0)
               .call()
@@ -57,11 +59,12 @@ impl<'a> StatelessWidget<'a> for HomePage {
         Button {
           bg_color: Color::GREEN,
           icon: icon_name::PLAY_ARROW,
-          label: "Start Game".to_string(),
+          label: I18N.with(|i18n| i18n.t("start_game").call()),
+          label_font_family: I18N.with(|i18n| i18n.get_default_font_family()),
           size: (256.0, 64.0),
           on_mouse_up: Arc::new(Mutex::new(move || {
             let mut navigator = navigator.lock().unwrap();
-            navigator.go("/game".to_string());
+            navigator.go("/game");
           })),
           ..Default::default()
         }
@@ -74,7 +77,8 @@ impl<'a> StatelessWidget<'a> for HomePage {
         Button {
           bg_color: Color::RED,
           icon: icon_name::LOGOUT,
-          label: "Exit Game".to_string(),
+          label: I18N.with(|i18n| i18n.t("exit_game").call()),
+          label_font_family: I18N.with(|i18n| i18n.get_default_font_family()),
           size: (256.0, 64.0),
           on_mouse_up: Arc::new(Mutex::new(|| process::exit(0))),
           ..Default::default()
