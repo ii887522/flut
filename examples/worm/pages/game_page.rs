@@ -348,7 +348,7 @@ impl<'a> State<'a> for GamePageState<'a> {
                     .text(I18N.with(|i18n| {
                       i18n
                         .t("you_died_desc")
-                        .message_args([("score", Value::Uint(score as _))].as_slice())
+                        .message_args(&[("score", Value::Uint(score as _))][..])
                         .call()
                     }))
                     .font_family(I18N.with(|i18n| i18n.get_default_font_family()))
