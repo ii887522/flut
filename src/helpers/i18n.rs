@@ -1,4 +1,4 @@
-use crate::models::{Locale, Value};
+use crate::models::{Lang, Value};
 use optarg2chain::optarg_impl;
 use regex::{Captures, Regex};
 use std::{borrow::Cow, collections::HashMap};
@@ -6,20 +6,20 @@ use std::{borrow::Cow, collections::HashMap};
 #[derive(Debug)]
 pub struct I18n {
   placeholder_regex: Regex,
-  current_locale: Locale,
-  messages: HashMap<Locale, HashMap<&'static str, &'static str>>,
+  current_lang: Lang,
+  messages: HashMap<Lang, HashMap<&'static str, &'static str>>,
 }
 
 #[optarg_impl]
 impl I18n {
   #[optarg_method(I18nNewBuilder, call)]
   pub fn new(
-    #[optarg_default] current_locale: Option<Locale>,
-    messages: HashMap<Locale, HashMap<&'static str, &'static str>>,
+    #[optarg_default] current_lang: Option<Lang>,
+    messages: HashMap<Lang, HashMap<&'static str, &'static str>>,
   ) -> Self {
     let placeholder_regex = Regex::new(r"(\{\w+\})|(\{\w+:\w+\|\w+\})").unwrap();
 
-    let current_locale = current_locale.unwrap_or_else(|| {
+    let current_lang = current_lang.unwrap_or_else(|| {
       sys_locale::get_locale()
         .unwrap_or("en-US".to_string())
         .into()
@@ -27,13 +27,13 @@ impl I18n {
 
     Self {
       placeholder_regex,
-      current_locale,
+      current_lang,
       messages,
     }
   }
 
   pub const fn get_default_font_family(&self) -> &'static str {
-    self.current_locale.get_default_font_family()
+    self.current_lang.get_default_font_family()
   }
 
   #[optarg_method(I18nTBuilder, call)]
@@ -48,7 +48,7 @@ impl I18n {
       .collect::<HashMap<_, _>>();
 
     self.placeholder_regex.replace_all(
-      self.messages[&self.current_locale][message_key],
+      self.messages[&self.current_lang][message_key],
       |captures: &Captures<'_>| {
         if let Some(pluralization_placeholder) = captures.get(2) {
           let placeholder = pluralization_placeholder.as_str();

@@ -1,7 +1,7 @@
 use super::PainterWidget;
 use crate::{
   boot::context,
-  models::{Locale, Origin},
+  models::{Lang, Origin},
 };
 use optarg2chain::optarg_impl;
 use skia_safe::{font::Edging, Canvas, Color, Font, FontStyle, Paint, Point, Rect};
@@ -80,7 +80,7 @@ impl PainterWidget for Text {
     //     .set_color(Color::MAGENTA),
     // );
 
-    let y_offset = match Locale::from_font_family(self.font_family).get_text_origin() {
+    let y_offset = match Lang::from_font_family(self.font_family).get_text_origin() {
       Origin::TopLeft => 0.0,
       Origin::Left => (self.bound.height() - self.font.size() * 0.75) * 0.5,
       origin => unreachable!("{origin:?} not yet supported in Text::draw() implementation"),
