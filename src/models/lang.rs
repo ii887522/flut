@@ -12,6 +12,15 @@ pub enum Lang {
 
 impl Lang {
   pub fn from_font_family(font_family: &str) -> Self {
+    #[cfg(target_os = "macos")]
+    match font_family {
+      "Arial" => Lang::En,
+      "Heiti SC" => Lang::ZhCn,
+      "Heiti TC" => Lang::ZhTw,
+      _ => Lang::En,
+    }
+
+    #[cfg(not(target_os = "macos"))]
     match font_family {
       "Arial" => Lang::En,
       "SimHei" => Lang::ZhCn,
@@ -20,6 +29,14 @@ impl Lang {
   }
 
   pub const fn get_default_font_family(&self) -> &'static str {
+    #[cfg(target_os = "macos")]
+    match self {
+      Lang::En | Lang::Id => "Arial",
+      Lang::ZhCn => "Heiti SC",
+      Lang::ZhTw => "Heiti TC",
+    }
+
+    #[cfg(not(target_os = "macos"))]
     match self {
       Lang::En | Lang::Id => "Arial",
       Lang::ZhCn | Lang::ZhTw => "SimHei",
