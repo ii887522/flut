@@ -29,6 +29,8 @@ pub struct Button<'a> {
   pub label_color: Color,
   pub size: (f32, f32),
   pub child_align: VerticalAlign,
+  pub is_cursor_fixed: bool,
+  pub has_effect: bool,
   pub on_mouse_over: Arc<Mutex<dyn FnMut() + 'a + Send>>,
   pub on_mouse_out: Arc<Mutex<dyn FnMut() + 'a + Send>>,
   pub on_mouse_down: Arc<Mutex<dyn FnMut() + 'a + Send>>,
@@ -49,6 +51,8 @@ impl Debug for Button<'_> {
       .field("label_color", &self.label_color)
       .field("size", &self.size)
       .field("child_align", &self.child_align)
+      .field("is_cursor_fixed", &self.is_cursor_fixed)
+      .field("has_effect", &self.has_effect)
       .finish_non_exhaustive()
   }
 }
@@ -66,6 +70,8 @@ impl Default for Button<'_> {
       label_color: Color::BLACK,
       size: (-1.0, -1.0),
       child_align: VerticalAlign::Middle,
+      is_cursor_fixed: false,
+      has_effect: true,
       on_mouse_over: Arc::new(Mutex::new(|| {})),
       on_mouse_out: Arc::new(Mutex::new(|| {})),
       on_mouse_down: Arc::new(Mutex::new(|| {})),
@@ -91,6 +97,8 @@ impl<'a> StatefulWidget<'a> for Button<'a> {
       label_font_family: self.label_font_family,
       label_color: self.label_color,
       child_align: self.child_align,
+      is_cursor_fixed: self.is_cursor_fixed,
+      has_effect: self.has_effect,
       on_mouse_over: Arc::clone(&self.on_mouse_over),
       on_mouse_out: Arc::clone(&self.on_mouse_out),
       on_mouse_down: Arc::clone(&self.on_mouse_down),
@@ -112,6 +120,8 @@ struct ButtonState<'a> {
   label_font_family: &'static str,
   label_color: Color,
   child_align: VerticalAlign,
+  is_cursor_fixed: bool,
+  has_effect: bool,
   on_mouse_over: Arc<Mutex<dyn FnMut() + 'a + Send>>,
   on_mouse_out: Arc<Mutex<dyn FnMut() + 'a + Send>>,
   on_mouse_down: Arc<Mutex<dyn FnMut() + 'a + Send>>,
@@ -134,6 +144,8 @@ impl Debug for ButtonState<'_> {
       .field("label_font_family", &self.label_font_family)
       .field("label_color", &self.label_color)
       .field("child_align", &self.child_align)
+      .field("is_cursor_fixed", &self.is_cursor_fixed)
+      .field("has_effect", &self.has_effect)
       .field("animation_sm", &self.animation_sm)
       .field("mouse_down_position", &self.mouse_down_position)
       .finish_non_exhaustive()
@@ -142,15 +154,24 @@ impl Debug for ButtonState<'_> {
 
 impl<'a> State<'a> for ButtonState<'_> {
   fn on_mouse_over(&mut self, _mouse_position: (f32, f32)) -> bool {
-    context::HAND_CURSOR.with(|hand_cursor| hand_cursor.set());
+    if !self.is_cursor_fixed {
+      context::HAND_CURSOR.with(|hand_cursor| hand_cursor.set());
+    }
+
     self.on_mouse_over.lock().unwrap()();
     true
   }
 
   fn on_mouse_out(&mut self, _mouse_position: (f32, f32)) -> bool {
-    context::ARROW_CURSOR.with(|arrow_cursor| arrow_cursor.set());
+    if !self.is_cursor_fixed {
+      context::ARROW_CURSOR.with(|arrow_cursor| arrow_cursor.set());
+    }
+
+    if self.has_effect {
+      self.animation_sm.fade_out();
+    }
+
     self.is_elevated = self.req_is_elevated;
-    self.animation_sm.fade_out();
     self.on_mouse_out.lock().unwrap()();
     true
   }
@@ -160,9 +181,12 @@ impl<'a> State<'a> for ButtonState<'_> {
       return true;
     }
 
+    if self.has_effect {
+      self.animation_sm.ripple();
+    }
+
     self.is_elevated = false;
     self.mouse_down_position = mouse_position;
-    self.animation_sm.ripple();
     self.on_mouse_down.lock().unwrap()();
     true
   }
@@ -172,14 +196,21 @@ impl<'a> State<'a> for ButtonState<'_> {
       return true;
     }
 
+    if self.has_effect {
+      self.animation_sm.fade_out();
+    }
+
     self.is_elevated = self.req_is_elevated;
-    self.animation_sm.fade_out();
     self.on_mouse_up.lock().unwrap()();
     true
   }
 
   fn update(&mut self, dt: f32) -> bool {
-    self.animation_sm.update(dt)
+    if self.has_effect {
+      return self.animation_sm.update(dt);
+    }
+
+    false
   }
 
   fn build(&mut self, constraint: Rect) -> Widget<'a> {
@@ -187,7 +218,7 @@ impl<'a> State<'a> for ButtonState<'_> {
 
     Stack {
       children: vec![
-        StackChild {
+        Some(StackChild {
           position: (constraint.x(), constraint.y()),
           size: (constraint.width(), constraint.height()),
           origin: Origin::TopLeft,
@@ -199,75 +230,83 @@ impl<'a> State<'a> for ButtonState<'_> {
             }
             .into_widget(),
           ),
-        },
-        StackChild {
-          position: (
-            constraint.x() + constraint.width() * 0.5,
-            constraint.y() + constraint.height() * 0.5,
-          ),
-          size: (0.0, 0.0),
-          origin: Origin::Center,
-          child: Some(
-            Row::new()
-              .align(self.child_align)
-              .children(
-                vec![
-                  if self.icon == 0 {
-                    None
-                  } else {
-                    Some(
-                      Icon::new(self.icon)
-                        .size(40.0)
-                        .color(self.icon_color)
-                        .call()
+        }),
+        if self.icon == 0 && self.label.is_empty() {
+          None
+        } else {
+          Some(StackChild {
+            position: (
+              constraint.x() + constraint.width() * 0.5,
+              constraint.y() + constraint.height() * 0.5,
+            ),
+            size: (0.0, 0.0),
+            origin: Origin::Center,
+            child: Some(
+              Row::new()
+                .align(self.child_align)
+                .children(
+                  vec![
+                    if self.icon == 0 {
+                      None
+                    } else {
+                      Some(
+                        Icon::new(self.icon)
+                          .size(40.0)
+                          .color(self.icon_color)
+                          .call()
+                          .into_widget(),
+                      )
+                    },
+                    if self.icon == 0 || self.label.is_empty() {
+                      None
+                    } else {
+                      Some(
+                        Spacing {
+                          width: 16.0,
+                          ..Default::default()
+                        }
                         .into_widget(),
-                    )
-                  },
-                  if self.icon == 0 || self.label.is_empty() {
-                    None
-                  } else {
-                    Some(
-                      Spacing {
-                        width: 16.0,
-                        ..Default::default()
-                      }
-                      .into_widget(),
-                    )
-                  },
-                  if self.label.is_empty() {
-                    None
-                  } else {
-                    Some(
-                      Text::new()
-                        .text(self.label.to_string())
-                        .font_family(self.label_font_family)
-                        .font_size(28.0)
-                        .font_style(FontStyle::new(
-                          Weight::SEMI_BOLD,
-                          Width::NORMAL,
-                          Slant::Upright,
-                        ))
-                        .color(self.label_color)
-                        .call()
-                        .into_widget(),
-                    )
-                  },
-                ]
-                .into_iter()
-                .flatten()
-                .collect::<Vec<_>>(),
-              )
-              .call()
-              .into_widget(),
-          ),
+                      )
+                    },
+                    if self.label.is_empty() {
+                      None
+                    } else {
+                      Some(
+                        Text::new()
+                          .text(self.label.to_string())
+                          .font_family(self.label_font_family)
+                          .font_size(28.0)
+                          .font_style(FontStyle::new(
+                            Weight::SEMI_BOLD,
+                            Width::NORMAL,
+                            Slant::Upright,
+                          ))
+                          .color(self.label_color)
+                          .call()
+                          .into_widget(),
+                      )
+                    },
+                  ]
+                  .into_iter()
+                  .flatten()
+                  .collect::<Vec<_>>(),
+                )
+                .call()
+                .into_widget(),
+            ),
+          })
         },
-      ],
+      ]
+      .into_iter()
+      .flatten()
+      .collect::<Vec<_>>(),
     }
     .into()
   }
 
   fn post_draw(&self, canvas: &Canvas, constraint: Rect) {
-    if self.animation_sm.ripple_radius.get_now() <= 0.0
+    if !self.has_effect
+      || self.animation_sm.ripple_radius.get_now() <= 0.0
       || self.animation_sm.ripple_alpha.get_now() <= 0.0
     {
       return;
