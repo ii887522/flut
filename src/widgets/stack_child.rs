@@ -33,7 +33,7 @@ impl StackChild<'_> {
     if let Some(child) = &self.child {
       let child_size = child.get_size();
 
-      (
+      return (
         if child_size.0 >= 0.0 {
           child_size.0
         } else {
@@ -44,9 +44,9 @@ impl StackChild<'_> {
         } else {
           self.size.1
         },
-      )
-    } else {
-      self.size
+      );
     }
+
+    self.size
   }
 }

@@ -15,6 +15,7 @@ use std::collections::HashMap;
 
 fn main() {
   app::run(App {
+    favicon_file_path: "assets/worm/images/favicon.png",
     title: &I18N.with(|i18n| i18n.t("avoid_the_bomb").call()),
     size: (660, 660),
     use_audio: false,

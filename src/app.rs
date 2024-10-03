@@ -30,6 +30,7 @@ use std::{
 
 #[derive(Debug)]
 pub struct App<'a> {
+  pub favicon_file_path: &'a str,
   pub title: &'a str,
   pub size: (u32, u32),
   pub use_audio: bool,
@@ -39,6 +40,7 @@ pub struct App<'a> {
 impl Default for App<'_> {
   fn default() -> Self {
     Self {
+      favicon_file_path: "",
       title: "",
       size: (800, 600),
       use_audio: true,
@@ -100,7 +102,7 @@ pub fn run(app: App<'_>) {
     .build()
     .unwrap();
 
-  if let Ok(favicon) = Surface::from_file("assets/images/favicon.png") {
+  if let Ok(favicon) = Surface::from_file(app.favicon_file_path) {
     window.set_icon(favicon);
   }
 

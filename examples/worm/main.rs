@@ -16,6 +16,7 @@ use std::{collections::HashMap, sync::Arc};
 
 fn main() {
   app::run(App {
+    favicon_file_path: "assets/worm/images/favicon.png",
     title: &I18N.with(|i18n| i18n.t("worm").call()),
     size: (660, 720),
     use_audio: true,

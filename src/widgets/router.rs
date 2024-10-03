@@ -48,11 +48,11 @@ impl<'a> State<'a> for RouterState<'a> {
     let mut navigator = self.navigator.lock().unwrap();
 
     if *navigator.animation_count == 0 {
-      false
-    } else {
-      navigator.animation_count = AnimationCount::new();
-      true
+      return false;
     }
+
+    navigator.animation_count = AnimationCount::new();
+    true
   }
 
   fn build(&mut self, _constraint: Rect) -> Widget<'a> {

@@ -32,7 +32,7 @@ impl<'a> StatelessWidget<'a> for HomePage<'a> {
         Row::new()
           .align(VerticalAlign::Middle)
           .children(vec![
-            ImageWidget::new("assets/images/favicon.png")
+            ImageWidget::new("assets/worm/images/favicon.png")
               .size((64.0, 64.0))
               .call()
               .into_widget(),
