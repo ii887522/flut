@@ -15,11 +15,11 @@ impl Clock {
   pub fn update(&mut self, dt: f32) -> bool {
     self.accumulator += dt;
 
-    if self.accumulator >= 1.0 / self.tps {
-      self.accumulator -= 1.0 / self.tps;
-      return true;
+    if self.accumulator < 1.0 / self.tps {
+      return false;
     }
 
-    false
+    self.accumulator -= 1.0 / self.tps;
+    true
   }
 }

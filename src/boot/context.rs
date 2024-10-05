@@ -6,10 +6,13 @@ use std::{
   cell::{OnceCell, RefCell},
   collections::HashMap,
   fs,
-  sync::mpsc::Sender,
+  sync::{mpsc::Sender, LazyLock, RwLock},
 };
 
 pub static DRAWABLE_SIZE: (AtomicF32, AtomicF32) = (AtomicF32::new(0.0), AtomicF32::new(0.0));
+
+pub static IMAGES: LazyLock<RwLock<HashMap<&'static str, Image>>> =
+  LazyLock::new(|| RwLock::new(HashMap::new()));
 
 thread_local! {
   pub static AUDIO_TX: OnceCell<Sender<AudioTask<'static>>> = const { OnceCell::new() };
@@ -25,7 +28,4 @@ thread_local! {
   // Mouse cursors
   pub static ARROW_CURSOR: Cursor = Cursor::from_system(SystemCursor::Arrow).unwrap();
   pub static HAND_CURSOR: Cursor = Cursor::from_system(SystemCursor::Hand).unwrap();
-
-  // Images
-  pub static IMAGES: RefCell<HashMap<&'static str, Image>> = RefCell::new(HashMap::new());
 }

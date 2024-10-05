@@ -276,47 +276,49 @@ impl WidgetTree<'_> {
           .as_mut()
           .unwrap();
 
-        if let Buildable::Stateful(state) = &mut buildable_node.buildable {
-          if !state.update(dt) {
-            // Widget state not changed, thus can be reused
-            continue;
-          }
+        let Buildable::Stateful(state) = &mut buildable_node.buildable else {
+          continue;
+        };
 
-          // Widget state changed, need to rebuild
-          widget_node.widget = state.build(widget_node.constraint);
-          let mut child_indices = widget_node.child_indices.par_drain(..).collect::<Vec<_>>();
-
-          let mut buildable_indices = widget_node
-            .buildable_indices
-            .par_drain(index + 1..)
-            .collect::<Vec<_>>();
-
-          while let Some(child_index) = child_indices.pop() {
-            let widget_node = self.widget_nodes[child_index as usize].take().unwrap();
-            self.empty_widget_node_indices.push(child_index);
-            child_indices.par_extend(widget_node.child_indices);
-            buildable_indices.par_extend(widget_node.buildable_indices);
-          }
-
-          self
-            .empty_buildable_node_indices
-            .reserve(buildable_indices.len());
-
-          for buildable_index in buildable_indices {
-            let mut buildable_node = self.buildable_nodes[buildable_index as usize]
-              .take()
-              .unwrap();
-
-            // This widget will be removed and if mouse cursor still hover on this, it is considered as cursor leaving
-            // this widget (mouse_out)
-            buildable_node.on_mouse_out(event_pump, self.app_size);
-
-            self.empty_buildable_node_indices.push(buildable_index);
-          }
-
-          is_widget_rebuilt = true;
-          break;
+        if !state.update(dt) {
+          // Widget state not changed, thus can be reused
+          continue;
         }
+
+        // Widget state changed, need to rebuild
+        widget_node.widget = state.build(widget_node.constraint);
+        let mut child_indices = widget_node.child_indices.par_drain(..).collect::<Vec<_>>();
+
+        let mut buildable_indices = widget_node
+          .buildable_indices
+          .par_drain(index + 1..)
+          .collect::<Vec<_>>();
+
+        while let Some(child_index) = child_indices.pop() {
+          let widget_node = self.widget_nodes[child_index as usize].take().unwrap();
+          self.empty_widget_node_indices.push(child_index);
+          child_indices.par_extend(widget_node.child_indices);
+          buildable_indices.par_extend(widget_node.buildable_indices);
+        }
+
+        self
+          .empty_buildable_node_indices
+          .reserve(buildable_indices.len());
+
+        for buildable_index in buildable_indices {
+          let mut buildable_node = self.buildable_nodes[buildable_index as usize]
+            .take()
+            .unwrap();
+
+          // This widget will be removed and if mouse cursor still hover on this, it is considered as cursor leaving
+          // this widget (mouse_out)
+          buildable_node.on_mouse_out(event_pump, self.app_size);
+
+          self.empty_buildable_node_indices.push(buildable_index);
+        }
+
+        is_widget_rebuilt = true;
+        break;
       }
 
       if !is_widget_rebuilt {
@@ -367,12 +369,15 @@ impl WidgetTree<'_> {
 
       match &widget_node.widget {
         Widget::Stack(_) => {
-          if let Some(&last_child_index) = widget_node.child_indices.last() {
-            last_child_to_parent.insert(last_child_index, widget_node_index);
+          let Some(&last_child_index) = widget_node.child_indices.last() else {
+            // Skip the below post_draw() code as there are still more stack_child children yet to be drawn
+            continue;
+          };
 
-            // Traverse the expanded widget tree in depth-first order
-            widget_node_index_lifo_q.par_extend(widget_node.child_indices.par_iter().rev());
-          }
+          last_child_to_parent.insert(last_child_index, widget_node_index);
+
+          // Traverse the expanded widget tree in depth-first order
+          widget_node_index_lifo_q.par_extend(widget_node.child_indices.par_iter().rev());
 
           // Skip the below post_draw() code as there are still more stack_child children yet to be drawn
           continue;
@@ -425,28 +430,28 @@ impl WidgetTree<'_> {
 
 impl BuildableNode<'_> {
   fn on_mouse_move(&mut self, mouse_position: (f32, f32), is_mouse_on_this: bool) -> bool {
-    if let Buildable::Stateful(state) = &mut self.buildable {
-      let is_consume_event = if !self.is_mouse_on_this && is_mouse_on_this {
-        // Have to use | instead of || because || will short-circuit meaning that if state.on_mouse_over() consume event,
-        // state.on_mouse_hover() will not get called which is not expected.
-        //
-        // When event is consumed, all children of this widget will not process the event. But all associated
-        // state.on_xxx() of this widget will still get called regardless of event consumption.
-        state.on_mouse_over(mouse_position) | state.on_mouse_hover(mouse_position)
-      } else if self.is_mouse_on_this && !is_mouse_on_this {
-        self.downed_mouse_button = MouseButton::Unknown;
-        state.on_mouse_out(mouse_position)
-      } else if is_mouse_on_this {
-        state.on_mouse_hover(mouse_position)
-      } else {
-        false
-      };
+    let Buildable::Stateful(state) = &mut self.buildable else {
+      return false;
+    };
 
-      self.is_mouse_on_this = is_mouse_on_this;
-      return is_consume_event;
-    }
+    let is_consume_event = if !self.is_mouse_on_this && is_mouse_on_this {
+      // Have to use | instead of || because || will short-circuit meaning that if state.on_mouse_over() consume event,
+      // state.on_mouse_hover() will not get called which is not expected.
+      //
+      // When event is consumed, all children of this widget will not process the event. But all associated
+      // state.on_xxx() of this widget will still get called regardless of event consumption.
+      state.on_mouse_over(mouse_position) | state.on_mouse_hover(mouse_position)
+    } else if self.is_mouse_on_this && !is_mouse_on_this {
+      self.downed_mouse_button = MouseButton::Unknown;
+      state.on_mouse_out(mouse_position)
+    } else if is_mouse_on_this {
+      state.on_mouse_hover(mouse_position)
+    } else {
+      false
+    };
 
-    false
+    self.is_mouse_on_this = is_mouse_on_this;
+    is_consume_event
   }
 
   // This method is called when this widget is removed and mouse cursor still hover on this
@@ -455,16 +460,18 @@ impl BuildableNode<'_> {
       return;
     }
 
-    if let Buildable::Stateful(state) = &mut self.buildable {
-      let mouse_state = event_pump.mouse_state();
+    let Buildable::Stateful(state) = &mut self.buildable else {
+      return;
+    };
 
-      state.on_mouse_out((
-        mouse_state.x() as f32 * context::DRAWABLE_SIZE.0.load(Ordering::Relaxed) / app_size.0,
-        mouse_state.y() as f32 * context::DRAWABLE_SIZE.1.load(Ordering::Relaxed) / app_size.1,
-      ));
+    let mouse_state = event_pump.mouse_state();
 
-      self.is_mouse_on_this = false;
-    }
+    state.on_mouse_out((
+      mouse_state.x() as f32 * context::DRAWABLE_SIZE.0.load(Ordering::Relaxed) / app_size.0,
+      mouse_state.y() as f32 * context::DRAWABLE_SIZE.1.load(Ordering::Relaxed) / app_size.1,
+    ));
+
+    self.is_mouse_on_this = false;
   }
 
   fn on_mouse_down(
@@ -477,12 +484,12 @@ impl BuildableNode<'_> {
       return false;
     }
 
-    if let Buildable::Stateful(state) = &mut self.buildable {
-      self.downed_mouse_button = mouse_button;
-      return state.on_mouse_down(mouse_position, mouse_button);
-    }
+    let Buildable::Stateful(state) = &mut self.buildable else {
+      return false;
+    };
 
-    false
+    self.downed_mouse_button = mouse_button;
+    state.on_mouse_down(mouse_position, mouse_button)
   }
 
   fn on_mouse_up(&mut self, mouse_position: (f32, f32), mouse_button: MouseButton) -> bool {
@@ -490,19 +497,19 @@ impl BuildableNode<'_> {
       return false;
     }
 
-    if let Buildable::Stateful(state) = &mut self.buildable {
-      self.downed_mouse_button = MouseButton::Unknown;
-      return state.on_mouse_up(mouse_position, mouse_button);
-    }
+    let Buildable::Stateful(state) = &mut self.buildable else {
+      return false;
+    };
 
-    false
+    self.downed_mouse_button = MouseButton::Unknown;
+    state.on_mouse_up(mouse_position, mouse_button)
   }
 
   fn process_event(&mut self, event: &Event) -> bool {
-    if let Buildable::Stateful(state) = &mut self.buildable {
-      return state.process_event(event);
-    }
+    let Buildable::Stateful(state) = &mut self.buildable else {
+      return false;
+    };
 
-    false
+    state.process_event(event)
   }
 }

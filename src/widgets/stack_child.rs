@@ -30,23 +30,23 @@ impl StackChild<'_> {
   }
 
   pub(crate) fn get_size(&self) -> (f32, f32) {
-    if let Some(child) = &self.child {
-      let child_size = child.get_size();
+    let Some(child) = &self.child else {
+      return self.size;
+    };
 
-      return (
-        if child_size.0 >= 0.0 {
-          child_size.0
-        } else {
-          self.size.0
-        },
-        if child_size.1 >= 0.0 {
-          child_size.1
-        } else {
-          self.size.1
-        },
-      );
-    }
+    let child_size = child.get_size();
 
-    self.size
+    (
+      if child_size.0 >= 0.0 {
+        child_size.0
+      } else {
+        self.size.0
+      },
+      if child_size.1 >= 0.0 {
+        child_size.1
+      } else {
+        self.size.1
+      },
+    )
   }
 }

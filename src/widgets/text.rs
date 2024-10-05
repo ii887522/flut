@@ -65,7 +65,7 @@ impl PainterWidget for Text {
   }
 
   fn draw(&self, canvas: &Canvas, constraint: Rect) {
-    // Draw boundary for debugging purpose
+    // Uncomment to draw boundary for debugging purpose
     // canvas.draw_rect(
     //   Rect::from_xywh(
     //     constraint.x(),

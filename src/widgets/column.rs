@@ -40,10 +40,10 @@ impl<'a> StatelessWidget<'a> for Column<'a> {
           let child_size = child.get_size();
 
           if child_size.1 < 0.0 {
-            Err(())
-          } else {
-            Ok((child_size.0.max(acc.0), child_size.1 + acc.1))
+            return Err(());
           }
+
+          Ok((child_size.0.max(acc.0), child_size.1 + acc.1))
         })
         .unwrap_or((-1.0, -1.0))
     })
