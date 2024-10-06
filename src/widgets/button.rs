@@ -26,6 +26,7 @@ pub struct Button<'a> {
   pub icon_color: Color,
   pub label: Cow<'static, str>,
   pub label_font_family: &'static str,
+  pub label_font_size: f32,
   pub label_color: Color,
   pub size: (f32, f32),
   pub child_align: VerticalAlign,
@@ -48,6 +49,7 @@ impl Debug for Button<'_> {
       .field("icon_color", &self.icon_color)
       .field("label", &self.label)
       .field("label_font_family", &self.label_font_family)
+      .field("label_font_size", &self.label_font_size)
       .field("label_color", &self.label_color)
       .field("size", &self.size)
       .field("child_align", &self.child_align)
@@ -67,6 +69,7 @@ impl Default for Button<'_> {
       icon_color: Color::BLACK,
       label: Cow::Borrowed(""),
       label_font_family: "Arial",
+      label_font_size: 28.0,
       label_color: Color::BLACK,
       size: (-1.0, -1.0),
       child_align: VerticalAlign::Middle,
@@ -95,6 +98,7 @@ impl<'a> StatefulWidget<'a> for Button<'a> {
       icon_color: self.icon_color,
       label: self.label.to_string(),
       label_font_family: self.label_font_family,
+      label_font_size: self.label_font_size,
       label_color: self.label_color,
       child_align: self.child_align,
       is_cursor_fixed: self.is_cursor_fixed,
@@ -118,6 +122,7 @@ struct ButtonState<'a> {
   icon_color: Color,
   label: String,
   label_font_family: &'static str,
+  label_font_size: f32,
   label_color: Color,
   child_align: VerticalAlign,
   is_cursor_fixed: bool,
@@ -142,6 +147,7 @@ impl Debug for ButtonState<'_> {
       .field("icon_color", &self.icon_color)
       .field("label", &self.label)
       .field("label_font_family", &self.label_font_family)
+      .field("label_font_size", &self.label_font_size)
       .field("label_color", &self.label_color)
       .field("child_align", &self.child_align)
       .field("is_cursor_fixed", &self.is_cursor_fixed)
@@ -275,7 +281,7 @@ impl<'a> State<'a> for ButtonState<'_> {
                         Text::new()
                           .text(self.label.to_string())
                           .font_family(self.label_font_family)
-                          .font_size(28.0)
+                          .font_size(self.label_font_size)
                           .font_style(FontStyle::new(
                             Weight::SEMI_BOLD,
                             Width::NORMAL,

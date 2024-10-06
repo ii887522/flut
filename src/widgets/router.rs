@@ -20,10 +20,11 @@ impl<'a> Router<'a> {
     children: impl Fn(Arc<Mutex<Navigator<'a>>>) -> HashMap<&str, Widget<'a>> + 'a + Send,
   ) -> Self {
     let navigator = Arc::new(Mutex::new(Navigator::new(initial_route)));
+    let children = children(Arc::clone(&navigator));
 
     Self {
-      children: children(Arc::clone(&navigator)),
       navigator,
+      children,
     }
   }
 }
