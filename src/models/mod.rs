@@ -1,3 +1,4 @@
+pub mod asset_task;
 pub mod audio_task;
 pub mod horizontal_align;
 pub mod icon_name;
@@ -6,6 +7,7 @@ pub mod origin;
 pub mod value;
 pub mod vertical_align;
 
+pub use asset_task::AssetTask;
 pub use audio_task::AudioTask;
 pub use horizontal_align::HorizontalAlign;
 pub use lang::Lang;

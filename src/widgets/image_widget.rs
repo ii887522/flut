@@ -1,7 +1,11 @@
 use super::PainterWidget;
-use crate::boot::context;
+use crate::{
+  boot::context::{self, ASSET_TX},
+  models::AssetTask,
+};
 use optarg2chain::optarg_impl;
-use skia_safe::{Canvas, Data, Image, Paint, Rect};
+use skia_safe::{Canvas, Paint, Rect};
+use std::sync::mpsc::Sender;
 
 #[derive(Debug)]
 pub struct ImageWidget {
@@ -13,11 +17,9 @@ pub struct ImageWidget {
 impl ImageWidget {
   #[optarg_method(ImageWidgetNewBuilder, call)]
   pub fn new(file_path: &'static str, #[optarg((-1.0, -1.0))] size: (f32, f32)) -> Self {
-    let mut images = context::IMAGES.write().unwrap();
-
-    images.entry(file_path).or_insert_with(|| {
-      let image_data = Data::from_filename(file_path).unwrap();
-      Image::from_encoded(image_data).unwrap()
+    ASSET_TX.with(|asset_tx| {
+      let asset_tx = asset_tx.get_or_init(|| Sender::clone(context::MAIN_ASSET_TX.get().unwrap()));
+      asset_tx.send(AssetTask::Load(file_path)).unwrap();
     });
 
     Self { file_path, size }
@@ -32,8 +34,12 @@ impl PainterWidget for ImageWidget {
   fn draw(&self, canvas: &Canvas, constraint: Rect) {
     let images = context::IMAGES.read().unwrap();
 
+    let Some(image) = images.get(self.file_path) else {
+      return;
+    };
+
     canvas.draw_image_rect(
-      &images[self.file_path],
+      image,
       None,
       Rect::from_xywh(
         constraint.x(),

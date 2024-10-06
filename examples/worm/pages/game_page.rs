@@ -31,12 +31,10 @@ pub(crate) struct GamePage<'a> {
 
 impl<'a> StatefulWidget<'a> for GamePage<'a> {
   fn new_state(&mut self) -> Box<dyn State<'a> + 'a> {
-    context::AUDIO_TX.with(|audio_tx| {
-      if let Some(audio_tx) = audio_tx.get() {
-        let _ = audio_tx.send(AudioTask::LoadSound("assets/worm/audio/dead.wav"));
-        let _ = audio_tx.send(AudioTask::LoadSound("assets/worm/audio/eat.wav"));
-      }
-    });
+    if let Some(audio_tx) = context::MAIN_AUDIO_TX.get() {
+      let _ = audio_tx.send(AudioTask::LoadSound("assets/worm/audio/dead.wav"));
+      let _ = audio_tx.send(AudioTask::LoadSound("assets/worm/audio/eat.wav"));
+    }
 
     Box::new(GamePageState {
       clock: Clock::new(30.0),
@@ -164,11 +162,9 @@ impl GamePageStateInner {
     };
 
     if let GameCell::Wall | GameCell::Worm = self.grid_model[new_head.position as usize] {
-      context::AUDIO_TX.with(|audio_tx| {
-        if let Some(audio_tx) = audio_tx.get() {
-          let _ = audio_tx.send(AudioTask::PlaySound("assets/worm/audio/dead.wav"));
-        }
-      });
+      if let Some(audio_tx) = context::MAIN_AUDIO_TX.get() {
+        let _ = audio_tx.send(AudioTask::PlaySound("assets/worm/audio/dead.wav"));
+      }
 
       self.is_worm_dead = true;
 
@@ -178,11 +174,9 @@ impl GamePageStateInner {
       self.shake_animation_sm.shake();
       return;
     } else if let GameCell::Food = self.grid_model[new_head.position as usize] {
-      context::AUDIO_TX.with(|audio_tx| {
-        if let Some(audio_tx) = audio_tx.get() {
-          let _ = audio_tx.send(AudioTask::PlaySound("assets/worm/audio/eat.wav"));
-        }
-      });
+      if let Some(audio_tx) = context::MAIN_AUDIO_TX.get() {
+        let _ = audio_tx.send(AudioTask::PlaySound("assets/worm/audio/eat.wav"));
+      }
 
       self.spawn_food();
     } else {

@@ -3,13 +3,10 @@ use sdl2::mixer::{self, Channel, Chunk};
 use std::{collections::HashMap, sync::mpsc::Receiver};
 
 pub(crate) fn main(rx: Receiver<AudioTask<'_>>) {
-  if mixer::open_audio(48000, mixer::AUDIO_F32SYS, 2, 2048).is_err() {
-    return;
-  }
-
+  let _ = mixer::open_audio(48000, mixer::AUDIO_F32SYS, 2, 2048);
   let mut chunk_map = HashMap::new();
 
-  while let Ok(task) = rx.recv() {
+  for task in rx {
     match task {
       AudioTask::LoadSound(file_path) => {
         if chunk_map.contains_key(file_path) {

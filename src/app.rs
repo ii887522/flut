@@ -1,5 +1,5 @@
 use crate::{
-  boot::{audio, context},
+  boot::{asset, audio, context},
   helpers::AnimationCount,
   widgets::Widget,
   WidgetTree,
@@ -63,9 +63,13 @@ pub fn run(app: App<'_>) {
 
   if app.use_audio {
     let (audio_tx, audio_rx) = mpsc::channel();
-    context::AUDIO_TX.with(|ctx_audio_tx| ctx_audio_tx.set(audio_tx).unwrap());
+    context::MAIN_AUDIO_TX.set(audio_tx).unwrap();
     thread::spawn(|| audio::main(audio_rx));
   }
+
+  let (asset_tx, asset_rx) = mpsc::channel();
+  context::MAIN_ASSET_TX.set(asset_tx).unwrap();
+  thread::spawn(|| asset::main(asset_rx));
 
   let vid_subsys = sdl.video().unwrap();
   let gl_attr = vid_subsys.gl_attr();
