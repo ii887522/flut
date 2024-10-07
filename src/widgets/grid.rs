@@ -8,7 +8,7 @@ pub struct Grid<'a> {
   pub col_count: u16,
   pub row_count: u16,
   pub gap: f32,
-  pub builder: Box<dyn Fn(u32) -> Widget<'a> + 'a + Send + Sync>,
+  pub builder: Box<dyn Fn(u32) -> Option<Widget<'a>> + 'a + Send + Sync>,
 }
 
 impl Debug for Grid<'_> {
@@ -39,7 +39,7 @@ impl<'a> StatelessWidget<'a> for Grid<'a> {
           ),
           size: child_size,
           origin: Origin::TopLeft,
-          child: Some((self.builder)(i)),
+          child: (self.builder)(i),
         })
         .collect(),
     }

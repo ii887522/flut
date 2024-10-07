@@ -1,15 +1,15 @@
 use crate::models::GameCell;
-use flut::widgets::{
-  router::Navigator, stateful_widget::State, widget::*, Button, Column, Grid, ImageWidget,
-  StatefulWidget, Widget,
+use flut::{
+  helpers::AnimationCount,
+  widgets::{
+    router::Navigator, stateful_widget::State, widget::*, Button, Center, Column, Grid,
+    ImageWidget, StatefulWidget, Text, Widget,
+  },
 };
 use rand::{prelude::*, seq::index};
 use rayon::prelude::*;
 use skia_safe::{Color, Rect};
-use std::{
-  borrow::Cow,
-  sync::{Arc, Mutex, RwLock},
-};
+use std::sync::{Arc, Mutex, RwLock};
 
 const COL_COUNT: u16 = 31;
 const ROW_COUNT: u16 = 31;
@@ -171,19 +171,39 @@ impl<'a> StatefulWidget<'a> for GamePage<'a> {
     }
 
     Box::new(GamePageState {
-      grid_model: Arc::new(RwLock::new(grid_model)),
+      inner: Arc::new(RwLock::new(GamePageStateInner {
+        grid_model,
+        animation_count: AnimationCount::new(),
+      })),
     })
   }
 }
 
 #[derive(Debug, Default)]
+struct GamePageStateInner {
+  grid_model: Vec<GameCell>,
+  animation_count: AnimationCount,
+}
+
+#[derive(Debug, Default)]
 struct GamePageState {
-  grid_model: Arc<RwLock<Vec<GameCell>>>,
+  inner: Arc<RwLock<GamePageStateInner>>,
 }
 
 impl<'a> State<'a> for GamePageState {
+  fn update(&mut self, _dt: f32) -> bool {
+    let mut state = self.inner.write().unwrap();
+
+    if *state.animation_count == 0 {
+      return false;
+    }
+
+    state.animation_count = AnimationCount::new();
+    true
+  }
+
   fn build(&mut self, _constraint: Rect) -> Widget<'a> {
-    let grid_model = Arc::clone(&self.grid_model);
+    let state_arc = Arc::clone(&self.inner);
 
     Column::new()
       .children(vec![Grid {
@@ -191,58 +211,94 @@ impl<'a> State<'a> for GamePageState {
         row_count: ROW_COUNT,
         gap: 2.0,
         builder: Box::new(move |index| {
-          let grid_model = grid_model.read().unwrap();
+          let state = state_arc.read().unwrap();
+          let state_arc = Arc::clone(&state_arc);
 
-          match grid_model[index as usize] {
+          match state.grid_model[index as usize] {
             GameCell::Count {
               count: bomb_count,
               is_visible,
             } => {
-              Button {
-                bg_color: Color::from_rgb(56, 56, 56),
-                border_radius: 0.0,
-                is_elevated: false,
-                is_cursor_fixed: true,
-                has_effect: false,
-                label_color: Color::LIGHT_GRAY,
-                label_font_size: 24.0,
-                label: if is_visible && bomb_count > 0 {
-                  Cow::Owned(bomb_count.to_string())
+              if is_visible {
+                if bomb_count > 0 {
+                  Some(
+                    Center {
+                      child: Some(
+                        Text::new()
+                          .text(bomb_count.to_string())
+                          .font_size(24.0)
+                          .color(Color::LIGHT_GRAY)
+                          .call()
+                          .into_widget(),
+                      ),
+                    }
+                    .into_widget(),
+                  )
                 } else {
-                  Cow::Borrowed("")
-                },
-                on_mouse_up: Arc::new(Mutex::new(move || {
-                  // todo: Do something
-                  dbg!(index);
-                })),
-                ..Default::default()
+                  None
+                }
+              } else {
+                Some(
+                  Button {
+                    bg_color: Color::from_rgb(56, 56, 56),
+                    border_radius: 0.0,
+                    is_elevated: false,
+                    is_cursor_fixed: true,
+                    has_effect: false,
+                    on_mouse_up: Arc::new(Mutex::new(move || {
+                      let mut state = state_arc.write().unwrap();
+
+                      state.grid_model[index as usize] = GameCell::Count {
+                        count: bomb_count,
+                        is_visible: true,
+                      };
+
+                      state.animation_count.incr();
+                    })),
+                    ..Default::default()
+                  }
+                  .into_widget(),
+                )
               }
-              .into_widget()
             }
             GameCell::Bomb { is_visible } => {
               if is_visible {
-                ImageWidget::new("assets/avoid_the_bomb/images/bomb.png")
-                  .call()
-                  .into_widget()
+                Some(
+                  ImageWidget::new("assets/avoid_the_bomb/images/bomb.png")
+                    .call()
+                    .into_widget(),
+                )
               } else {
-                Button {
-                  bg_color: Color::from_rgb(56, 56, 56),
-                  border_radius: 0.0,
-                  is_elevated: false,
-                  is_cursor_fixed: true,
-                  has_effect: false,
-                  on_mouse_up: Arc::new(Mutex::new(move || {
-                    // todo: Do something
-                    dbg!(index);
-                  })),
-                  ..Default::default()
-                }
-                .into_widget()
+                Some(
+                  Button {
+                    bg_color: Color::from_rgb(56, 56, 56),
+                    border_radius: 0.0,
+                    is_elevated: false,
+                    is_cursor_fixed: true,
+                    has_effect: false,
+                    on_mouse_up: Arc::new(Mutex::new(move || {
+                      let mut state = state_arc.write().unwrap();
+
+                      // Game over. Reveal the whole game board
+                      state.grid_model.par_iter_mut().for_each(|cell| match cell {
+                        GameCell::Count { is_visible, .. } => *is_visible = true,
+                        GameCell::Bomb { is_visible } => *is_visible = true,
+                        GameCell::Flag => {}
+                      });
+
+                      state.animation_count.incr();
+                    })),
+                    ..Default::default()
+                  }
+                  .into_widget(),
+                )
               }
             }
-            GameCell::Flag => ImageWidget::new("assets/avoid_the_bomb/images/flag.png")
-              .call()
-              .into_widget(),
+            GameCell::Flag => Some(
+              ImageWidget::new("assets/avoid_the_bomb/images/flag.png")
+                .call()
+                .into_widget(),
+            ),
           }
         }),
       }

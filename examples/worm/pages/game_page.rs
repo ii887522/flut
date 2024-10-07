@@ -295,16 +295,18 @@ impl<'a> State<'a> for GamePageState<'a> {
                     builder: Box::new(move |index| {
                       let state = state_arc_1.read().unwrap();
 
-                      RectWidget {
-                        color: match state.grid_model[index as usize] {
-                          GameCell::Air => Color::from_rgb(56, 56, 56),
-                          GameCell::Worm => Color::from_rgb(243, 125, 121),
-                          GameCell::Wall => Color::RED,
-                          GameCell::Food => Color::GREEN,
-                        },
-                        ..Default::default()
-                      }
-                      .into_widget()
+                      Some(
+                        RectWidget {
+                          color: match state.grid_model[index as usize] {
+                            GameCell::Air => Color::from_rgb(56, 56, 56),
+                            GameCell::Worm => Color::from_rgb(243, 125, 121),
+                            GameCell::Wall => Color::RED,
+                            GameCell::Food => Color::GREEN,
+                          },
+                          ..Default::default()
+                        }
+                        .into_widget(),
+                      )
                     }),
                   }
                   .into_widget(),
