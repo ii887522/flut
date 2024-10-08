@@ -1,9 +1,9 @@
-use crate::models::GameCell;
+use crate::models::{GameCell, GameCellState};
 use flut::{
   helpers::AnimationCount,
   widgets::{
     router::Navigator, stateful_widget::State, widget::*, Button, Center, Column, Grid,
-    ImageWidget, StatefulWidget, Text, Widget,
+    ImageButton, ImageWidget, StatefulWidget, Text, Widget,
   },
 };
 use rand::{prelude::*, seq::index};
@@ -28,13 +28,15 @@ impl<'a> StatefulWidget<'a> for GamePage<'a> {
       .into_par_iter()
       .map(|_| GameCell::Count {
         count: 0,
-        is_visible: false,
+        state: GameCellState::Hidden,
       })
       .collect::<Vec<_>>();
 
     // Spawn random bombs
     for bomb_index in index::sample(&mut thread_rng(), (COL_COUNT * ROW_COUNT) as _, 100) {
-      grid_model[bomb_index] = GameCell::Bomb { is_visible: false };
+      grid_model[bomb_index] = GameCell::Bomb {
+        state: GameCellState::Hidden,
+      };
 
       // Record this bomb on neighbor cells
       // Left neighbor
@@ -43,12 +45,12 @@ impl<'a> StatefulWidget<'a> for GamePage<'a> {
         // Dont override spawned bomb
         if let GameCell::Count {
           count: bomb_count,
-          is_visible,
+          state,
         } = grid_model[bomb_index - 1]
         {
           grid_model[bomb_index - 1] = GameCell::Count {
             count: bomb_count + 1,
-            is_visible,
+            state,
           };
         }
       }
@@ -59,12 +61,12 @@ impl<'a> StatefulWidget<'a> for GamePage<'a> {
         // Dont override spawned bomb
         if let GameCell::Count {
           count: bomb_count,
-          is_visible,
+          state,
         } = grid_model[bomb_index + 1]
         {
           grid_model[bomb_index + 1] = GameCell::Count {
             count: bomb_count + 1,
-            is_visible,
+            state,
           };
         }
       }
@@ -75,12 +77,12 @@ impl<'a> StatefulWidget<'a> for GamePage<'a> {
         // Dont override spawned bomb
         if let GameCell::Count {
           count: bomb_count,
-          is_visible,
+          state,
         } = grid_model[bomb_index - COL_COUNT as usize]
         {
           grid_model[bomb_index - COL_COUNT as usize] = GameCell::Count {
             count: bomb_count + 1,
-            is_visible,
+            state,
           };
         }
       }
@@ -91,12 +93,12 @@ impl<'a> StatefulWidget<'a> for GamePage<'a> {
         // Dont override spawned bomb
         if let GameCell::Count {
           count: bomb_count,
-          is_visible,
+          state,
         } = grid_model[bomb_index + COL_COUNT as usize]
         {
           grid_model[bomb_index + COL_COUNT as usize] = GameCell::Count {
             count: bomb_count + 1,
-            is_visible,
+            state,
           };
         }
       }
@@ -108,12 +110,12 @@ impl<'a> StatefulWidget<'a> for GamePage<'a> {
         // Dont override spawned bomb
         if let GameCell::Count {
           count: bomb_count,
-          is_visible,
+          state,
         } = grid_model[bomb_index - COL_COUNT as usize - 1]
         {
           grid_model[bomb_index - COL_COUNT as usize - 1] = GameCell::Count {
             count: bomb_count + 1,
-            is_visible,
+            state,
           };
         }
       }
@@ -125,12 +127,12 @@ impl<'a> StatefulWidget<'a> for GamePage<'a> {
         // Dont override spawned bomb
         if let GameCell::Count {
           count: bomb_count,
-          is_visible,
+          state,
         } = grid_model[bomb_index - COL_COUNT as usize + 1]
         {
           grid_model[bomb_index - COL_COUNT as usize + 1] = GameCell::Count {
             count: bomb_count + 1,
-            is_visible,
+            state,
           };
         }
       }
@@ -143,12 +145,12 @@ impl<'a> StatefulWidget<'a> for GamePage<'a> {
         // Dont override spawned bomb
         if let GameCell::Count {
           count: bomb_count,
-          is_visible,
+          state,
         } = grid_model[bomb_index + COL_COUNT as usize - 1]
         {
           grid_model[bomb_index + COL_COUNT as usize - 1] = GameCell::Count {
             count: bomb_count + 1,
-            is_visible,
+            state,
           };
         }
       }
@@ -162,12 +164,12 @@ impl<'a> StatefulWidget<'a> for GamePage<'a> {
         // Dont override spawned bomb
         if let GameCell::Count {
           count: bomb_count,
-          is_visible,
+          state,
         } = grid_model[bomb_index + COL_COUNT as usize + 1]
         {
           grid_model[bomb_index + COL_COUNT as usize + 1] = GameCell::Count {
             count: bomb_count + 1,
-            is_visible,
+            state,
           };
         }
       }
@@ -206,7 +208,7 @@ impl GamePageStateInner {
 
     self.grid_model[index] = GameCell::Count {
       count: bomb_count,
-      is_visible: true,
+      state: GameCellState::Visible,
     };
 
     self.animation_count.incr();
@@ -215,11 +217,10 @@ impl GamePageStateInner {
 
   fn reveal_surronding(&mut self, index: u32) {
     let mut index_fifo_q = VecDeque::from_iter([index]);
-    let mut visited_indices = HashSet::new();
+    let mut covered_indices = HashSet::<_>::from_iter([index]);
 
     while let Some(index) = index_fifo_q.pop_front() {
       let bomb_count = self.reveal_bomb_count(index);
-      visited_indices.insert(index);
 
       if bomb_count > 0 {
         continue;
@@ -227,31 +228,34 @@ impl GamePageStateInner {
 
       // Traverse the game board in breadth-first order
       // Left neighbor
-      if index % COL_COUNT as u32 > 0 && !visited_indices.contains(&(index - 1)) {
+      if index % COL_COUNT as u32 > 0 && !covered_indices.contains(&(index - 1)) {
         index_fifo_q.push_back(index - 1);
+        covered_indices.insert(index - 1);
       }
       // Right neighbor
-      if (index + 1) % COL_COUNT as u32 > 0 && !visited_indices.contains(&(index + 1)) {
+      if (index + 1) % COL_COUNT as u32 > 0 && !covered_indices.contains(&(index + 1)) {
         index_fifo_q.push_back(index + 1);
+        covered_indices.insert(index + 1);
       }
       // Top neighbor
-      if index / COL_COUNT as u32 > 0 && !visited_indices.contains(&(index - COL_COUNT as u32)) {
+      if index / COL_COUNT as u32 > 0 && !covered_indices.contains(&(index - COL_COUNT as u32)) {
         index_fifo_q.push_back(index - COL_COUNT as u32);
+        covered_indices.insert(index - COL_COUNT as u32);
       }
       // Bottom neighbor
       if index + (COL_COUNT as u32) < self.grid_model.len() as _
-        && !visited_indices.contains(&(index + COL_COUNT as u32))
+        && !covered_indices.contains(&(index + COL_COUNT as u32))
       {
         index_fifo_q.push_back(index + COL_COUNT as u32);
+        covered_indices.insert(index + COL_COUNT as u32);
       }
     }
   }
 
   fn reveal_all(&mut self) {
     self.grid_model.par_iter_mut().for_each(|cell| match cell {
-      GameCell::Count { is_visible, .. } => *is_visible = true,
-      GameCell::Bomb { is_visible } => *is_visible = true,
-      GameCell::Flag => {}
+      GameCell::Count { state, .. } => *state = GameCellState::Visible,
+      GameCell::Bomb { state } => *state = GameCellState::Visible,
     });
 
     self.animation_count.incr();
@@ -285,9 +289,28 @@ impl<'a> State<'a> for GamePageState {
           match state.grid_model[index as usize] {
             GameCell::Count {
               count: bomb_count,
-              is_visible,
-            } => {
-              if is_visible {
+              state,
+            } => match state {
+              GameCellState::Hidden => Some(
+                Button {
+                  bg_color: Color::from_rgb(56, 56, 56),
+                  border_radius: 0.0,
+                  is_elevated: false,
+                  is_cursor_fixed: true,
+                  has_effect: false,
+                  on_mouse_up: Arc::new(Mutex::new(move || {
+                    let mut state = state_arc.write().unwrap();
+                    let bomb_count = state.reveal_bomb_count(index);
+
+                    if bomb_count == 0 {
+                      state.reveal_surronding(index);
+                    }
+                  })),
+                  ..Default::default()
+                }
+                .into_widget(),
+              ),
+              GameCellState::Visible => {
                 if bomb_count > 0 {
                   Some(
                     Center {
@@ -305,60 +328,45 @@ impl<'a> State<'a> for GamePageState {
                 } else {
                   None
                 }
-              } else {
-                Some(
-                  Button {
-                    bg_color: Color::from_rgb(56, 56, 56),
-                    border_radius: 0.0,
-                    is_elevated: false,
-                    is_cursor_fixed: true,
-                    has_effect: false,
-                    on_mouse_up: Arc::new(Mutex::new(move || {
-                      let mut state = state_arc.write().unwrap();
-                      let bomb_count = state.reveal_bomb_count(index);
-
-                      if bomb_count == 0 {
-                        state.reveal_surronding(index);
-                      }
-                    })),
-                    ..Default::default()
-                  }
-                  .into_widget(),
-                )
               }
-            }
-            GameCell::Bomb { is_visible } => {
-              if is_visible {
-                Some(
+              GameCellState::Flagged => todo!(),
+            },
+            GameCell::Bomb { state } => {
+              match state {
+                GameCellState::Hidden => {
+                  Some(
+                    Button {
+                      bg_color: Color::from_rgb(56, 56, 56),
+                      border_radius: 0.0,
+                      is_elevated: false,
+                      is_cursor_fixed: true,
+                      has_effect: false,
+                      on_mouse_up: Arc::new(Mutex::new(move || {
+                        let mut state = state_arc.write().unwrap();
+
+                        // Game over. Reveal the whole game board
+                        state.reveal_all();
+                      })),
+                      ..Default::default()
+                    }
+                    .into_widget(),
+                  )
+                }
+                GameCellState::Visible => Some(
                   ImageWidget::new("assets/avoid_the_bomb/images/bomb.png")
                     .call()
                     .into_widget(),
-                )
-              } else {
-                Some(
-                  Button {
-                    bg_color: Color::from_rgb(56, 56, 56),
-                    border_radius: 0.0,
-                    is_elevated: false,
-                    is_cursor_fixed: true,
-                    has_effect: false,
-                    on_mouse_up: Arc::new(Mutex::new(move || {
-                      let mut state = state_arc.write().unwrap();
-
-                      // Game over. Reveal the whole game board
-                      state.reveal_all();
-                    })),
-                    ..Default::default()
-                  }
-                  .into_widget(),
-                )
+                ),
+                GameCellState::Flagged => todo!(),
               }
-            }
-            GameCell::Flag => Some(
-              ImageWidget::new("assets/avoid_the_bomb/images/flag.png")
-                .call()
-                .into_widget(),
-            ),
+            } // GameCell::Flag => Some(
+              //   ImageButton {
+              //     file_path: "assets/avoid_the_bomb/images/flag.png",
+              //     on_mouse_up: Arc::new(Mutex::new(|| {})),
+              //     ..Default::default()
+              //   }
+              //   .into_widget(),
+              // ),
           }
         }),
       }

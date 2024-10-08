@@ -1,15 +1,16 @@
+use super::GameCellState;
+
 #[derive(Clone, Copy, Debug, Hash, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) enum GameCell {
-  Count { count: u8, is_visible: bool },
-  Bomb { is_visible: bool },
-  Flag,
+  Count { count: u8, state: GameCellState },
+  Bomb { state: GameCellState },
 }
 
 impl Default for GameCell {
   fn default() -> Self {
     Self::Count {
       count: 0,
-      is_visible: false,
+      state: GameCellState::Hidden,
     }
   }
 }
