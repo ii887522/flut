@@ -9,7 +9,10 @@ use flut::{
 use rand::{prelude::*, seq::index};
 use rayon::prelude::*;
 use skia_safe::{Color, Rect};
-use std::sync::{Arc, Mutex, RwLock};
+use std::{
+  collections::{HashSet, VecDeque},
+  sync::{Arc, Mutex, RwLock},
+};
 
 const COL_COUNT: u16 = 31;
 const ROW_COUNT: u16 = 31;
@@ -190,6 +193,71 @@ struct GamePageState {
   inner: Arc<RwLock<GamePageStateInner>>,
 }
 
+impl GamePageStateInner {
+  fn reveal_bomb_count(&mut self, index: u32) -> u8 {
+    let index = index as usize;
+
+    let GameCell::Count {
+      count: bomb_count, ..
+    } = self.grid_model[index]
+    else {
+      unreachable!("Caller should know index refers to bomb count before calling this method");
+    };
+
+    self.grid_model[index] = GameCell::Count {
+      count: bomb_count,
+      is_visible: true,
+    };
+
+    self.animation_count.incr();
+    bomb_count
+  }
+
+  fn reveal_surronding(&mut self, index: u32) {
+    let mut index_fifo_q = VecDeque::from_iter([index]);
+    let mut visited_indices = HashSet::new();
+
+    while let Some(index) = index_fifo_q.pop_front() {
+      let bomb_count = self.reveal_bomb_count(index);
+      visited_indices.insert(index);
+
+      if bomb_count > 0 {
+        continue;
+      }
+
+      // Traverse the game board in breadth-first order
+      // Left neighbor
+      if index % COL_COUNT as u32 > 0 && !visited_indices.contains(&(index - 1)) {
+        index_fifo_q.push_back(index - 1);
+      }
+      // Right neighbor
+      if (index + 1) % COL_COUNT as u32 > 0 && !visited_indices.contains(&(index + 1)) {
+        index_fifo_q.push_back(index + 1);
+      }
+      // Top neighbor
+      if index / COL_COUNT as u32 > 0 && !visited_indices.contains(&(index - COL_COUNT as u32)) {
+        index_fifo_q.push_back(index - COL_COUNT as u32);
+      }
+      // Bottom neighbor
+      if index + (COL_COUNT as u32) < self.grid_model.len() as _
+        && !visited_indices.contains(&(index + COL_COUNT as u32))
+      {
+        index_fifo_q.push_back(index + COL_COUNT as u32);
+      }
+    }
+  }
+
+  fn reveal_all(&mut self) {
+    self.grid_model.par_iter_mut().for_each(|cell| match cell {
+      GameCell::Count { is_visible, .. } => *is_visible = true,
+      GameCell::Bomb { is_visible } => *is_visible = true,
+      GameCell::Flag => {}
+    });
+
+    self.animation_count.incr();
+  }
+}
+
 impl<'a> State<'a> for GamePageState {
   fn update(&mut self, _dt: f32) -> bool {
     let mut state = self.inner.write().unwrap();
@@ -247,13 +315,11 @@ impl<'a> State<'a> for GamePageState {
                     has_effect: false,
                     on_mouse_up: Arc::new(Mutex::new(move || {
                       let mut state = state_arc.write().unwrap();
+                      let bomb_count = state.reveal_bomb_count(index);
 
-                      state.grid_model[index as usize] = GameCell::Count {
-                        count: bomb_count,
-                        is_visible: true,
-                      };
-
-                      state.animation_count.incr();
+                      if bomb_count == 0 {
+                        state.reveal_surronding(index);
+                      }
                     })),
                     ..Default::default()
                   }
@@ -280,13 +346,7 @@ impl<'a> State<'a> for GamePageState {
                       let mut state = state_arc.write().unwrap();
 
                       // Game over. Reveal the whole game board
-                      state.grid_model.par_iter_mut().for_each(|cell| match cell {
-                        GameCell::Count { is_visible, .. } => *is_visible = true,
-                        GameCell::Bomb { is_visible } => *is_visible = true,
-                        GameCell::Flag => {}
-                      });
-
-                      state.animation_count.incr();
+                      state.reveal_all();
                     })),
                     ..Default::default()
                   }
