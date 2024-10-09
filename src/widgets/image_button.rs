@@ -1,6 +1,7 @@
 use super::{
   stateful_widget::State, widget::IntoPainterWidget, ImageWidget, StatefulWidget, Widget,
 };
+use sdl2::mouse::MouseButton;
 use skia_safe::Rect;
 use std::{
   fmt::{self, Debug, Formatter},
@@ -14,6 +15,8 @@ pub struct ImageButton<'a> {
   pub on_mouse_out: Arc<Mutex<dyn FnMut() + 'a + Send>>,
   pub on_mouse_down: Arc<Mutex<dyn FnMut() + 'a + Send>>,
   pub on_mouse_up: Arc<Mutex<dyn FnMut() + 'a + Send>>,
+  pub on_right_mouse_down: Arc<Mutex<dyn FnMut() + 'a + Send>>,
+  pub on_right_mouse_up: Arc<Mutex<dyn FnMut() + 'a + Send>>,
 }
 
 impl<'a> Debug for ImageButton<'a> {
@@ -35,6 +38,8 @@ impl Default for ImageButton<'_> {
       on_mouse_out: Arc::new(Mutex::new(|| {})),
       on_mouse_down: Arc::new(Mutex::new(|| {})),
       on_mouse_up: Arc::new(Mutex::new(|| {})),
+      on_right_mouse_down: Arc::new(Mutex::new(|| {})),
+      on_right_mouse_up: Arc::new(Mutex::new(|| {})),
     }
   }
 }
@@ -48,6 +53,8 @@ impl<'a> StatefulWidget<'a> for ImageButton<'a> {
       on_mouse_out: Arc::clone(&self.on_mouse_out),
       on_mouse_down: Arc::clone(&self.on_mouse_down),
       on_mouse_up: Arc::clone(&self.on_mouse_up),
+      on_right_mouse_down: Arc::clone(&self.on_right_mouse_down),
+      on_right_mouse_up: Arc::clone(&self.on_right_mouse_up),
     })
   }
 }
@@ -59,6 +66,8 @@ struct ImageButtonState<'a> {
   on_mouse_out: Arc<Mutex<dyn FnMut() + 'a + Send>>,
   on_mouse_down: Arc<Mutex<dyn FnMut() + 'a + Send>>,
   on_mouse_up: Arc<Mutex<dyn FnMut() + 'a + Send>>,
+  on_right_mouse_down: Arc<Mutex<dyn FnMut() + 'a + Send>>,
+  on_right_mouse_up: Arc<Mutex<dyn FnMut() + 'a + Send>>,
 }
 
 impl Debug for ImageButtonState<'_> {
@@ -82,21 +91,23 @@ impl<'a> State<'a> for ImageButtonState<'a> {
     true
   }
 
-  fn on_mouse_down(
-    &mut self,
-    _mouse_position: (f32, f32),
-    _mouse_button: sdl2::mouse::MouseButton,
-  ) -> bool {
-    self.on_mouse_down.lock().unwrap()();
+  fn on_mouse_down(&mut self, _mouse_position: (f32, f32), mouse_button: MouseButton) -> bool {
+    match mouse_button {
+      MouseButton::Left => self.on_mouse_down.lock().unwrap()(),
+      MouseButton::Right => self.on_right_mouse_down.lock().unwrap()(),
+      _ => {}
+    }
+
     true
   }
 
-  fn on_mouse_up(
-    &mut self,
-    _mouse_position: (f32, f32),
-    _mouse_button: sdl2::mouse::MouseButton,
-  ) -> bool {
-    self.on_mouse_up.lock().unwrap()();
+  fn on_mouse_up(&mut self, _mouse_position: (f32, f32), mouse_button: MouseButton) -> bool {
+    match mouse_button {
+      MouseButton::Left => self.on_mouse_up.lock().unwrap()(),
+      MouseButton::Right => self.on_right_mouse_up.lock().unwrap()(),
+      _ => {}
+    }
+
     true
   }
 

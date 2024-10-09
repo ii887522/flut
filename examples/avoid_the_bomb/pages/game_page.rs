@@ -260,6 +260,15 @@ impl GamePageStateInner {
 
     self.animation_count.incr();
   }
+
+  fn set_cell_state(&mut self, index: u32, cell_state: GameCellState) {
+    match &mut self.grid_model[index as usize] {
+      GameCell::Count { state, .. } => *state = cell_state,
+      GameCell::Bomb { state } => *state = cell_state,
+    }
+
+    self.animation_count.incr();
+  }
 }
 
 impl<'a> State<'a> for GamePageState {
@@ -284,7 +293,8 @@ impl<'a> State<'a> for GamePageState {
         gap: 2.0,
         builder: Box::new(move |index| {
           let state = state_arc.read().unwrap();
-          let state_arc = Arc::clone(&state_arc);
+          let state_arc_1 = Arc::clone(&state_arc);
+          let state_arc_2 = Arc::clone(&state_arc);
 
           match state.grid_model[index as usize] {
             GameCell::Count {
@@ -299,12 +309,16 @@ impl<'a> State<'a> for GamePageState {
                   is_cursor_fixed: true,
                   has_effect: false,
                   on_mouse_up: Arc::new(Mutex::new(move || {
-                    let mut state = state_arc.write().unwrap();
+                    let mut state = state_arc_1.write().unwrap();
                     let bomb_count = state.reveal_bomb_count(index);
 
                     if bomb_count == 0 {
                       state.reveal_surronding(index);
                     }
+                  })),
+                  on_right_mouse_up: Arc::new(Mutex::new(move || {
+                    let mut state = state_arc_2.write().unwrap();
+                    state.set_cell_state(index, GameCellState::Flagged);
                   })),
                   ..Default::default()
                 }
@@ -329,7 +343,17 @@ impl<'a> State<'a> for GamePageState {
                   None
                 }
               }
-              GameCellState::Flagged => todo!(),
+              GameCellState::Flagged => Some(
+                ImageButton {
+                  file_path: "assets/avoid_the_bomb/images/flag.png",
+                  on_right_mouse_up: Arc::new(Mutex::new(move || {
+                    let mut state = state_arc_1.write().unwrap();
+                    state.set_cell_state(index, GameCellState::Hidden);
+                  })),
+                  ..Default::default()
+                }
+                .into_widget(),
+              ),
             },
             GameCell::Bomb { state } => {
               match state {
@@ -342,10 +366,14 @@ impl<'a> State<'a> for GamePageState {
                       is_cursor_fixed: true,
                       has_effect: false,
                       on_mouse_up: Arc::new(Mutex::new(move || {
-                        let mut state = state_arc.write().unwrap();
+                        let mut state = state_arc_1.write().unwrap();
 
                         // Game over. Reveal the whole game board
                         state.reveal_all();
+                      })),
+                      on_right_mouse_up: Arc::new(Mutex::new(move || {
+                        let mut state = state_arc_2.write().unwrap();
+                        state.set_cell_state(index, GameCellState::Flagged);
                       })),
                       ..Default::default()
                     }
@@ -357,16 +385,19 @@ impl<'a> State<'a> for GamePageState {
                     .call()
                     .into_widget(),
                 ),
-                GameCellState::Flagged => todo!(),
+                GameCellState::Flagged => Some(
+                  ImageButton {
+                    file_path: "assets/avoid_the_bomb/images/flag.png",
+                    on_right_mouse_up: Arc::new(Mutex::new(move || {
+                      let mut state = state_arc_1.write().unwrap();
+                      state.set_cell_state(index, GameCellState::Hidden);
+                    })),
+                    ..Default::default()
+                  }
+                  .into_widget(),
+                ),
               }
-            } // GameCell::Flag => Some(
-              //   ImageButton {
-              //     file_path: "assets/avoid_the_bomb/images/flag.png",
-              //     on_mouse_up: Arc::new(Mutex::new(|| {})),
-              //     ..Default::default()
-              //   }
-              //   .into_widget(),
-              // ),
+            }
           }
         }),
       }

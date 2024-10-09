@@ -36,6 +36,8 @@ pub struct Button<'a> {
   pub on_mouse_out: Arc<Mutex<dyn FnMut() + 'a + Send>>,
   pub on_mouse_down: Arc<Mutex<dyn FnMut() + 'a + Send>>,
   pub on_mouse_up: Arc<Mutex<dyn FnMut() + 'a + Send>>,
+  pub on_right_mouse_down: Arc<Mutex<dyn FnMut() + 'a + Send>>,
+  pub on_right_mouse_up: Arc<Mutex<dyn FnMut() + 'a + Send>>,
 }
 
 impl Debug for Button<'_> {
@@ -79,6 +81,8 @@ impl Default for Button<'_> {
       on_mouse_out: Arc::new(Mutex::new(|| {})),
       on_mouse_down: Arc::new(Mutex::new(|| {})),
       on_mouse_up: Arc::new(Mutex::new(|| {})),
+      on_right_mouse_down: Arc::new(Mutex::new(|| {})),
+      on_right_mouse_up: Arc::new(Mutex::new(|| {})),
     }
   }
 }
@@ -107,6 +111,8 @@ impl<'a> StatefulWidget<'a> for Button<'a> {
       on_mouse_out: Arc::clone(&self.on_mouse_out),
       on_mouse_down: Arc::clone(&self.on_mouse_down),
       on_mouse_up: Arc::clone(&self.on_mouse_up),
+      on_right_mouse_down: Arc::clone(&self.on_right_mouse_down),
+      on_right_mouse_up: Arc::clone(&self.on_right_mouse_up),
       animation_sm: ButtonAnimationSM::new(),
       mouse_down_position: (-1.0, -1.0),
     })
@@ -131,6 +137,8 @@ struct ButtonState<'a> {
   on_mouse_out: Arc<Mutex<dyn FnMut() + 'a + Send>>,
   on_mouse_down: Arc<Mutex<dyn FnMut() + 'a + Send>>,
   on_mouse_up: Arc<Mutex<dyn FnMut() + 'a + Send>>,
+  on_right_mouse_down: Arc<Mutex<dyn FnMut() + 'a + Send>>,
+  on_right_mouse_up: Arc<Mutex<dyn FnMut() + 'a + Send>>,
   animation_sm: ButtonAnimationSM,
   mouse_down_position: (f32, f32),
 }
@@ -183,31 +191,38 @@ impl<'a> State<'a> for ButtonState<'_> {
   }
 
   fn on_mouse_down(&mut self, mouse_position: (f32, f32), mouse_button: MouseButton) -> bool {
-    if mouse_button != MouseButton::Left {
-      return true;
-    }
-
-    if self.has_effect {
-      self.animation_sm.ripple();
-    }
-
-    self.is_elevated = false;
     self.mouse_down_position = mouse_position;
-    self.on_mouse_down.lock().unwrap()();
+
+    match mouse_button {
+      MouseButton::Left => {
+        if self.has_effect {
+          self.animation_sm.ripple();
+        }
+
+        self.is_elevated = false;
+        self.on_mouse_down.lock().unwrap()();
+      }
+      MouseButton::Right => self.on_right_mouse_down.lock().unwrap()(),
+      _ => {}
+    }
+
     true
   }
 
   fn on_mouse_up(&mut self, _mouse_position: (f32, f32), mouse_button: MouseButton) -> bool {
-    if mouse_button != MouseButton::Left {
-      return true;
+    match mouse_button {
+      MouseButton::Left => {
+        if self.has_effect {
+          self.animation_sm.fade_out();
+        }
+
+        self.is_elevated = self.req_is_elevated;
+        self.on_mouse_up.lock().unwrap()();
+      }
+      MouseButton::Right => self.on_right_mouse_up.lock().unwrap()(),
+      _ => {}
     }
 
-    if self.has_effect {
-      self.animation_sm.fade_out();
-    }
-
-    self.is_elevated = self.req_is_elevated;
-    self.on_mouse_up.lock().unwrap()();
     true
   }
 
