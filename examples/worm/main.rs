@@ -4,6 +4,7 @@
 mod i18n;
 mod models;
 mod pages;
+mod widgets;
 
 use flut::{
   app,
@@ -23,14 +24,26 @@ fn main() {
     child: Some(
       Router::new("/", |navigator| {
         HashMap::from_iter([
-          (
-            "/",
-            HomePage {
-              navigator: Arc::clone(&navigator),
-            }
-            .into_widget(),
-          ),
-          ("/game", GamePage { navigator }.into_widget()),
+          ("/", {
+            let navigator = Arc::clone(&navigator);
+
+            Box::new(move || {
+              HomePage {
+                navigator: Arc::clone(&navigator),
+              }
+              .into_widget()
+            }) as _
+          }),
+          ("/game", {
+            let navigator = Arc::clone(&navigator);
+
+            Box::new(move || {
+              GamePage {
+                navigator: Arc::clone(&navigator),
+              }
+              .into_widget()
+            }) as _
+          }),
         ])
       })
       .into_widget(),

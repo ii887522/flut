@@ -1,3 +1,4 @@
+use crate::{boot::context, models::PulseEvent};
 use std::{
   ops::Deref,
   sync::atomic::{AtomicU32, Ordering},
@@ -20,6 +21,10 @@ impl AnimationCount {
   pub fn incr(&mut self) {
     self.0 += 1;
     ANIMATION_COUNT.fetch_add(1, Ordering::Relaxed);
+
+    // Wake up the app event loop
+    let event_sender = context::EVENT_SENDER.get().unwrap();
+    event_sender.push_custom_event(PulseEvent).unwrap();
   }
 }
 

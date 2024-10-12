@@ -1,15 +1,15 @@
 use crate::{
-  i18n::I18N,
   models::{Direction, GameCell, WormCell},
+  widgets::GameOverDialog,
 };
 use flut::{
   boot::context,
   collections::U16SparseSet,
   helpers::{AnimationCount, Clock, ShakeAnimationSM},
-  models::{icon_name, AudioTask, HorizontalAlign, Value},
+  models::{AudioTask, HorizontalAlign},
   widgets::{
-    router::Navigator, stateful_widget::State, widget::*, Column, Dialog, Grid, RectWidget,
-    Spacing, StatefulWidget, Text, Translation, Widget,
+    router::Navigator, stateful_widget::State, widget::*, Column, Grid, RectWidget, Spacing,
+    StatefulWidget, Text, Translation, Widget,
   },
 };
 use rand::prelude::*;
@@ -318,41 +318,14 @@ impl<'a> State<'a> for GamePageState<'a> {
           ),
           if state.is_worm_dead {
             Some(
-              Dialog {
-                color: Color::from_rgb(255, 128, 128),
-                header_icon: icon_name::SKULL,
-                header_title: I18N.with(|i18n| i18n.t("you_died").call()),
-                header_title_font_family: I18N.with(|i18n| i18n.get_default_font_family()),
-                has_ok: true,
-                close_icon: icon_name::SENTIMENT_DISSATISFIED,
-                close_label: I18N.with(|i18n| i18n.t("give_up").call()),
-                close_label_font_family: I18N.with(|i18n| i18n.get_default_font_family()),
-                ok_icon: icon_name::RESTART_ALT,
-                ok_label: I18N.with(|i18n| i18n.t("try_again").call()),
-                ok_label_font_family: I18N.with(|i18n| i18n.get_default_font_family()),
-                on_close: Arc::new(Mutex::new(move || {
-                  let mut navigator = navigator.lock().unwrap();
-                  navigator.go("/");
-                })),
+              GameOverDialog {
+                navigator,
+                score: score as _,
                 on_ok: Arc::new(Mutex::new(move || {
                   // Restart the game
                   let mut state = state_arc_2.write().unwrap();
                   state.init();
                 })),
-                body: Some(
-                  Text::new()
-                    .text(I18N.with(|i18n| {
-                      i18n
-                        .t("you_died_desc")
-                        .message_args(&[("score", Value::Uint(score as _))][..])
-                        .call()
-                    }))
-                    .font_family(I18N.with(|i18n| i18n.get_default_font_family()))
-                    .font_size(24.0)
-                    .call()
-                    .into_widget(),
-                ),
-                ..Default::default()
               }
               .into_widget(),
             )

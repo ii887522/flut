@@ -4,7 +4,18 @@ thread_local! {
   pub(super) static MESSAGES: RefCell<HashMap<&'static str, &'static str>> =
     RefCell::new(
       HashMap::from_iter([
-        ("avoid_the_bomb", "Avoid The Bomb"),
+        ("avoid_the_bomb", "远离炸弹"),
+        ("start_easy_game", "开始简单游戏"),
+        ("start_medium_game", "开始普通游戏"),
+        ("start_hard_game", "开始困难游戏"),
+        ("exit_game", "退出游戏"),
+        ("you_died", "你死了..."),
+        ("give_up", "放弃"),
+        ("try_again", "再试一次"),
+        ("you_died_desc", "你被炸弹炸死了。想再试一次吗？"),
+        ("you_won", "你赢了~~"),
+        ("home", "主页"),
+        ("you_won_desc", "您标记了所有炸弹位置。想再试一次吗？"),
       ]),
     );
 }

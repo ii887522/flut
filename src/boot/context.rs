@@ -1,6 +1,9 @@
 use crate::models::{AssetTask, AudioTask};
 use atomic_float::AtomicF32;
-use sdl2::mouse::{Cursor, SystemCursor};
+use sdl2::{
+  event::EventSender,
+  mouse::{Cursor, SystemCursor},
+};
 use skia_safe::{FontMgr, Image, Typeface};
 use std::{
   cell::{OnceCell, RefCell},
@@ -17,6 +20,7 @@ pub static IMAGES: LazyLock<RwLock<HashMap<&'static str, Image>>> =
 // Queue producers
 pub static MAIN_AUDIO_TX: OnceLock<Sender<AudioTask<'static>>> = OnceLock::new();
 pub static MAIN_ASSET_TX: OnceLock<Sender<AssetTask>> = OnceLock::new();
+pub static EVENT_SENDER: OnceLock<EventSender> = OnceLock::new();
 
 thread_local! {
   pub(crate) static FONT_MGR: FontMgr = FontMgr::new();

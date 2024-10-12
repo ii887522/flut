@@ -1,0 +1,111 @@
+use crate::i18n::I18N;
+use flut::{
+  models::{icon_name, HorizontalAlign, VerticalAlign},
+  widgets::{
+    router::Navigator, widget::*, Button, Column, ImageWidget, Row, Spacing, StatelessWidget, Text,
+    Widget,
+  },
+};
+use skia_safe::{Color, Rect};
+use std::sync::{Arc, Mutex};
+
+#[derive(Debug)]
+pub(crate) struct HomePage<'a> {
+  pub(crate) navigator: Arc<Mutex<Navigator<'a>>>,
+}
+
+impl<'a> StatelessWidget<'a> for HomePage<'a> {
+  fn build(&mut self, _constraint: Rect) -> Widget<'a> {
+    let navigator_arc_1 = Arc::clone(&self.navigator);
+    let navigator_arc_2 = Arc::clone(&self.navigator);
+    let navigator_arc_3 = Arc::clone(&self.navigator);
+
+    Column::new()
+      .align(HorizontalAlign::Center)
+      .children(vec![
+        Spacing {
+          height: 128.0,
+          ..Default::default()
+        }
+        .into_widget(),
+        Row::new()
+          .align(VerticalAlign::Middle)
+          .children(vec![
+            ImageWidget::new("assets/avoid_the_bomb/images/bomb.png")
+              .size((64.0, 64.0))
+              .call()
+              .into_widget(),
+            Spacing {
+              width: 24.0,
+              ..Default::default()
+            }
+            .into_widget(),
+            Text::new()
+              .text(I18N.with(|i18n| i18n.t("avoid_the_bomb").call()))
+              .font_family(I18N.with(|i18n| i18n.get_default_font_family()))
+              .color(Color::from_rgb(114, 114, 114))
+              .font_size(64.0)
+              .call()
+              .into_widget(),
+          ])
+          .call()
+          .into_widget(),
+        Spacing {
+          height: 192.0,
+          ..Default::default()
+        }
+        .into_widget(),
+        Button {
+          bg_color: Color::GREEN,
+          icon: icon_name::SENTIMENT_VERY_SATISFIED,
+          label: I18N.with(|i18n| i18n.t("start_easy_game").call()),
+          label_font_family: I18N.with(|i18n| i18n.get_default_font_family()),
+          size: (352.0, 64.0),
+          on_mouse_up: Arc::new(Mutex::new(move || {
+            let mut navigator = navigator_arc_1.lock().unwrap();
+            navigator.go("/game"); // todo: /game?difficulty=easy
+          })),
+          ..Default::default()
+        }
+        .into_widget(),
+        Spacing {
+          height: 64.0,
+          ..Default::default()
+        }
+        .into_widget(),
+        Button {
+          bg_color: Color::YELLOW,
+          icon: icon_name::SENTIMENT_NEUTRAL,
+          label: I18N.with(|i18n| i18n.t("start_medium_game").call()),
+          label_font_family: I18N.with(|i18n| i18n.get_default_font_family()),
+          size: (352.0, 64.0),
+          on_mouse_up: Arc::new(Mutex::new(move || {
+            let mut navigator = navigator_arc_2.lock().unwrap();
+            navigator.go("/game"); // todo: /game?difficulty=medium
+          })),
+          ..Default::default()
+        }
+        .into_widget(),
+        Spacing {
+          height: 64.0,
+          ..Default::default()
+        }
+        .into_widget(),
+        Button {
+          bg_color: Color::RED,
+          icon: icon_name::SENTIMENT_VERY_DISSATISFIED,
+          label: I18N.with(|i18n| i18n.t("start_hard_game").call()),
+          label_font_family: I18N.with(|i18n| i18n.get_default_font_family()),
+          size: (352.0, 64.0),
+          on_mouse_up: Arc::new(Mutex::new(move || {
+            let mut navigator = navigator_arc_3.lock().unwrap();
+            navigator.go("/game"); // todo: /game?difficulty=hard
+          })),
+          ..Default::default()
+        }
+        .into_widget(),
+      ])
+      .call()
+      .into_widget()
+  }
+}

@@ -1,6 +1,7 @@
 use crate::{
   boot::{asset, audio, context},
   helpers::AnimationCount,
+  models::PulseEvent,
   widgets::Widget,
   WidgetTree,
 };
@@ -70,6 +71,17 @@ pub fn run(app: App<'_>) {
   let (asset_tx, asset_rx) = mpsc::channel();
   context::MAIN_ASSET_TX.set(asset_tx).unwrap();
   thread::spawn(|| asset::main(asset_rx));
+
+  let event_subsys = sdl.event().unwrap();
+  event_subsys.register_custom_event::<PulseEvent>().unwrap();
+
+  // EventSender does not implement Debug, cannot unwrap() the Result, fallback to "if" checking
+  if context::EVENT_SENDER
+    .set(event_subsys.event_sender())
+    .is_err()
+  {
+    unreachable!("context::EVENT_SENDER was set by another set() call");
+  }
 
   let vid_subsys = sdl.video().unwrap();
   let gl_attr = vid_subsys.gl_attr();

@@ -4,6 +4,7 @@ pub mod horizontal_align;
 pub mod icon_name;
 pub mod lang;
 pub mod origin;
+pub mod pulse_event;
 pub mod value;
 pub mod vertical_align;
 
@@ -12,5 +13,6 @@ pub use audio_task::AudioTask;
 pub use horizontal_align::HorizontalAlign;
 pub use lang::Lang;
 pub use origin::Origin;
+pub use pulse_event::PulseEvent;
 pub use value::Value;
 pub use vertical_align::VerticalAlign;
