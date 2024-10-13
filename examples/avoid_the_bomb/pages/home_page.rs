@@ -1,6 +1,6 @@
 use crate::i18n::I18N;
 use flut::{
-  models::{icon_name, HorizontalAlign, VerticalAlign},
+  models::{icon_name, HorizontalAlign, Lang, VerticalAlign},
   widgets::{
     router::Navigator, widget::*, Button, Column, ImageWidget, Row, Spacing, StatelessWidget, Text,
     Widget,
@@ -60,7 +60,10 @@ impl<'a> StatelessWidget<'a> for HomePage<'a> {
           icon: icon_name::SENTIMENT_VERY_SATISFIED,
           label: I18N.with(|i18n| i18n.t("start_easy_game").call()),
           label_font_family: I18N.with(|i18n| i18n.get_default_font_family()),
-          size: (352.0, 64.0),
+          size: I18N.with(|i18n| match i18n.get_current_lang() {
+            Lang::Id => (480.0, 64.0),
+            _ => (352.0, 64.0),
+          }),
           on_mouse_up: Arc::new(Mutex::new(move || {
             let mut navigator = navigator_arc_1.lock().unwrap();
             navigator.go("/game?difficulty=easy");
@@ -78,7 +81,10 @@ impl<'a> StatelessWidget<'a> for HomePage<'a> {
           icon: icon_name::SENTIMENT_NEUTRAL,
           label: I18N.with(|i18n| i18n.t("start_medium_game").call()),
           label_font_family: I18N.with(|i18n| i18n.get_default_font_family()),
-          size: (352.0, 64.0),
+          size: I18N.with(|i18n| match i18n.get_current_lang() {
+            Lang::Id => (480.0, 64.0),
+            _ => (352.0, 64.0),
+          }),
           on_mouse_up: Arc::new(Mutex::new(move || {
             let mut navigator = navigator_arc_2.lock().unwrap();
             navigator.go("/game?difficulty=medium");
@@ -96,7 +102,10 @@ impl<'a> StatelessWidget<'a> for HomePage<'a> {
           icon: icon_name::SENTIMENT_VERY_DISSATISFIED,
           label: I18N.with(|i18n| i18n.t("start_hard_game").call()),
           label_font_family: I18N.with(|i18n| i18n.get_default_font_family()),
-          size: (352.0, 64.0),
+          size: I18N.with(|i18n| match i18n.get_current_lang() {
+            Lang::Id => (480.0, 64.0),
+            _ => (352.0, 64.0),
+          }),
           on_mouse_up: Arc::new(Mutex::new(move || {
             let mut navigator = navigator_arc_3.lock().unwrap();
             navigator.go("/game?difficulty=hard");

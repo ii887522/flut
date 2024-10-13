@@ -32,6 +32,10 @@ impl I18n {
     }
   }
 
+  pub const fn get_current_lang(&self) -> Lang {
+    self.current_lang
+  }
+
   pub const fn get_default_font_family(&self) -> &'static str {
     self.current_lang.get_default_font_family()
   }

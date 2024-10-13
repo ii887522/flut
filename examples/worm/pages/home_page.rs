@@ -1,6 +1,6 @@
 use crate::i18n::I18N;
 use flut::{
-  models::{icon_name, HorizontalAlign, VerticalAlign},
+  models::{icon_name, HorizontalAlign, Lang, VerticalAlign},
   widgets::{
     router::Navigator, widget::*, Button, Column, ImageWidget, Row, Spacing, StatelessWidget, Text,
     Widget,
@@ -61,7 +61,10 @@ impl<'a> StatelessWidget<'a> for HomePage<'a> {
           icon: icon_name::PLAY_ARROW,
           label: I18N.with(|i18n| i18n.t("start_game").call()),
           label_font_family: I18N.with(|i18n| i18n.get_default_font_family()),
-          size: (256.0, 64.0),
+          size: I18N.with(|i18n| match i18n.get_current_lang() {
+            Lang::Id => (384.0, 64.0),
+            _ => (256.0, 64.0),
+          }),
           on_mouse_up: Arc::new(Mutex::new(move || {
             let mut navigator = navigator.lock().unwrap();
             navigator.go("/game");
@@ -79,7 +82,10 @@ impl<'a> StatelessWidget<'a> for HomePage<'a> {
           icon: icon_name::LOGOUT,
           label: I18N.with(|i18n| i18n.t("exit_game").call()),
           label_font_family: I18N.with(|i18n| i18n.get_default_font_family()),
-          size: (256.0, 64.0),
+          size: I18N.with(|i18n| match i18n.get_current_lang() {
+            Lang::Id => (384.0, 64.0),
+            _ => (256.0, 64.0),
+          }),
           on_mouse_up: Arc::new(Mutex::new(|| process::exit(0))),
           ..Default::default()
         }

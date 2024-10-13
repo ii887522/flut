@@ -1,7 +1,7 @@
 use crate::i18n::I18N;
 use flut::{
   models::{icon_name, Value},
-  widgets::{router::Navigator, widget::*, Dialog, StatelessWidget, Text, Widget},
+  widgets::{router::Navigator, widget::*, Dialog, StatelessWidget, TextBlock, Widget},
 };
 use skia_safe::{Color, Rect};
 use std::{
@@ -53,7 +53,7 @@ impl<'a> StatelessWidget<'a> for GameOverDialog<'a> {
       })),
       on_ok: Arc::clone(&self.on_ok),
       body: Some(
-        Text::new()
+        TextBlock::new()
           .text(I18N.with(|i18n| {
             i18n
               .t("you_died_desc")

@@ -1,7 +1,7 @@
 use crate::i18n::I18N;
 use flut::{
   models::icon_name,
-  widgets::{router::Navigator, widget::*, Dialog, StatelessWidget, Text, Widget},
+  widgets::{router::Navigator, widget::*, Dialog, StatelessWidget, TextBlock, Widget},
 };
 use skia_safe::{Color, Rect};
 use std::{
@@ -51,7 +51,7 @@ impl<'a> StatelessWidget<'a> for YouWonDialog<'a> {
       })),
       on_ok: Arc::clone(&self.on_ok),
       body: Some(
-        Text::new()
+        TextBlock::new()
           .text(I18N.with(|i18n| i18n.t("you_won_desc").call()))
           .font_family(I18N.with(|i18n| i18n.get_default_font_family()))
           .font_size(24.0)
