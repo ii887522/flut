@@ -260,7 +260,7 @@ impl<'a> State<'a> for ButtonState<'_> {
               constraint.x() + constraint.width() * 0.5,
               constraint.y() + constraint.height() * 0.5,
             ),
-            size: (0.0, 0.0),
+            size: (constraint.width(), constraint.height()),
             origin: Origin::Center,
             child: Some(
               Row::new()
@@ -386,6 +386,8 @@ impl ButtonAnimationSM {
       ripple_radius: Animation::new(0.0, 0.0, 0.0),
       ripple_alpha: Animation::new(0.0, 0.0, 0.0),
       state: ButtonAnimationState::Start,
+
+      // Constraint defaults to app size first, later will be overridden with actual button size in ButtonState::build()
       constraint: Rect::from_size((
         context::DRAWABLE_SIZE.0.load(Ordering::Relaxed),
         context::DRAWABLE_SIZE.1.load(Ordering::Relaxed),

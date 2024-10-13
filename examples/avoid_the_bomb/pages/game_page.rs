@@ -1,5 +1,5 @@
 use crate::{
-  models::{GameCell, GameCellState, GameState},
+  models::{Difficulty, GameCell, GameCellState, GameState},
   widgets::{GameOverDialog, YouWonDialog},
 };
 use flut::{
@@ -23,14 +23,11 @@ use std::{
 
 const COL_COUNT: u16 = 31;
 const ROW_COUNT: u16 = 31;
-const BOMB_COUNT: u32 = 100;
-// todo: Easy = 50
-// todo: Medium = 100
-// todo: Hard = 200
 
 #[derive(Debug, Default)]
 pub(crate) struct GamePage<'a> {
   pub(crate) navigator: Arc<Mutex<Navigator<'a>>>,
+  pub(crate) difficulty: Difficulty,
 }
 
 impl<'a> StatefulWidget<'a> for GamePage<'a> {
@@ -50,13 +47,14 @@ impl<'a> StatefulWidget<'a> for GamePage<'a> {
 
     Box::new(GamePageState {
       navigator: Arc::clone(&self.navigator),
-      inner: Arc::new(RwLock::new(GamePageStateInner::new())),
+      inner: Arc::new(RwLock::new(GamePageStateInner::new(self.difficulty))),
     })
   }
 }
 
 #[derive(Debug, Default)]
 struct GamePageStateInner {
+  difficulty: Difficulty,
   grid_model: Vec<GameCell>,
   flagged_bomb_count: u32,
   visible_digit_count: u32,
@@ -72,8 +70,11 @@ struct GamePageState<'a> {
 }
 
 impl GamePageStateInner {
-  fn new() -> Self {
-    let mut this = Self::default();
+  fn new(difficulty: Difficulty) -> Self {
+    let mut this = Self {
+      difficulty,
+      ..Default::default()
+    };
     this.init();
     this
   }
@@ -94,7 +95,7 @@ impl GamePageStateInner {
     for bomb_index in index::sample(
       &mut thread_rng(),
       (COL_COUNT * ROW_COUNT) as _,
-      BOMB_COUNT as _,
+      self.difficulty.get_bomb_count(),
     ) {
       grid_model[bomb_index] = GameCell::Bomb {
         state: GameCellState::Hidden,

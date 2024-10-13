@@ -63,7 +63,7 @@ impl<'a> StatelessWidget<'a> for HomePage<'a> {
           size: (352.0, 64.0),
           on_mouse_up: Arc::new(Mutex::new(move || {
             let mut navigator = navigator_arc_1.lock().unwrap();
-            navigator.go("/game"); // todo: /game?difficulty=easy
+            navigator.go("/game?difficulty=easy");
           })),
           ..Default::default()
         }
@@ -81,7 +81,7 @@ impl<'a> StatelessWidget<'a> for HomePage<'a> {
           size: (352.0, 64.0),
           on_mouse_up: Arc::new(Mutex::new(move || {
             let mut navigator = navigator_arc_2.lock().unwrap();
-            navigator.go("/game"); // todo: /game?difficulty=medium
+            navigator.go("/game?difficulty=medium");
           })),
           ..Default::default()
         }
@@ -99,7 +99,7 @@ impl<'a> StatelessWidget<'a> for HomePage<'a> {
           size: (352.0, 64.0),
           on_mouse_up: Arc::new(Mutex::new(move || {
             let mut navigator = navigator_arc_3.lock().unwrap();
-            navigator.go("/game"); // todo: /game?difficulty=hard
+            navigator.go("/game?difficulty=hard");
           })),
           ..Default::default()
         }

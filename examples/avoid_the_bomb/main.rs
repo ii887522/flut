@@ -12,6 +12,7 @@ use flut::{
   App,
 };
 use i18n::I18N;
+use models::Difficulty;
 use pages::{GamePage, HomePage};
 use std::{collections::HashMap, sync::Arc};
 
@@ -27,7 +28,7 @@ fn main() {
           ("/", {
             let navigator = Arc::clone(&navigator);
 
-            Box::new(move || {
+            Box::new(move |_qs_params: HashMap<&str, &str>| {
               HomePage {
                 navigator: Arc::clone(&navigator),
               }
@@ -37,9 +38,10 @@ fn main() {
           ("/game", {
             let navigator = Arc::clone(&navigator);
 
-            Box::new(move || {
+            Box::new(move |qs_params: HashMap<&str, &str>| {
               GamePage {
                 navigator: Arc::clone(&navigator),
+                difficulty: Difficulty::from(*qs_params.get("difficulty").unwrap_or(&"")),
               }
               .into_widget()
             }) as _

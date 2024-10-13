@@ -27,7 +27,7 @@ fn main() {
           ("/", {
             let navigator = Arc::clone(&navigator);
 
-            Box::new(move || {
+            Box::new(move |_qs_params: HashMap<&str, &str>| {
               HomePage {
                 navigator: Arc::clone(&navigator),
               }
@@ -37,7 +37,7 @@ fn main() {
           ("/game", {
             let navigator = Arc::clone(&navigator);
 
-            Box::new(move || {
+            Box::new(move |_qs_params: HashMap<&str, &str>| {
               GamePage {
                 navigator: Arc::clone(&navigator),
               }

@@ -1,5 +1,5 @@
 use super::{stateful_widget::State, StatefulWidget, Widget};
-use crate::helpers::AnimationCount;
+use crate::{helpers::AnimationCount, models::Route};
 use skia_safe::Rect;
 use std::{
   collections::HashMap,
@@ -8,9 +8,12 @@ use std::{
   sync::{Arc, Mutex},
 };
 
+type QsParams<'a> = HashMap<&'a str, &'a str>;
+type ChildBuilder<'a> = dyn Fn(QsParams<'_>) -> Widget<'a> + 'a + Send + Sync;
+
 pub struct Router<'a> {
   navigator: Arc<Mutex<Navigator<'a>>>,
-  children: HashMap<&'a str, Box<dyn Fn() -> Widget<'a> + 'a + Send + Sync>>,
+  children: HashMap<&'a str, Box<ChildBuilder<'a>>>,
 }
 
 impl Debug for Router<'_> {
@@ -25,7 +28,9 @@ impl Debug for Router<'_> {
 impl<'a> Router<'a> {
   pub fn new(
     initial_route: &'a str,
-    children: impl Fn(Arc<Mutex<Navigator<'a>>>) -> HashMap<&str, Box<dyn Fn() -> Widget<'a> + 'a + Send + Sync>>
+    children: impl Fn(
+        Arc<Mutex<Navigator<'a>>>,
+      ) -> HashMap<&str, Box<dyn Fn(QsParams<'_>) -> Widget<'a> + 'a + Send + Sync>>
       + 'a,
   ) -> Self {
     let navigator = Arc::new(Mutex::new(Navigator::new(initial_route)));
@@ -49,7 +54,7 @@ impl<'a> StatefulWidget<'a> for Router<'a> {
 
 struct RouterState<'a> {
   navigator: Arc<Mutex<Navigator<'a>>>,
-  children: HashMap<&'a str, Box<dyn Fn() -> Widget<'a> + 'a + Send + Sync>>,
+  children: HashMap<&'a str, Box<ChildBuilder<'a>>>,
 }
 
 impl Debug for RouterState<'_> {
@@ -75,9 +80,8 @@ impl<'a> State<'a> for RouterState<'a> {
 
   fn build(&mut self, _constraint: Rect) -> Widget<'a> {
     let navigator = self.navigator.lock().unwrap();
-    // todo: /game?difficulty=medium&a=b&a=c
-    // todo: -> Route { path: "/game", qs_params: "difficulty=medium&a=b&a=c" }
-    self.children[navigator.current_route]()
+    let route = Route::from_relative_url(navigator.current_route);
+    self.children[route.path](route.qs_params)
   }
 }
 
