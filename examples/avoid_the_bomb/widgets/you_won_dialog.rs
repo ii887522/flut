@@ -1,7 +1,13 @@
 use crate::i18n::I18N;
 use flut::{
-  models::icon_name,
-  widgets::{router::Navigator, widget::*, Dialog, StatelessWidget, TextBlock, Widget},
+  models::{icon_name, TextStyle},
+  widgets::{
+    button::LabelStyle,
+    dialog::{DialogButton, DialogHeader, TitleStyle},
+    router::Navigator,
+    widget::*,
+    Dialog, StatelessWidget, TextBlock, Widget,
+  },
 };
 use skia_safe::{Color, Rect};
 use std::{
@@ -35,16 +41,32 @@ impl<'a> StatelessWidget<'a> for YouWonDialog<'a> {
 
     Dialog {
       color: Color::from_rgb(128, 255, 128),
-      header_icon: icon_name::SENTIMENT_VERY_SATISFIED,
-      header_title: I18N.with(|i18n| i18n.t("you_won").call()),
-      header_title_font_family: I18N.with(|i18n| i18n.get_default_font_family()),
+      header: DialogHeader {
+        icon: icon_name::SENTIMENT_VERY_SATISFIED,
+        title: I18N.with(|i18n| i18n.t("you_won").call()),
+        title_style: TitleStyle {
+          font_family: I18N.with(|i18n| i18n.get_default_font_family()),
+          ..Default::default()
+        },
+        ..Default::default()
+      },
       has_ok: true,
-      close_icon: icon_name::HOME,
-      close_label: I18N.with(|i18n| i18n.t("home").call()),
-      close_label_font_family: I18N.with(|i18n| i18n.get_default_font_family()),
-      ok_icon: icon_name::RESTART_ALT,
-      ok_label: I18N.with(|i18n| i18n.t("try_again").call()),
-      ok_label_font_family: I18N.with(|i18n| i18n.get_default_font_family()),
+      close_btn: DialogButton {
+        icon: icon_name::HOME,
+        label: I18N.with(|i18n| i18n.t("home").call()),
+        label_style: LabelStyle {
+          font_family: I18N.with(|i18n| i18n.get_default_font_family()),
+          ..Default::default()
+        },
+      },
+      ok_btn: DialogButton {
+        icon: icon_name::RESTART_ALT,
+        label: I18N.with(|i18n| i18n.t("try_again").call()),
+        label_style: LabelStyle {
+          font_family: I18N.with(|i18n| i18n.get_default_font_family()),
+          ..Default::default()
+        },
+      },
       on_close: Arc::new(Mutex::new(move || {
         let mut navigator = navigator.lock().unwrap();
         navigator.go("/");
@@ -53,12 +75,14 @@ impl<'a> StatelessWidget<'a> for YouWonDialog<'a> {
       body: Some(
         TextBlock::new()
           .text(I18N.with(|i18n| i18n.t("you_won_desc").call()))
-          .font_family(I18N.with(|i18n| i18n.get_default_font_family()))
-          .font_size(24.0)
+          .style(TextStyle {
+            font_family: I18N.with(|i18n| i18n.get_default_font_family()),
+            font_size: 24.0,
+            ..Default::default()
+          })
           .call()
           .into_widget(),
       ),
-      ..Default::default()
     }
     .into_widget()
   }

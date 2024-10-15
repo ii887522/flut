@@ -4,8 +4,8 @@ use super::{
 };
 use crate::{
   boot::context,
-  helpers::{Animation, AnimationCount},
-  models::{Origin, VerticalAlign},
+  helpers::{consts, Animation, AnimationCount},
+  models::{Origin, TextStyle, VerticalAlign},
 };
 use sdl2::mouse::MouseButton;
 use skia_safe::{
@@ -18,16 +18,45 @@ use std::{
   sync::{atomic::Ordering, Arc, Mutex},
 };
 
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct LabelStyle {
+  pub font_family: &'static str,
+  pub font_style: FontStyle,
+  pub font_size: f32,
+  pub color: Color,
+}
+
+impl Default for LabelStyle {
+  fn default() -> Self {
+    Self {
+      font_family: consts::DEFAULT_FONT_FAMILY,
+      font_style: FontStyle::new(Weight::SEMI_BOLD, Width::NORMAL, Slant::Upright),
+      font_size: 28.0,
+      color: Color::BLACK,
+    }
+  }
+}
+
+impl From<LabelStyle> for TextStyle {
+  fn from(style: LabelStyle) -> Self {
+    TextStyle {
+      font_family: style.font_family,
+      font_style: style.font_style,
+      font_size: style.font_size,
+      color: style.color,
+    }
+  }
+}
+
 pub struct Button<'a> {
+  pub is_enabled: bool,
   pub bg_color: Color,
   pub border_radius: f32,
   pub is_elevated: bool,
   pub icon: u16,
   pub icon_color: Color,
   pub label: Cow<'static, str>,
-  pub label_font_family: &'static str,
-  pub label_font_size: f32,
-  pub label_color: Color,
+  pub label_style: LabelStyle,
   pub size: (f32, f32),
   pub child_align: VerticalAlign,
   pub is_cursor_fixed: bool,
@@ -44,15 +73,14 @@ impl Debug for Button<'_> {
   fn fmt(&self, fmt: &mut Formatter<'_>) -> fmt::Result {
     fmt
       .debug_struct("Button")
+      .field("is_enabled", &self.is_enabled)
       .field("bg_color", &self.bg_color)
       .field("border_radius", &self.border_radius)
       .field("is_elevated", &self.is_elevated)
       .field("icon", &self.icon)
       .field("icon_color", &self.icon_color)
       .field("label", &self.label)
-      .field("label_font_family", &self.label_font_family)
-      .field("label_font_size", &self.label_font_size)
-      .field("label_color", &self.label_color)
+      .field("label_style", &self.label_style)
       .field("size", &self.size)
       .field("child_align", &self.child_align)
       .field("is_cursor_fixed", &self.is_cursor_fixed)
@@ -64,15 +92,14 @@ impl Debug for Button<'_> {
 impl Default for Button<'_> {
   fn default() -> Self {
     Self {
+      is_enabled: true,
       bg_color: Color::WHITE,
       border_radius: 8.0,
       is_elevated: true,
       icon: 0,
       icon_color: Color::BLACK,
       label: Cow::Borrowed(""),
-      label_font_family: "Arial",
-      label_font_size: 28.0,
-      label_color: Color::BLACK,
+      label_style: LabelStyle::default(),
       size: (-1.0, -1.0),
       child_align: VerticalAlign::Middle,
       is_cursor_fixed: false,
@@ -94,6 +121,7 @@ impl<'a> StatefulWidget<'a> for Button<'a> {
 
   fn new_state(&mut self) -> Box<dyn State<'a> + 'a> {
     Box::new(ButtonState {
+      is_enabled: self.is_enabled,
       bg_color: self.bg_color,
       border_radius: self.border_radius,
       req_is_elevated: self.is_elevated,
@@ -101,9 +129,7 @@ impl<'a> StatefulWidget<'a> for Button<'a> {
       icon: self.icon,
       icon_color: self.icon_color,
       label: self.label.to_string(),
-      label_font_family: self.label_font_family,
-      label_font_size: self.label_font_size,
-      label_color: self.label_color,
+      label_style: self.label_style,
       child_align: self.child_align,
       is_cursor_fixed: self.is_cursor_fixed,
       has_effect: self.has_effect,
@@ -120,6 +146,7 @@ impl<'a> StatefulWidget<'a> for Button<'a> {
 }
 
 struct ButtonState<'a> {
+  is_enabled: bool,
   bg_color: Color,
   border_radius: f32,
   req_is_elevated: bool,
@@ -127,9 +154,7 @@ struct ButtonState<'a> {
   icon: u16,
   icon_color: Color,
   label: String,
-  label_font_family: &'static str,
-  label_font_size: f32,
-  label_color: Color,
+  label_style: LabelStyle,
   child_align: VerticalAlign,
   is_cursor_fixed: bool,
   has_effect: bool,
@@ -147,6 +172,7 @@ impl Debug for ButtonState<'_> {
   fn fmt(&self, fmt: &mut Formatter<'_>) -> fmt::Result {
     fmt
       .debug_struct("ButtonState")
+      .field("is_enabled", &self.is_enabled)
       .field("bg_color", &self.bg_color)
       .field("border_radius", &self.border_radius)
       .field("req_is_elevated", &self.req_is_elevated)
@@ -154,9 +180,7 @@ impl Debug for ButtonState<'_> {
       .field("icon", &self.icon)
       .field("icon_color", &self.icon_color)
       .field("label", &self.label)
-      .field("label_font_family", &self.label_font_family)
-      .field("label_font_size", &self.label_font_size)
-      .field("label_color", &self.label_color)
+      .field("label_style", &self.label_style)
       .field("child_align", &self.child_align)
       .field("is_cursor_fixed", &self.is_cursor_fixed)
       .field("has_effect", &self.has_effect)
@@ -168,6 +192,10 @@ impl Debug for ButtonState<'_> {
 
 impl<'a> State<'a> for ButtonState<'_> {
   fn on_mouse_over(&mut self, _mouse_position: (f32, f32)) -> bool {
+    if !self.is_enabled {
+      return true;
+    }
+
     if !self.is_cursor_fixed {
       context::HAND_CURSOR.with(|hand_cursor| hand_cursor.set());
     }
@@ -177,6 +205,10 @@ impl<'a> State<'a> for ButtonState<'_> {
   }
 
   fn on_mouse_out(&mut self, _mouse_position: (f32, f32)) -> bool {
+    if !self.is_enabled {
+      return true;
+    }
+
     if !self.is_cursor_fixed {
       context::ARROW_CURSOR.with(|arrow_cursor| arrow_cursor.set());
     }
@@ -191,6 +223,10 @@ impl<'a> State<'a> for ButtonState<'_> {
   }
 
   fn on_mouse_down(&mut self, mouse_position: (f32, f32), mouse_button: MouseButton) -> bool {
+    if !self.is_enabled {
+      return true;
+    }
+
     self.mouse_down_position = mouse_position;
 
     match mouse_button {
@@ -210,6 +246,10 @@ impl<'a> State<'a> for ButtonState<'_> {
   }
 
   fn on_mouse_up(&mut self, _mouse_position: (f32, f32), mouse_button: MouseButton) -> bool {
+    if !self.is_enabled {
+      return true;
+    }
+
     match mouse_button {
       MouseButton::Left => {
         if self.has_effect {
@@ -227,7 +267,7 @@ impl<'a> State<'a> for ButtonState<'_> {
   }
 
   fn update(&mut self, dt: f32) -> bool {
-    if self.has_effect {
+    if self.is_enabled && self.has_effect {
       return self.animation_sm.update(dt);
     }
 
@@ -295,14 +335,7 @@ impl<'a> State<'a> for ButtonState<'_> {
                       Some(
                         Text::new()
                           .text(self.label.to_string())
-                          .font_family(self.label_font_family)
-                          .font_size(self.label_font_size)
-                          .font_style(FontStyle::new(
-                            Weight::SEMI_BOLD,
-                            Width::NORMAL,
-                            Slant::Upright,
-                          ))
-                          .color(self.label_color)
+                          .style(self.label_style)
                           .call()
                           .into_widget(),
                       )

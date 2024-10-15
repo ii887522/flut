@@ -1,11 +1,11 @@
 use super::{
-  stateful_widget::State, widget::*, RectWidget, Stack, StackChild, StatefulWidget,
-  StatelessWidget, Widget,
+  button::LabelStyle, stateful_widget::State, widget::*, RectWidget, Stack, StackChild,
+  StatefulWidget, StatelessWidget, Widget,
 };
 use crate::{
   boot::context,
-  helpers::{Animation, AnimationCount},
-  models::{icon_name, Origin},
+  helpers::{consts, Animation, AnimationCount},
+  models::{icon_name, Origin, TextStyle},
   widgets::{Button, Icon, Text},
 };
 use sdl2::mouse::MouseButton;
@@ -28,19 +28,67 @@ thread_local! {
   );
 }
 
+#[derive(Clone, Debug, PartialEq)]
+pub struct DialogHeader {
+  pub icon: u16,
+  pub icon_color: Color,
+  pub title: Cow<'static, str>,
+  pub title_style: TitleStyle,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct TitleStyle {
+  pub font_family: &'static str,
+  pub font_style: FontStyle,
+  pub font_size: f32,
+  pub color: Color,
+}
+
+impl Default for TitleStyle {
+  fn default() -> Self {
+    Self {
+      font_family: consts::DEFAULT_FONT_FAMILY,
+      font_style: FontStyle::new(Weight::SEMI_BOLD, Width::NORMAL, Slant::Upright),
+      font_size: 32.0,
+      color: Color::BLACK,
+    }
+  }
+}
+
+impl From<TitleStyle> for TextStyle {
+  fn from(style: TitleStyle) -> Self {
+    Self {
+      font_family: style.font_family,
+      font_style: style.font_style,
+      font_size: style.font_size,
+      color: style.color,
+    }
+  }
+}
+
+impl Default for DialogHeader {
+  fn default() -> Self {
+    Self {
+      icon: 0,
+      icon_color: Color::BLACK,
+      title: Cow::Borrowed(""),
+      title_style: TitleStyle::default(),
+    }
+  }
+}
+
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct DialogButton {
+  pub icon: u16,
+  pub label: Cow<'static, str>,
+  pub label_style: LabelStyle,
+}
+
 pub struct Dialog<'a> {
   pub color: Color,
-  pub header_icon: u16,
-  pub header_icon_color: Color,
-  pub header_title: Cow<'static, str>,
-  pub header_title_font_family: &'static str,
-  pub header_title_color: Color,
-  pub close_icon: u16,
-  pub close_label: Cow<'static, str>,
-  pub close_label_font_family: &'static str,
-  pub ok_icon: u16,
-  pub ok_label: Cow<'static, str>,
-  pub ok_label_font_family: &'static str,
+  pub header: DialogHeader,
+  pub close_btn: DialogButton,
+  pub ok_btn: DialogButton,
   pub has_ok: bool,
   pub on_close: Arc<Mutex<dyn FnMut() + 'a + Send>>,
   pub on_ok: Arc<Mutex<dyn FnMut() + 'a + Send>>,
@@ -52,17 +100,9 @@ impl Debug for Dialog<'_> {
     fmt
       .debug_struct("Dialog")
       .field("color", &self.color)
-      .field("header_icon", &self.header_icon)
-      .field("header_icon_color", &self.header_icon_color)
-      .field("header_title", &self.header_title)
-      .field("header_title_font_family", &self.header_title_font_family)
-      .field("header_title_color", &self.header_title_color)
-      .field("close_icon", &self.close_icon)
-      .field("close_label", &self.close_label)
-      .field("close_label_font_family", &self.close_label_font_family)
-      .field("ok_icon", &self.ok_icon)
-      .field("ok_label", &self.ok_label)
-      .field("ok_label_font_family", &self.ok_label_font_family)
+      .field("header", &self.header)
+      .field("close_btn", &self.close_btn)
+      .field("ok_btn", &self.ok_btn)
       .field("has_ok", &self.has_ok)
       .field("body", &self.body)
       .finish_non_exhaustive()
@@ -73,21 +113,21 @@ impl Default for Dialog<'_> {
   fn default() -> Self {
     Self {
       color: Color::BLACK,
-      header_icon: 0,
-      header_icon_color: Color::BLACK,
-      header_title: Cow::Borrowed(""),
-      header_title_font_family: "Arial",
-      header_title_color: Color::BLACK,
-      body: None,
-      close_icon: icon_name::CLOSE,
-      close_label: Cow::Borrowed("Close"),
-      close_label_font_family: "Arial",
-      ok_icon: icon_name::CHECK,
-      ok_label: Cow::Borrowed("OK"),
-      ok_label_font_family: "Arial",
+      header: DialogHeader::default(),
+      close_btn: DialogButton {
+        icon: icon_name::CLOSE,
+        label: Cow::Borrowed("Close"),
+        ..Default::default()
+      },
+      ok_btn: DialogButton {
+        icon: icon_name::CHECK,
+        label: Cow::Borrowed("OK"),
+        ..Default::default()
+      },
       has_ok: false,
       on_close: Arc::new(Mutex::new(|| {})),
       on_ok: Arc::new(Mutex::new(|| {})),
+      body: None,
     }
   }
 }
@@ -96,17 +136,9 @@ impl<'a> StatefulWidget<'a> for Dialog<'a> {
   fn new_state(&mut self) -> Box<dyn State<'a> + 'a> {
     Box::new(DialogState {
       color: self.color,
-      header_icon: self.header_icon,
-      header_icon_color: self.header_icon_color,
-      header_title: self.header_title.to_string(),
-      header_title_font_family: self.header_title_font_family,
-      header_title_color: self.header_title_color,
-      close_icon: self.close_icon,
-      close_label: self.close_label.to_string(),
-      close_label_font_family: self.close_label_font_family,
-      ok_icon: self.ok_icon,
-      ok_label: self.ok_label.to_string(),
-      ok_label_font_family: self.ok_label_font_family,
+      header: self.header.clone(),
+      close_btn: self.close_btn.clone(),
+      ok_btn: self.ok_btn.clone(),
       has_ok: self.has_ok,
       on_close: Arc::clone(&self.on_close),
       on_ok: Arc::clone(&self.on_ok),
@@ -126,17 +158,9 @@ impl<'a> StatefulWidget<'a> for Dialog<'a> {
 
 struct DialogState<'a> {
   color: Color,
-  header_icon: u16,
-  header_icon_color: Color,
-  header_title: String,
-  header_title_font_family: &'static str,
-  header_title_color: Color,
-  close_icon: u16,
-  close_label: String,
-  close_label_font_family: &'static str,
-  ok_icon: u16,
-  ok_label: String,
-  ok_label_font_family: &'static str,
+  header: DialogHeader,
+  close_btn: DialogButton,
+  ok_btn: DialogButton,
   has_ok: bool,
   on_close: Arc<Mutex<dyn FnMut() + 'a + Send>>,
   on_ok: Arc<Mutex<dyn FnMut() + 'a + Send>>,
@@ -150,17 +174,9 @@ impl Debug for DialogState<'_> {
     fmt
       .debug_struct("DialogState")
       .field("color", &self.color)
-      .field("header_icon", &self.header_icon)
-      .field("header_icon_color", &self.header_icon_color)
-      .field("header_title", &self.header_title)
-      .field("header_title_font_family", &self.header_title_font_family)
-      .field("header_title_color", &self.header_title_color)
-      .field("close_icon", &self.close_icon)
-      .field("close_label", &self.close_label)
-      .field("close_label_font_family", &self.close_label_font_family)
-      .field("ok_icon", &self.ok_icon)
-      .field("ok_label", &self.ok_label)
-      .field("ok_label_font_family", &self.ok_label_font_family)
+      .field("header", &self.header)
+      .field("close_btn", &self.close_btn)
+      .field("ok_btn", &self.ok_btn)
       .field("has_ok", &self.has_ok)
       .field("body", &self.body)
       .field("animation_sm", &self.animation_sm)
@@ -244,17 +260,9 @@ impl<'a> State<'a> for DialogState<'a> {
           child: Some(
             DialogInner {
               color: self.color,
-              header_icon: self.header_icon,
-              header_icon_color: self.header_icon_color,
-              header_title: self.header_title.to_string(),
-              header_title_font_family: self.header_title_font_family,
-              header_title_color: self.header_title_color,
-              close_icon: self.close_icon,
-              close_label: self.close_label.to_string(),
-              close_label_font_family: self.close_label_font_family,
-              ok_icon: self.ok_icon,
-              ok_label: self.ok_label.to_string(),
-              ok_label_font_family: self.ok_label_font_family,
+              header: self.header.clone(),
+              close_btn: self.close_btn.clone(),
+              ok_btn: self.ok_btn.clone(),
               has_ok: self.has_ok,
               on_close: Arc::clone(&self.on_close),
               on_ok: Arc::clone(&self.on_ok),
@@ -341,17 +349,9 @@ impl DialogAnimationSM {
 
 struct DialogInner<'a> {
   color: Color,
-  header_icon: u16,
-  header_icon_color: Color,
-  header_title: String,
-  header_title_font_family: &'static str,
-  header_title_color: Color,
-  close_icon: u16,
-  close_label: String,
-  close_label_font_family: &'static str,
-  ok_icon: u16,
-  ok_label: String,
-  ok_label_font_family: &'static str,
+  header: DialogHeader,
+  close_btn: DialogButton,
+  ok_btn: DialogButton,
   has_ok: bool,
   on_close: Arc<Mutex<dyn FnMut() + 'a + Send>>,
   on_ok: Arc<Mutex<dyn FnMut() + 'a + Send>>,
@@ -364,17 +364,9 @@ impl Debug for DialogInner<'_> {
     fmt
       .debug_struct("DialogInner")
       .field("color", &self.color)
-      .field("header_icon", &self.header_icon)
-      .field("header_icon_color", &self.header_icon_color)
-      .field("header_title", &self.header_title)
-      .field("header_title_font_family", &self.header_title_font_family)
-      .field("header_title_color", &self.header_title_color)
-      .field("close_icon", &self.close_icon)
-      .field("close_label", &self.close_label)
-      .field("close_label_font_family", &self.close_label_font_family)
-      .field("ok_icon", &self.ok_icon)
-      .field("ok_label", &self.ok_label)
-      .field("ok_label_font_family", &self.ok_label_font_family)
+      .field("header", &self.header)
+      .field("close_btn", &self.close_btn)
+      .field("ok_btn", &self.ok_btn)
       .field("has_ok", &self.has_ok)
       .field("body", &self.body)
       .field("scale", &self.scale)
@@ -421,7 +413,7 @@ impl<'a> StatelessWidget<'a> for DialogInner<'a> {
             .into_widget(),
           ),
         }),
-        if self.header_icon == 0 {
+        if self.header.icon == 0 {
           None
         } else {
           Some(StackChild {
@@ -429,15 +421,15 @@ impl<'a> StatelessWidget<'a> for DialogInner<'a> {
             size: (0.0, 0.0),
             origin: Origin::TopLeft,
             child: Some(
-              Icon::new(self.header_icon)
+              Icon::new(self.header.icon)
                 .size(64.0)
-                .color(self.header_icon_color)
+                .color(self.header.icon_color)
                 .call()
                 .into_widget(),
             ),
           })
         },
-        if self.header_title.is_empty() {
+        if self.header.title.is_empty() {
           None
         } else {
           Some(StackChild {
@@ -446,15 +438,8 @@ impl<'a> StatelessWidget<'a> for DialogInner<'a> {
             origin: Origin::Left,
             child: Some(
               Text::new()
-                .text(self.header_title.to_string())
-                .font_family(self.header_title_font_family)
-                .font_style(FontStyle::new(
-                  Weight::SEMI_BOLD,
-                  Width::NORMAL,
-                  Slant::Upright,
-                ))
-                .font_size(32.0)
-                .color(self.header_title_color)
+                .text(self.header.title.to_string())
+                .style(self.header.title_style)
                 .call()
                 .into_widget(),
             ),
@@ -483,9 +468,9 @@ impl<'a> StatelessWidget<'a> for DialogInner<'a> {
           child: Some(
             Button {
               bg_color: Color::RED,
-              icon: self.close_icon,
-              label: Cow::Owned(self.close_label.to_string()),
-              label_font_family: self.close_label_font_family,
+              icon: self.close_btn.icon,
+              label: Cow::Owned(self.close_btn.label.to_string()),
+              label_style: self.close_btn.label_style,
               on_mouse_up: Arc::clone(&self.on_close),
               ..Default::default()
             }
@@ -503,9 +488,9 @@ impl<'a> StatelessWidget<'a> for DialogInner<'a> {
             child: Some(
               Button {
                 bg_color: Color::from_rgb(0, 128, 0),
-                icon: self.ok_icon,
-                label: Cow::Owned(self.ok_label.to_string()),
-                label_font_family: self.ok_label_font_family,
+                icon: self.ok_btn.icon,
+                label: Cow::Owned(self.ok_btn.label.to_string()),
+                label_style: self.ok_btn.label_style,
                 on_mouse_up: Arc::clone(&self.on_ok),
                 ..Default::default()
               }

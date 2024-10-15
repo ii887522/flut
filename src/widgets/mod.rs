@@ -1,3 +1,4 @@
+pub mod bar;
 pub(super) mod buildable;
 pub mod button;
 pub mod center;
@@ -11,6 +12,7 @@ pub mod painter_widget;
 pub mod rect_widget;
 pub mod router;
 pub mod row;
+pub mod select;
 pub mod spacing;
 pub mod stack;
 pub mod stack_child;
@@ -21,6 +23,7 @@ pub mod text_block;
 pub mod translation;
 pub mod widget;
 
+pub use bar::Bar;
 pub(super) use buildable::Buildable;
 pub use button::Button;
 pub use center::Center;
@@ -34,6 +37,7 @@ pub use painter_widget::PainterWidget;
 pub use rect_widget::RectWidget;
 pub use router::Router;
 pub use row::Row;
+pub use select::Select;
 pub use spacing::Spacing;
 pub use stack::Stack;
 pub use stack_child::StackChild;

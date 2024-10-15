@@ -1,16 +1,14 @@
 use super::{widget::*, Column, Spacing, StatelessWidget, Text, Widget};
-use crate::helpers;
+use crate::{helpers, models::TextStyle};
 use optarg2chain::optarg_impl;
-use skia_safe::{Color, Font, FontStyle, Rect};
+use skia_safe::{Font, Rect};
 use std::borrow::Cow;
 
 #[derive(Debug, PartialEq)]
 pub struct TextBlock {
   text: Cow<'static, str>,
   font: Font,
-  font_family: &'static str,
-  font_style: FontStyle,
-  color: Color,
+  style: TextStyle,
 }
 
 #[optarg_impl]
@@ -18,20 +16,10 @@ impl TextBlock {
   #[optarg_method(TextBlockNewBuilder, call)]
   pub fn new(
     #[optarg_default] text: Cow<'static, str>,
-    #[optarg("Arial")] font_family: &'static str,
-    #[optarg_default] font_style: FontStyle,
-    #[optarg(12.0)] font_size: f32,
-    #[optarg(Color::BLACK)] color: Color,
+    #[optarg_default] style: TextStyle,
   ) -> Self {
-    let font = helpers::new_font(font_family, font_style, font_size);
-
-    Self {
-      text,
-      font,
-      font_family,
-      font_style,
-      color,
-    }
+    let font = helpers::new_font(style);
+    Self { text, font, style }
   }
 }
 
@@ -59,10 +47,7 @@ impl<'a> StatelessWidget<'a> for TextBlock {
       children.extend([
         Text::new()
           .text(text_line.to_string())
-          .font_family(self.font_family)
-          .font_style(self.font_style)
-          .font_size(self.font.size())
-          .color(self.color)
+          .style(self.style)
           .call()
           .into_widget(),
         Spacing {
@@ -80,10 +65,7 @@ impl<'a> StatelessWidget<'a> for TextBlock {
     children.push(
       Text::new()
         .text(text)
-        .font_family(self.font_family)
-        .font_style(self.font_style)
-        .font_size(self.font.size())
-        .color(self.color)
+        .style(self.style)
         .call()
         .into_widget(),
     );

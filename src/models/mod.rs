@@ -6,6 +6,7 @@ pub mod lang;
 pub mod origin;
 pub mod pulse_event;
 pub(super) mod route;
+pub mod text_style;
 pub mod value;
 pub mod vertical_align;
 
@@ -16,5 +17,6 @@ pub use lang::Lang;
 pub use origin::Origin;
 pub use pulse_event::PulseEvent;
 pub(super) use route::Route;
+pub use text_style::TextStyle;
 pub use value::Value;
 pub use vertical_align::VerticalAlign;

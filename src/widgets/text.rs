@@ -1,18 +1,17 @@
 use super::PainterWidget;
 use crate::{
-  helpers,
-  models::{Lang, Origin},
+  helpers::{self},
+  models::{Lang, Origin, TextStyle},
 };
 use optarg2chain::optarg_impl;
-use skia_safe::{font::Edging, Canvas, Color, Font, FontStyle, Paint, Point, Rect};
+use skia_safe::{font::Edging, Canvas, Font, Paint, Point, Rect};
 use std::borrow::Cow;
 
 #[derive(Debug, PartialEq)]
 pub struct Text {
   text: Cow<'static, str>,
   font: Font,
-  font_family: &'static str,
-  color: Color,
+  style: TextStyle,
   bound: Rect,
 }
 
@@ -21,20 +20,16 @@ impl Text {
   #[optarg_method(TextNewBuilder, call)]
   pub fn new(
     #[optarg_default] text: Cow<'static, str>,
-    #[optarg("Arial")] font_family: &'static str,
-    #[optarg_default] font_style: FontStyle,
-    #[optarg(12.0)] font_size: f32,
-    #[optarg(Color::BLACK)] color: Color,
+    #[optarg_default] style: TextStyle,
   ) -> Self {
-    let mut font = helpers::new_font(font_family, font_style, font_size);
+    let mut font = helpers::new_font(style);
     font.set_edging(Edging::AntiAlias);
     let (_, bound) = font.measure_str(&text, None);
 
     Self {
       text,
       font,
-      font_family,
-      color,
+      style,
       bound,
     }
   }
@@ -61,7 +56,7 @@ impl PainterWidget for Text {
     //     .set_color(Color::MAGENTA),
     // );
 
-    let y_offset = match Lang::from_font_family(self.font_family).get_text_origin() {
+    let y_offset = match Lang::from_font_family(self.style.font_family).get_text_origin() {
       Origin::TopLeft => 0.0,
       Origin::Left => (self.bound.height() - self.font.size() * 0.75) * 0.5,
       origin => unreachable!("{origin:?} not yet supported in Text::draw() implementation"),
@@ -74,7 +69,9 @@ impl PainterWidget for Text {
         constraint.y() - self.bound.y() - y_offset,
       ),
       &self.font,
-      Paint::default().set_anti_alias(true).set_color(self.color),
+      Paint::default()
+        .set_anti_alias(true)
+        .set_color(self.style.color),
     );
   }
 }

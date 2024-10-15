@@ -6,7 +6,7 @@ use flut::{
   boot::context,
   collections::U16SparseSet,
   helpers::{AnimationCount, Clock, ShakeAnimationSM},
-  models::{AudioTask, HorizontalAlign},
+  models::{AudioTask, HorizontalAlign, TextStyle},
   widgets::{
     router::Navigator, stateful_widget::State, widget::*, Column, Grid, RectWidget, Spacing,
     StatefulWidget, Text, Translation, Widget,
@@ -279,8 +279,11 @@ impl<'a> State<'a> for GamePageState<'a> {
                   .into_widget(),
                   Text::new()
                     .text(score.to_string())
-                    .color(Color::WHITE)
-                    .font_size(48.0)
+                    .style(TextStyle {
+                      color: Color::WHITE,
+                      font_size: 48.0,
+                      ..Default::default()
+                    })
                     .call()
                     .into_widget(),
                   Spacing {

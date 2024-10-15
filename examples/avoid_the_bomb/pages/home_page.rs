@@ -1,9 +1,9 @@
 use crate::i18n::I18N;
 use flut::{
-  models::{icon_name, HorizontalAlign, Lang, VerticalAlign},
+  models::{icon_name, HorizontalAlign, Lang, TextStyle, VerticalAlign},
   widgets::{
-    router::Navigator, widget::*, Button, Column, ImageWidget, Row, Spacing, StatelessWidget, Text,
-    Widget,
+    button::LabelStyle, router::Navigator, widget::*, Button, Column, ImageWidget, Row, Spacing,
+    StatelessWidget, Text, Widget,
   },
 };
 use skia_safe::{Color, Rect};
@@ -42,9 +42,12 @@ impl<'a> StatelessWidget<'a> for HomePage<'a> {
             .into_widget(),
             Text::new()
               .text(I18N.with(|i18n| i18n.t("avoid_the_bomb").call()))
-              .font_family(I18N.with(|i18n| i18n.get_default_font_family()))
-              .color(Color::from_rgb(114, 114, 114))
-              .font_size(64.0)
+              .style(TextStyle {
+                font_family: I18N.with(|i18n| i18n.get_default_font_family()),
+                font_size: 64.0,
+                color: Color::from_rgb(114, 114, 114),
+                ..Default::default()
+              })
               .call()
               .into_widget(),
           ])
@@ -59,7 +62,10 @@ impl<'a> StatelessWidget<'a> for HomePage<'a> {
           bg_color: Color::GREEN,
           icon: icon_name::SENTIMENT_VERY_SATISFIED,
           label: I18N.with(|i18n| i18n.t("start_easy_game").call()),
-          label_font_family: I18N.with(|i18n| i18n.get_default_font_family()),
+          label_style: LabelStyle {
+            font_family: I18N.with(|i18n| i18n.get_default_font_family()),
+            ..Default::default()
+          },
           size: I18N.with(|i18n| match i18n.get_current_lang() {
             Lang::Id => (480.0, 64.0),
             _ => (352.0, 64.0),
@@ -80,7 +86,10 @@ impl<'a> StatelessWidget<'a> for HomePage<'a> {
           bg_color: Color::YELLOW,
           icon: icon_name::SENTIMENT_NEUTRAL,
           label: I18N.with(|i18n| i18n.t("start_medium_game").call()),
-          label_font_family: I18N.with(|i18n| i18n.get_default_font_family()),
+          label_style: LabelStyle {
+            font_family: I18N.with(|i18n| i18n.get_default_font_family()),
+            ..Default::default()
+          },
           size: I18N.with(|i18n| match i18n.get_current_lang() {
             Lang::Id => (480.0, 64.0),
             _ => (352.0, 64.0),
@@ -101,7 +110,10 @@ impl<'a> StatelessWidget<'a> for HomePage<'a> {
           bg_color: Color::RED,
           icon: icon_name::SENTIMENT_VERY_DISSATISFIED,
           label: I18N.with(|i18n| i18n.t("start_hard_game").call()),
-          label_font_family: I18N.with(|i18n| i18n.get_default_font_family()),
+          label_style: LabelStyle {
+            font_family: I18N.with(|i18n| i18n.get_default_font_family()),
+            ..Default::default()
+          },
           size: I18N.with(|i18n| match i18n.get_current_lang() {
             Lang::Id => (480.0, 64.0),
             _ => (352.0, 64.0),

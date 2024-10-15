@@ -1,13 +1,14 @@
 use crate::{
+  i18n::I18N,
   models::{Difficulty, GameCell, GameCellState, GameState},
   widgets::{GameOverDialog, YouWonDialog},
 };
 use flut::{
   boot::context,
   helpers::{AnimationCount, ShakeAnimationSM},
-  models::AudioTask,
+  models::{AudioTask, TextStyle},
   widgets::{
-    router::Navigator, stateful_widget::State, widget::*, Button, Center, Column, Grid,
+    router::Navigator, stateful_widget::State, widget::*, Bar, Button, Center, Column, Grid,
     ImageButton, ImageWidget, StatefulWidget, Text, Translation, Widget,
   },
 };
@@ -75,6 +76,7 @@ impl GamePageStateInner {
       difficulty,
       ..Default::default()
     };
+
     this.init();
     this
   }
@@ -358,110 +360,30 @@ impl<'a> State<'a> for GamePageState<'a> {
           Some(
             Translation {
               translation: state.shake_animation_sm.get_current_translation(),
-              child: Grid {
-                col_count: COL_COUNT,
-                row_count: ROW_COUNT,
-                gap: 2.0,
-                builder: Box::new(move |index| {
-                  let state = state_arc_1.read().unwrap();
-                  let state_arc_1 = Arc::clone(&state_arc_1);
-                  let state_arc_2 = Arc::clone(&state_arc_1);
+              child: Column::new()
+                .children(vec![
+                  Bar {
+                    color: Color::LIGHT_GRAY,
+                    is_elevated: false,
+                    title: I18N.with(|i18n| i18n.t("avoid_the_bomb").call()),
+                    ..Default::default()
+                  }
+                  .into_widget(),
+                  Grid {
+                    col_count: COL_COUNT,
+                    row_count: ROW_COUNT,
+                    gap: 2.0,
+                    builder: Box::new(move |index| {
+                      let state = state_arc_1.read().unwrap();
+                      let state_arc_1 = Arc::clone(&state_arc_1);
+                      let state_arc_2 = Arc::clone(&state_arc_1);
 
-                  match state.grid_model[index as usize] {
-                    GameCell::Count {
-                      count: bomb_count,
-                      state,
-                    } => match state {
-                      GameCellState::Hidden => Some(
-                        Button {
-                          bg_color: Color::from_rgb(56, 56, 56),
-                          border_radius: 0.0,
-                          is_elevated: false,
-                          is_cursor_fixed: true,
-                          has_effect: false,
-                          on_mouse_up: Arc::new(Mutex::new(move || {
-                            if let Some(audio_tx) = context::MAIN_AUDIO_TX.get() {
-                              let _ = audio_tx
-                                .send(AudioTask::PlaySound("assets/avoid_the_bomb/audio/dig.wav"));
-                            }
-
-                            let mut state = state_arc_1.write().unwrap();
-                            let state_arc = Arc::clone(&state_arc_1);
-                            state.reveal_surronding(index);
-
-                            // Win condition
-                            if !state.is_done() {
-                              return;
-                            }
-
-                            rayon::spawn(move || {
-                              thread::sleep(Duration::from_secs(1));
-
-                              if let Some(audio_tx) = context::MAIN_AUDIO_TX.get() {
-                                let _ = audio_tx.send(AudioTask::PlaySound(
-                                  "assets/avoid_the_bomb/audio/won.wav",
-                                ));
-                              }
-
-                              let mut state = state_arc.write().unwrap();
-                              state.set_game_state(GameState::Won);
-                            });
-                          })),
-                          on_right_mouse_up: Arc::new(Mutex::new(move || {
-                            if let Some(audio_tx) = context::MAIN_AUDIO_TX.get() {
-                              let _ = audio_tx.send(AudioTask::PlaySound(
-                                "assets/avoid_the_bomb/audio/click.wav",
-                              ));
-                            }
-
-                            let mut state = state_arc_2.write().unwrap();
-                            state.set_cell_state(index, GameCellState::Flagged);
-                          })),
-                          ..Default::default()
-                        }
-                        .into_widget(),
-                      ),
-                      GameCellState::Visible => {
-                        if bomb_count > 0 {
-                          Some(
-                            Center {
-                              child: Some(
-                                Text::new()
-                                  .text(bomb_count.to_string())
-                                  .font_size(24.0)
-                                  .color(Color::LIGHT_GRAY)
-                                  .call()
-                                  .into_widget(),
-                              ),
-                            }
-                            .into_widget(),
-                          )
-                        } else {
-                          None
-                        }
-                      }
-                      GameCellState::Flagged => Some(
-                        ImageButton {
-                          file_path: "assets/avoid_the_bomb/images/flag.png",
-                          on_right_mouse_up: Arc::new(Mutex::new(move || {
-                            if let Some(audio_tx) = context::MAIN_AUDIO_TX.get() {
-                              let _ = audio_tx.send(AudioTask::PlaySound(
-                                "assets/avoid_the_bomb/audio/click.wav",
-                              ));
-                            }
-
-                            let mut state = state_arc_1.write().unwrap();
-                            state.set_cell_state(index, GameCellState::Hidden);
-                          })),
-                          ..Default::default()
-                        }
-                        .into_widget(),
-                      ),
-                    },
-                    GameCell::Bomb { state } => {
-                      match state {
-                        GameCellState::Hidden => {
-                          Some(
+                      match state.grid_model[index as usize] {
+                        GameCell::Count {
+                          count: bomb_count,
+                          state,
+                        } => match state {
+                          GameCellState::Hidden => Some(
                             Button {
                               bg_color: Color::from_rgb(56, 56, 56),
                               border_radius: 0.0,
@@ -471,34 +393,13 @@ impl<'a> State<'a> for GamePageState<'a> {
                               on_mouse_up: Arc::new(Mutex::new(move || {
                                 if let Some(audio_tx) = context::MAIN_AUDIO_TX.get() {
                                   let _ = audio_tx.send(AudioTask::PlaySound(
-                                    "assets/avoid_the_bomb/audio/explode.wav",
+                                    "assets/avoid_the_bomb/audio/dig.wav",
                                   ));
                                 }
 
                                 let mut state = state_arc_1.write().unwrap();
                                 let state_arc = Arc::clone(&state_arc_1);
-
-                                // Game over. Reveal the whole game board
-                                state.reveal_all();
-                                state.shake_animation_sm.shake();
-
-                                rayon::spawn(move || {
-                                  thread::sleep(Duration::from_secs(1));
-                                  let mut state = state_arc.write().unwrap();
-                                  state.set_game_state(GameState::Dead);
-                                });
-                              })),
-                              on_right_mouse_up: Arc::new(Mutex::new(move || {
-                                if let Some(audio_tx) = context::MAIN_AUDIO_TX.get() {
-                                  let _ = audio_tx.send(AudioTask::PlaySound(
-                                    "assets/avoid_the_bomb/audio/click.wav",
-                                  ));
-                                }
-
-                                let mut state = state_arc_2.write().unwrap();
-                                let state_arc = Arc::clone(&state_arc_2);
-                                state.set_cell_state(index, GameCellState::Flagged);
-                                state.flagged_bomb_count += 1;
+                                state.reveal_surronding(index);
 
                                 // Win condition
                                 if !state.is_done() {
@@ -518,45 +419,162 @@ impl<'a> State<'a> for GamePageState<'a> {
                                   state.set_game_state(GameState::Won);
                                 });
                               })),
+                              on_right_mouse_up: Arc::new(Mutex::new(move || {
+                                if let Some(audio_tx) = context::MAIN_AUDIO_TX.get() {
+                                  let _ = audio_tx.send(AudioTask::PlaySound(
+                                    "assets/avoid_the_bomb/audio/click.wav",
+                                  ));
+                                }
+
+                                let mut state = state_arc_2.write().unwrap();
+                                state.set_cell_state(index, GameCellState::Flagged);
+                              })),
                               ..Default::default()
                             }
                             .into_widget(),
-                          )
-                        }
-                        GameCellState::Visible => Some(
-                          ImageWidget::new("assets/avoid_the_bomb/images/bomb.png")
-                            .call()
-                            .into_widget(),
-                        ),
-                        GameCellState::Flagged => Some(
-                          ImageButton {
-                            file_path: "assets/avoid_the_bomb/images/flag.png",
-                            on_right_mouse_up: Arc::new(Mutex::new(move || {
-                              let mut state = state_arc_1.write().unwrap();
-
-                              if state.is_done() {
-                                return;
-                              }
-
-                              if let Some(audio_tx) = context::MAIN_AUDIO_TX.get() {
-                                let _ = audio_tx.send(AudioTask::PlaySound(
-                                  "assets/avoid_the_bomb/audio/click.wav",
-                                ));
-                              }
-
-                              state.set_cell_state(index, GameCellState::Hidden);
-                              state.flagged_bomb_count -= 1;
-                            })),
-                            ..Default::default()
+                          ),
+                          GameCellState::Visible => {
+                            if bomb_count > 0 {
+                              Some(
+                                Center {
+                                  child: Some(
+                                    Text::new()
+                                      .text(bomb_count.to_string())
+                                      .style(TextStyle {
+                                        font_size: 24.0,
+                                        color: Color::LIGHT_GRAY,
+                                        ..Default::default()
+                                      })
+                                      .call()
+                                      .into_widget(),
+                                  ),
+                                }
+                                .into_widget(),
+                              )
+                            } else {
+                              None
+                            }
                           }
-                          .into_widget(),
-                        ),
+                          GameCellState::Flagged => Some(
+                            ImageButton {
+                              file_path: "assets/avoid_the_bomb/images/flag.png",
+                              on_right_mouse_up: Arc::new(Mutex::new(move || {
+                                if let Some(audio_tx) = context::MAIN_AUDIO_TX.get() {
+                                  let _ = audio_tx.send(AudioTask::PlaySound(
+                                    "assets/avoid_the_bomb/audio/click.wav",
+                                  ));
+                                }
+
+                                let mut state = state_arc_1.write().unwrap();
+                                state.set_cell_state(index, GameCellState::Hidden);
+                              })),
+                              ..Default::default()
+                            }
+                            .into_widget(),
+                          ),
+                        },
+                        GameCell::Bomb { state } => {
+                          match state {
+                            GameCellState::Hidden => {
+                              Some(
+                                Button {
+                                  bg_color: Color::from_rgb(56, 56, 56),
+                                  border_radius: 0.0,
+                                  is_elevated: false,
+                                  is_cursor_fixed: true,
+                                  has_effect: false,
+                                  on_mouse_up: Arc::new(Mutex::new(move || {
+                                    if let Some(audio_tx) = context::MAIN_AUDIO_TX.get() {
+                                      let _ = audio_tx.send(AudioTask::PlaySound(
+                                        "assets/avoid_the_bomb/audio/explode.wav",
+                                      ));
+                                    }
+
+                                    let mut state = state_arc_1.write().unwrap();
+                                    let state_arc = Arc::clone(&state_arc_1);
+
+                                    // Game over. Reveal the whole game board
+                                    state.reveal_all();
+                                    state.shake_animation_sm.shake();
+
+                                    rayon::spawn(move || {
+                                      thread::sleep(Duration::from_secs(1));
+                                      let mut state = state_arc.write().unwrap();
+                                      state.set_game_state(GameState::Dead);
+                                    });
+                                  })),
+                                  on_right_mouse_up: Arc::new(Mutex::new(move || {
+                                    if let Some(audio_tx) = context::MAIN_AUDIO_TX.get() {
+                                      let _ = audio_tx.send(AudioTask::PlaySound(
+                                        "assets/avoid_the_bomb/audio/click.wav",
+                                      ));
+                                    }
+
+                                    let mut state = state_arc_2.write().unwrap();
+                                    let state_arc = Arc::clone(&state_arc_2);
+                                    state.set_cell_state(index, GameCellState::Flagged);
+                                    state.flagged_bomb_count += 1;
+
+                                    // Win condition
+                                    if !state.is_done() {
+                                      return;
+                                    }
+
+                                    rayon::spawn(move || {
+                                      thread::sleep(Duration::from_secs(1));
+
+                                      if let Some(audio_tx) = context::MAIN_AUDIO_TX.get() {
+                                        let _ = audio_tx.send(AudioTask::PlaySound(
+                                          "assets/avoid_the_bomb/audio/won.wav",
+                                        ));
+                                      }
+
+                                      let mut state = state_arc.write().unwrap();
+                                      state.set_game_state(GameState::Won);
+                                    });
+                                  })),
+                                  ..Default::default()
+                                }
+                                .into_widget(),
+                              )
+                            }
+                            GameCellState::Visible => Some(
+                              ImageWidget::new("assets/avoid_the_bomb/images/bomb.png")
+                                .call()
+                                .into_widget(),
+                            ),
+                            GameCellState::Flagged => Some(
+                              ImageButton {
+                                file_path: "assets/avoid_the_bomb/images/flag.png",
+                                on_right_mouse_up: Arc::new(Mutex::new(move || {
+                                  let mut state = state_arc_1.write().unwrap();
+
+                                  if state.is_done() {
+                                    return;
+                                  }
+
+                                  if let Some(audio_tx) = context::MAIN_AUDIO_TX.get() {
+                                    let _ = audio_tx.send(AudioTask::PlaySound(
+                                      "assets/avoid_the_bomb/audio/click.wav",
+                                    ));
+                                  }
+
+                                  state.set_cell_state(index, GameCellState::Hidden);
+                                  state.flagged_bomb_count -= 1;
+                                })),
+                                ..Default::default()
+                              }
+                              .into_widget(),
+                            ),
+                          }
+                        }
                       }
-                    }
+                    }),
                   }
-                }),
-              }
-              .into_widget(),
+                  .into_widget(),
+                ])
+                .call()
+                .into_widget(),
             }
             .into_widget(),
           ),
