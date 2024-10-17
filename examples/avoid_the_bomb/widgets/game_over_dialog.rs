@@ -3,7 +3,7 @@ use flut::{
   models::{icon_name, TextStyle},
   widgets::{
     button::LabelStyle,
-    dialog::{DialogButton, DialogHeader, TitleStyle},
+    dialog::{CloseButton, DialogHeader, OkButton, TitleStyle},
     router::Navigator,
     widget::*,
     Dialog, StatelessWidget, TextBlock, Widget,
@@ -51,21 +51,23 @@ impl<'a> StatelessWidget<'a> for GameOverDialog<'a> {
         ..Default::default()
       },
       has_ok: true,
-      close_btn: DialogButton {
+      close_btn: CloseButton {
         icon: icon_name::SENTIMENT_DISSATISFIED,
         label: I18N.with(|i18n| i18n.t("give_up").call()),
         label_style: LabelStyle {
           font_family: I18N.with(|i18n| i18n.get_default_font_family()),
           ..Default::default()
         },
+        ..Default::default()
       },
-      ok_btn: DialogButton {
+      ok_btn: OkButton {
         icon: icon_name::RESTART_ALT,
         label: I18N.with(|i18n| i18n.t("try_again").call()),
         label_style: LabelStyle {
           font_family: I18N.with(|i18n| i18n.get_default_font_family()),
           ..Default::default()
         },
+        ..Default::default()
       },
       on_close: Arc::new(Mutex::new(move || {
         let mut navigator = navigator.lock().unwrap();

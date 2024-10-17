@@ -3,7 +3,7 @@ use flut::{
   models::{icon_name, TextStyle},
   widgets::{
     button::LabelStyle,
-    dialog::{DialogButton, DialogHeader, TitleStyle},
+    dialog::{CloseButton, DialogHeader, OkButton, TitleStyle},
     router::Navigator,
     widget::*,
     Dialog, StatelessWidget, TextBlock, Widget,
@@ -51,21 +51,26 @@ impl<'a> StatelessWidget<'a> for BackConfirmDialog<'a> {
         ..Default::default()
       },
       has_ok: true,
-      close_btn: DialogButton {
-        icon: icon_name::CLOSE,
+      close_btn: CloseButton {
+        icon_color: Color::LIGHT_GRAY,
+        color: Color::BLUE,
         label: I18N.with(|i18n| i18n.t("close").call()),
         label_style: LabelStyle {
           font_family: I18N.with(|i18n| i18n.get_default_font_family()),
+          color: Color::LIGHT_GRAY,
           ..Default::default()
         },
+        ..Default::default()
       },
-      ok_btn: DialogButton {
+      ok_btn: OkButton {
         icon: icon_name::HOME,
+        color: Color::RED,
         label: I18N.with(|i18n| i18n.t("give_up").call()),
         label_style: LabelStyle {
           font_family: I18N.with(|i18n| i18n.get_default_font_family()),
           ..Default::default()
         },
+        ..Default::default()
       },
       on_close: Arc::clone(&self.on_close),
       on_ok: Arc::new(Mutex::new(move || {

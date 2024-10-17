@@ -16,7 +16,7 @@ thread_local! {
         ("you_won", "You Won~~"),
         ("home", "Home"),
         ("you_won_desc", "You marked all the bomb locations. Want try one more time?"),
-        ("back_home", "Back to home?"),
+        ("back_home", "Back to Home?"),
         ("back_home_desc", "Are you sure you want to give up this game? Your progress will be LOST!"),
         ("close", "Close"),
       ]),

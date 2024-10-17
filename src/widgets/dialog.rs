@@ -77,18 +77,74 @@ impl Default for DialogHeader {
   }
 }
 
-#[derive(Clone, Debug, Default, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct DialogButton {
   pub icon: u16,
+  pub icon_color: Color,
+  pub color: Color,
   pub label: Cow<'static, str>,
   pub label_style: LabelStyle,
+}
+
+impl Default for DialogButton {
+  fn default() -> Self {
+    Self {
+      icon: 0,
+      icon_color: Color::BLACK,
+      color: Color::BLACK,
+      label: Cow::Borrowed(""),
+      label_style: LabelStyle::default(),
+    }
+  }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct CloseButton {
+  pub icon: u16,
+  pub icon_color: Color,
+  pub color: Color,
+  pub label: Cow<'static, str>,
+  pub label_style: LabelStyle,
+}
+
+impl Default for CloseButton {
+  fn default() -> Self {
+    Self {
+      icon: icon_name::CLOSE,
+      icon_color: Color::BLACK,
+      color: Color::RED,
+      label: Cow::Borrowed("Close"),
+      label_style: LabelStyle::default(),
+    }
+  }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct OkButton {
+  pub icon: u16,
+  pub icon_color: Color,
+  pub color: Color,
+  pub label: Cow<'static, str>,
+  pub label_style: LabelStyle,
+}
+
+impl Default for OkButton {
+  fn default() -> Self {
+    Self {
+      icon: icon_name::CHECK,
+      icon_color: Color::BLACK,
+      color: Color::from_rgb(0, 128, 0),
+      label: Cow::Borrowed("OK"),
+      label_style: LabelStyle::default(),
+    }
+  }
 }
 
 pub struct Dialog<'a> {
   pub color: Color,
   pub header: DialogHeader,
-  pub close_btn: DialogButton,
-  pub ok_btn: DialogButton,
+  pub close_btn: CloseButton,
+  pub ok_btn: OkButton,
   pub has_ok: bool,
   pub on_close: Arc<Mutex<dyn FnMut() + 'a + Send>>,
   pub on_ok: Arc<Mutex<dyn FnMut() + 'a + Send>>,
@@ -114,16 +170,8 @@ impl Default for Dialog<'_> {
     Self {
       color: Color::BLACK,
       header: DialogHeader::default(),
-      close_btn: DialogButton {
-        icon: icon_name::CLOSE,
-        label: Cow::Borrowed("Close"),
-        ..Default::default()
-      },
-      ok_btn: DialogButton {
-        icon: icon_name::CHECK,
-        label: Cow::Borrowed("OK"),
-        ..Default::default()
-      },
+      close_btn: CloseButton::default(),
+      ok_btn: OkButton::default(),
       has_ok: false,
       on_close: Arc::new(Mutex::new(|| {})),
       on_ok: Arc::new(Mutex::new(|| {})),
@@ -159,8 +207,8 @@ impl<'a> StatefulWidget<'a> for Dialog<'a> {
 struct DialogState<'a> {
   color: Color,
   header: DialogHeader,
-  close_btn: DialogButton,
-  ok_btn: DialogButton,
+  close_btn: CloseButton,
+  ok_btn: OkButton,
   has_ok: bool,
   on_close: Arc<Mutex<dyn FnMut() + 'a + Send>>,
   on_ok: Arc<Mutex<dyn FnMut() + 'a + Send>>,
@@ -350,8 +398,8 @@ impl DialogAnimationSM {
 struct DialogInner<'a> {
   color: Color,
   header: DialogHeader,
-  close_btn: DialogButton,
-  ok_btn: DialogButton,
+  close_btn: CloseButton,
+  ok_btn: OkButton,
   has_ok: bool,
   on_close: Arc<Mutex<dyn FnMut() + 'a + Send>>,
   on_ok: Arc<Mutex<dyn FnMut() + 'a + Send>>,
@@ -467,8 +515,9 @@ impl<'a> StatelessWidget<'a> for DialogInner<'a> {
           origin: Origin::TopLeft,
           child: Some(
             Button {
-              bg_color: Color::RED,
+              bg_color: self.close_btn.color,
               icon: self.close_btn.icon,
+              icon_color: self.close_btn.icon_color,
               label: Cow::Owned(self.close_btn.label.to_string()),
               label_style: self.close_btn.label_style,
               on_mouse_up: Arc::clone(&self.on_close),
@@ -487,8 +536,9 @@ impl<'a> StatelessWidget<'a> for DialogInner<'a> {
             origin: Origin::TopLeft,
             child: Some(
               Button {
-                bg_color: Color::from_rgb(0, 128, 0),
+                bg_color: self.ok_btn.color,
                 icon: self.ok_btn.icon,
+                icon_color: self.ok_btn.icon_color,
                 label: Cow::Owned(self.ok_btn.label.to_string()),
                 label_style: self.ok_btn.label_style,
                 on_mouse_up: Arc::clone(&self.on_ok),

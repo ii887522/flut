@@ -9,7 +9,7 @@ pub(crate) enum Difficulty {
 impl Difficulty {
   pub(crate) const fn get_bomb_count(&self) -> usize {
     match self {
-      Difficulty::Easy => 50,
+      Difficulty::Easy => 1,
       Difficulty::Medium => 100,
       Difficulty::Hard => 200,
     }
