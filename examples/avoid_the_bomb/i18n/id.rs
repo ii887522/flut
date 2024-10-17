@@ -16,6 +16,9 @@ thread_local! {
         ("you_won", "Anda Menang~~"),
         ("home", "Rumah"),
         ("you_won_desc", "Anda menandai semua lokasi bom. Coba sekali lagi?"),
+        ("back_home", "Kembali ke Rumah?"),
+        ("back_home_desc", "Apakah anda yakin ingin menghentikan permainan ini? Kemajuan anda akan HILANG!"),
+        ("close", "Menutup"),
       ]),
     );
 }

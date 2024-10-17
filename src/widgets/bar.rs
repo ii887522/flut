@@ -1,36 +1,98 @@
 use super::{widget::*, Button, RectWidget, Stack, StackChild, StatelessWidget, Text, Widget};
-use crate::models::{icon_name, Origin, TextStyle};
-use skia_safe::{Color, Rect};
+use crate::{
+  helpers::consts,
+  models::{Origin, TextStyle},
+};
+use skia_safe::{Color, FontStyle, Rect};
 use std::{
   borrow::Cow,
+  fmt::{self, Debug, Formatter},
   sync::{Arc, Mutex},
 };
 
-#[derive(Debug, PartialEq)]
-pub struct Bar {
+pub struct BarButton<'a> {
+  pub is_enabled: bool,
+  pub icon: u16,
+  pub icon_color: Color,
+  pub on_mouse_up: Arc<Mutex<dyn FnMut() + 'a + Send>>,
+}
+
+impl Debug for BarButton<'_> {
+  fn fmt(&self, fmt: &mut Formatter<'_>) -> fmt::Result {
+    fmt
+      .debug_struct("BarButton")
+      .field("is_enabled", &self.is_enabled)
+      .field("icon", &self.icon)
+      .field("icon_color", &self.icon_color)
+      .finish_non_exhaustive()
+  }
+}
+
+impl Default for BarButton<'_> {
+  fn default() -> Self {
+    Self {
+      is_enabled: true,
+      icon: 0,
+      icon_color: Color::BLACK,
+      on_mouse_up: Arc::new(Mutex::new(|| {})),
+    }
+  }
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct TitleStyle {
+  pub font_family: &'static str,
+  pub font_style: FontStyle,
+  pub font_size: f32,
+  pub color: Color,
+}
+
+impl Default for TitleStyle {
+  fn default() -> Self {
+    Self {
+      font_family: consts::DEFAULT_FONT_FAMILY,
+      font_style: FontStyle::default(),
+      font_size: 32.0,
+      color: Color::BLACK,
+    }
+  }
+}
+
+impl From<TitleStyle> for TextStyle {
+  fn from(style: TitleStyle) -> Self {
+    Self {
+      font_family: style.font_family,
+      font_style: style.font_style,
+      font_size: style.font_size,
+      color: style.color,
+    }
+  }
+}
+
+#[derive(Debug)]
+pub struct Bar<'a> {
   pub height: f32,
   pub color: Color,
   pub is_elevated: bool,
+  pub leading_btn: BarButton<'a>,
   pub title: Cow<'static, str>,
-  pub title_style: TextStyle,
+  pub title_style: TitleStyle,
 }
 
-impl Default for Bar {
+impl Default for Bar<'_> {
   fn default() -> Self {
     Self {
       height: 48.0,
       color: Color::BLACK,
       is_elevated: true,
+      leading_btn: BarButton::default(),
       title: Cow::Borrowed(""),
-      title_style: TextStyle {
-        font_size: 32.0,
-        ..Default::default()
-      },
+      title_style: TitleStyle::default(),
     }
   }
 }
 
-impl<'a> StatelessWidget<'a> for Bar {
+impl<'a> StatelessWidget<'a> for Bar<'a> {
   fn get_size(&self) -> (f32, f32) {
     (-1.0, self.height)
   }
@@ -60,12 +122,13 @@ impl<'a> StatelessWidget<'a> for Bar {
           origin: Origin::Left,
           child: Some(
             Button {
+              is_enabled: self.leading_btn.is_enabled,
               bg_color: Color::TRANSPARENT,
               border_radius: 100.0,
               is_elevated: false,
-              icon: icon_name::ARROW_BACK,
-              icon_color: Color::from_rgb(128, 0, 0),
-              on_mouse_up: Arc::new(Mutex::new(|| {})),
+              icon: self.leading_btn.icon,
+              icon_color: self.leading_btn.icon_color,
+              on_mouse_up: Arc::clone(&self.leading_btn.on_mouse_up),
               ..Default::default()
             }
             .into_widget(),

@@ -417,9 +417,9 @@ impl<'a> StatelessWidget<'a> for DialogInner<'a> {
           None
         } else {
           Some(StackChild {
-            position: POSITION.with(|position| (position.0 + 16.0, position.1 + 16.0)),
+            position: POSITION.with(|position| (position.0 + 44.0, position.1 + 44.0)),
             size: (0.0, 0.0),
-            origin: Origin::TopLeft,
+            origin: Origin::Center,
             child: Some(
               Icon::new(self.header.icon)
                 .size(64.0)

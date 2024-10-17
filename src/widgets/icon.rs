@@ -31,6 +31,21 @@ impl Icon {
 
 impl PainterWidget for Icon {
   fn draw(&self, canvas: &Canvas, constraint: Rect) {
+    // Uncomment to draw boundary for debugging purpose
+    // canvas.draw_rect(
+    //   Rect::from_xywh(
+    //     constraint.x(),
+    //     constraint.y(),
+    //     self.bound.width(),
+    //     self.bound.height(),
+    //   ),
+    //   Paint::default()
+    //     .set_anti_alias(true)
+    //     .set_stroke(true)
+    //     .set_stroke_width(2.0)
+    //     .set_color(Color::MAGENTA),
+    // );
+
     canvas.draw_str(
       &self.name,
       Point::new(

@@ -1,15 +1,19 @@
 use crate::{
   i18n::I18N,
   models::{Difficulty, GameCell, GameCellState, GameState},
-  widgets::{GameOverDialog, YouWonDialog},
+  widgets::{BackConfirmDialog, GameOverDialog, YouWonDialog},
 };
 use flut::{
   boot::context,
   helpers::{AnimationCount, ShakeAnimationSM},
-  models::{AudioTask, TextStyle},
+  models::{icon_name, AudioTask, TextStyle},
   widgets::{
-    router::Navigator, stateful_widget::State, widget::*, Bar, Button, Center, Column, Grid,
-    ImageButton, ImageWidget, StatefulWidget, Text, Translation, Widget,
+    bar::{BarButton, TitleStyle},
+    router::Navigator,
+    stateful_widget::State,
+    widget::*,
+    Bar, Button, Center, Column, Grid, ImageButton, ImageWidget, StatefulWidget, Text, Translation,
+    Widget,
   },
 };
 use rand::{prelude::*, seq::index};
@@ -351,6 +355,7 @@ impl<'a> State<'a> for GamePageState<'a> {
   fn build(&mut self, _constraint: Rect) -> Widget<'a> {
     let state_arc_1 = Arc::clone(&self.inner);
     let state_arc_2 = Arc::clone(&self.inner);
+    let state_arc_3 = Arc::clone(&self.inner);
     let state = self.inner.read().unwrap();
     let navigator = Arc::clone(&self.navigator);
 
@@ -365,7 +370,21 @@ impl<'a> State<'a> for GamePageState<'a> {
                   Bar {
                     color: Color::LIGHT_GRAY,
                     is_elevated: false,
+                    leading_btn: BarButton {
+                      is_enabled: state.game_state == GameState::Playing,
+                      icon: icon_name::ARROW_BACK,
+                      icon_color: Color::from_rgb(128, 0, 0),
+                      on_mouse_up: Arc::new(Mutex::new(move || {
+                        // Pop up back confirm dialog
+                        let mut state = state_arc_3.write().unwrap();
+                        state.set_game_state(GameState::Pause);
+                      })),
+                    },
                     title: I18N.with(|i18n| i18n.t("avoid_the_bomb").call()),
+                    title_style: TitleStyle {
+                      font_family: I18N.with(|i18n| i18n.get_default_font_family()),
+                      ..Default::default()
+                    },
                     ..Default::default()
                   }
                   .into_widget(),
@@ -381,10 +400,11 @@ impl<'a> State<'a> for GamePageState<'a> {
                       match state.grid_model[index as usize] {
                         GameCell::Count {
                           count: bomb_count,
-                          state,
-                        } => match state {
+                          state: cell_state,
+                        } => match cell_state {
                           GameCellState::Hidden => Some(
                             Button {
+                              is_enabled: state.game_state == GameState::Playing,
                               bg_color: Color::from_rgb(56, 56, 56),
                               border_radius: 0.0,
                               is_elevated: false,
@@ -457,6 +477,7 @@ impl<'a> State<'a> for GamePageState<'a> {
                           }
                           GameCellState::Flagged => Some(
                             ImageButton {
+                              is_enabled: state.game_state == GameState::Playing,
                               file_path: "assets/avoid_the_bomb/images/flag.png",
                               on_right_mouse_up: Arc::new(Mutex::new(move || {
                                 if let Some(audio_tx) = context::MAIN_AUDIO_TX.get() {
@@ -473,11 +494,12 @@ impl<'a> State<'a> for GamePageState<'a> {
                             .into_widget(),
                           ),
                         },
-                        GameCell::Bomb { state } => {
-                          match state {
+                        GameCell::Bomb { state: cell_state } => {
+                          match cell_state {
                             GameCellState::Hidden => {
                               Some(
                                 Button {
+                                  is_enabled: state.game_state == GameState::Playing,
                                   bg_color: Color::from_rgb(56, 56, 56),
                                   border_radius: 0.0,
                                   is_elevated: false,
@@ -545,6 +567,7 @@ impl<'a> State<'a> for GamePageState<'a> {
                             ),
                             GameCellState::Flagged => Some(
                               ImageButton {
+                                is_enabled: state.game_state == GameState::Playing,
                                 file_path: "assets/avoid_the_bomb/images/flag.png",
                                 on_right_mouse_up: Arc::new(Mutex::new(move || {
                                   let mut state = state_arc_1.write().unwrap();
@@ -580,6 +603,17 @@ impl<'a> State<'a> for GamePageState<'a> {
           ),
           match state.game_state {
             GameState::Playing => None,
+            GameState::Pause => Some(
+              BackConfirmDialog {
+                navigator,
+                on_close: Arc::new(Mutex::new(move || {
+                  // Resume the game
+                  let mut state = state_arc_2.write().unwrap();
+                  state.set_game_state(GameState::Playing);
+                })),
+              }
+              .into_widget(),
+            ),
             GameState::Dead => Some(
               GameOverDialog {
                 navigator,

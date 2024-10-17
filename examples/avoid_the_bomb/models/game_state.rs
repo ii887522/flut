@@ -2,6 +2,7 @@
 pub enum GameState {
   #[default]
   Playing,
+  Pause,
   Dead,
   Won,
 }

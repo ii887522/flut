@@ -9,6 +9,7 @@ use std::{
 };
 
 pub struct ImageButton<'a> {
+  pub is_enabled: bool,
   pub file_path: &'static str,
   pub size: (f32, f32),
   pub on_mouse_over: Arc<Mutex<dyn FnMut() + 'a + Send>>,
@@ -23,6 +24,7 @@ impl<'a> Debug for ImageButton<'a> {
   fn fmt(&self, fmt: &mut Formatter<'_>) -> fmt::Result {
     fmt
       .debug_struct("ImageButton")
+      .field("is_enabled", &self.file_path)
       .field("file_path", &self.file_path)
       .field("size", &self.size)
       .finish_non_exhaustive()
@@ -32,6 +34,7 @@ impl<'a> Debug for ImageButton<'a> {
 impl Default for ImageButton<'_> {
   fn default() -> Self {
     Self {
+      is_enabled: true,
       file_path: "",
       size: (-1.0, -1.0),
       on_mouse_over: Arc::new(Mutex::new(|| {})),
@@ -47,6 +50,7 @@ impl Default for ImageButton<'_> {
 impl<'a> StatefulWidget<'a> for ImageButton<'a> {
   fn new_state(&mut self) -> Box<dyn State<'a> + 'a> {
     Box::new(ImageButtonState {
+      is_enabled: self.is_enabled,
       file_path: self.file_path,
       size: self.size,
       on_mouse_over: Arc::clone(&self.on_mouse_over),
@@ -60,6 +64,7 @@ impl<'a> StatefulWidget<'a> for ImageButton<'a> {
 }
 
 struct ImageButtonState<'a> {
+  is_enabled: bool,
   file_path: &'static str,
   size: (f32, f32),
   on_mouse_over: Arc<Mutex<dyn FnMut() + 'a + Send>>,
@@ -74,6 +79,7 @@ impl Debug for ImageButtonState<'_> {
   fn fmt(&self, fmt: &mut Formatter<'_>) -> fmt::Result {
     fmt
       .debug_struct("ImageButtonState")
+      .field("is_enabled", &self.is_enabled)
       .field("file_path", &self.file_path)
       .field("size", &self.size)
       .finish_non_exhaustive()
@@ -82,16 +88,28 @@ impl Debug for ImageButtonState<'_> {
 
 impl<'a> State<'a> for ImageButtonState<'a> {
   fn on_mouse_over(&mut self, _mouse_position: (f32, f32)) -> bool {
+    if !self.is_enabled {
+      return true;
+    }
+
     self.on_mouse_over.lock().unwrap()();
     true
   }
 
   fn on_mouse_out(&mut self, _mouse_position: (f32, f32)) -> bool {
+    if !self.is_enabled {
+      return true;
+    }
+
     self.on_mouse_out.lock().unwrap()();
     true
   }
 
   fn on_mouse_down(&mut self, _mouse_position: (f32, f32), mouse_button: MouseButton) -> bool {
+    if !self.is_enabled {
+      return true;
+    }
+
     match mouse_button {
       MouseButton::Left => self.on_mouse_down.lock().unwrap()(),
       MouseButton::Right => self.on_right_mouse_down.lock().unwrap()(),
@@ -102,6 +120,10 @@ impl<'a> State<'a> for ImageButtonState<'a> {
   }
 
   fn on_mouse_up(&mut self, _mouse_position: (f32, f32), mouse_button: MouseButton) -> bool {
+    if !self.is_enabled {
+      return true;
+    }
+
     match mouse_button {
       MouseButton::Left => self.on_mouse_up.lock().unwrap()(),
       MouseButton::Right => self.on_right_mouse_up.lock().unwrap()(),
