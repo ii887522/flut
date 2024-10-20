@@ -1,4 +1,7 @@
-use super::{widget::*, Button, RectWidget, Stack, StackChild, StatelessWidget, Text, Widget};
+use super::{
+  button::ButtonIcon, widget::*, Button, RectWidget, Stack, StackChild, StatelessWidget, Text,
+  Widget,
+};
 use crate::{
   helpers::consts,
   models::{Origin, TextStyle},
@@ -126,8 +129,10 @@ impl<'a> StatelessWidget<'a> for Bar<'a> {
               bg_color: Color::TRANSPARENT,
               border_radius: 100.0,
               is_elevated: false,
-              icon: self.leading_btn.icon,
-              icon_color: self.leading_btn.icon_color,
+              icon: ButtonIcon::Icon {
+                name: self.leading_btn.icon,
+                color: self.leading_btn.icon_color,
+              },
               on_mouse_up: Arc::clone(&self.leading_btn.on_mouse_up),
               ..Default::default()
             }

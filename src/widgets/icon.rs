@@ -9,12 +9,18 @@ pub struct Icon {
   font: Font,
   color: Color,
   bound: Rect,
+  degrees: f32,
 }
 
 #[optarg_impl]
 impl Icon {
   #[optarg_method(IconNewBuilder, call)]
-  pub fn new(name: u16, #[optarg(12.0)] size: f32, #[optarg(Color::BLACK)] color: Color) -> Self {
+  pub fn new(
+    name: u16,
+    #[optarg(12.0)] size: f32,
+    #[optarg(Color::BLACK)] color: Color,
+    #[optarg_default] degrees: f32,
+  ) -> Self {
     let name = String::from_utf16_lossy(&[name]);
     let mut font = context::ICON_TYPEFACE.with(|icon_typeface| Font::new(icon_typeface, size));
     font.set_edging(Edging::AntiAlias);
@@ -25,6 +31,7 @@ impl Icon {
       font,
       color,
       bound,
+      degrees,
     }
   }
 }
@@ -46,6 +53,18 @@ impl PainterWidget for Icon {
     //     .set_color(Color::MAGENTA),
     // );
 
+    if self.degrees != 0.0 {
+      canvas.save();
+
+      canvas.rotate(
+        self.degrees,
+        Some(Point::new(
+          constraint.x() + self.bound.width() * 0.5,
+          constraint.y() + self.bound.height() * 0.5,
+        )),
+      );
+    }
+
     canvas.draw_str(
       &self.name,
       Point::new(
@@ -55,6 +74,10 @@ impl PainterWidget for Icon {
       &self.font,
       Paint::default().set_anti_alias(true).set_color(self.color),
     );
+
+    if self.degrees != 0.0 {
+      canvas.restore();
+    }
   }
 
   fn get_size(&self) -> (f32, f32) {

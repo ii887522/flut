@@ -4,25 +4,34 @@ use crate::{
   models::AssetTask,
 };
 use optarg2chain::optarg_impl;
-use skia_safe::{Canvas, Paint, Rect};
+use skia_safe::{Canvas, Color, Paint, Rect};
 use std::sync::mpsc::Sender;
 
 #[derive(Debug)]
 pub struct ImageWidget {
   file_path: &'static str,
   size: (f32, f32),
+  tint: Color,
 }
 
 #[optarg_impl]
 impl ImageWidget {
   #[optarg_method(ImageWidgetNewBuilder, call)]
-  pub fn new(file_path: &'static str, #[optarg((-1.0, -1.0))] size: (f32, f32)) -> Self {
+  pub fn new(
+    file_path: &'static str,
+    #[optarg((-1.0, -1.0))] size: (f32, f32),
+    #[optarg(Color::WHITE)] tint: Color,
+  ) -> Self {
     ASSET_TX.with(|asset_tx| {
       let asset_tx = asset_tx.get_or_init(|| Sender::clone(context::MAIN_ASSET_TX.get().unwrap()));
       asset_tx.send(AssetTask::Load(file_path)).unwrap();
     });
 
-    Self { file_path, size }
+    Self {
+      file_path,
+      size,
+      tint,
+    }
   }
 }
 
@@ -55,7 +64,7 @@ impl PainterWidget for ImageWidget {
           self.size.1
         },
       ),
-      Paint::default().set_anti_alias(true),
+      Paint::default().set_anti_alias(true).set_color(self.tint),
     );
   }
 }

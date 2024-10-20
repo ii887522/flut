@@ -2,8 +2,10 @@ use crate::i18n::I18N;
 use flut::{
   models::{icon_name, HorizontalAlign, Lang, TextStyle, VerticalAlign},
   widgets::{
-    button::LabelStyle, router::Navigator, widget::*, Button, Column, ImageWidget, Row, Spacing,
-    StatelessWidget, Text, Widget,
+    button::{ButtonIcon, LabelStyle},
+    router::Navigator,
+    widget::*,
+    Button, Column, ImageWidget, Row, Spacing, StatelessWidget, Text, Widget,
   },
 };
 use skia_safe::{Color, Rect};
@@ -60,7 +62,10 @@ impl<'a> StatelessWidget<'a> for HomePage<'a> {
         .into_widget(),
         Button {
           bg_color: Color::GREEN,
-          icon: icon_name::SENTIMENT_VERY_SATISFIED,
+          icon: ButtonIcon::Icon {
+            name: icon_name::SENTIMENT_VERY_DISSATISFIED,
+            color: Color::BLACK,
+          },
           label: I18N.with(|i18n| i18n.t("start_easy_game").call()),
           label_style: LabelStyle {
             font_family: I18N.with(|i18n| i18n.get_default_font_family()),
@@ -84,7 +89,10 @@ impl<'a> StatelessWidget<'a> for HomePage<'a> {
         .into_widget(),
         Button {
           bg_color: Color::YELLOW,
-          icon: icon_name::SENTIMENT_NEUTRAL,
+          icon: ButtonIcon::Icon {
+            name: icon_name::SENTIMENT_NEUTRAL,
+            color: Color::BLACK,
+          },
           label: I18N.with(|i18n| i18n.t("start_medium_game").call()),
           label_style: LabelStyle {
             font_family: I18N.with(|i18n| i18n.get_default_font_family()),
@@ -108,7 +116,10 @@ impl<'a> StatelessWidget<'a> for HomePage<'a> {
         .into_widget(),
         Button {
           bg_color: Color::RED,
-          icon: icon_name::SENTIMENT_VERY_DISSATISFIED,
+          icon: ButtonIcon::Icon {
+            name: icon_name::SENTIMENT_VERY_DISSATISFIED,
+            color: Color::BLACK,
+          },
           label: I18N.with(|i18n| i18n.t("start_hard_game").call()),
           label_style: LabelStyle {
             font_family: I18N.with(|i18n| i18n.get_default_font_family()),

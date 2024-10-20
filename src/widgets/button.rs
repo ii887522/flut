@@ -1,6 +1,6 @@
 use super::{
-  stateful_widget::State, widget::*, Icon, RectWidget, Row, Spacing, Stack, StackChild,
-  StatefulWidget, Text, Widget,
+  stateful_widget::State, widget::*, Icon, ImageWidget, RectWidget, Row, Spacing, Stack,
+  StackChild, StatefulWidget, Text, Widget,
 };
 use crate::{
   boot::context,
@@ -48,13 +48,42 @@ impl From<LabelStyle> for TextStyle {
   }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ButtonIcon {
+  Icon {
+    name: u16,
+    color: Color,
+  },
+  Image {
+    file_path: &'static str,
+    tint: Color,
+  },
+}
+
+impl Default for ButtonIcon {
+  fn default() -> Self {
+    Self::Icon {
+      name: 0,
+      color: Color::BLACK,
+    }
+  }
+}
+
+impl ButtonIcon {
+  const fn is_empty(&self) -> bool {
+    match self {
+      ButtonIcon::Icon { name, .. } => *name == 0,
+      ButtonIcon::Image { file_path, .. } => file_path.is_empty(),
+    }
+  }
+}
+
 pub struct Button<'a> {
   pub is_enabled: bool,
   pub bg_color: Color,
   pub border_radius: f32,
   pub is_elevated: bool,
-  pub icon: u16,
-  pub icon_color: Color,
+  pub icon: ButtonIcon,
   pub label: Cow<'static, str>,
   pub label_style: LabelStyle,
   pub size: (f32, f32),
@@ -78,7 +107,6 @@ impl Debug for Button<'_> {
       .field("border_radius", &self.border_radius)
       .field("is_elevated", &self.is_elevated)
       .field("icon", &self.icon)
-      .field("icon_color", &self.icon_color)
       .field("label", &self.label)
       .field("label_style", &self.label_style)
       .field("size", &self.size)
@@ -96,8 +124,7 @@ impl Default for Button<'_> {
       bg_color: Color::WHITE,
       border_radius: 8.0,
       is_elevated: true,
-      icon: 0,
-      icon_color: Color::BLACK,
+      icon: ButtonIcon::default(),
       label: Cow::Borrowed(""),
       label_style: LabelStyle::default(),
       size: (-1.0, -1.0),
@@ -127,7 +154,6 @@ impl<'a> StatefulWidget<'a> for Button<'a> {
       req_is_elevated: self.is_elevated,
       is_elevated: self.is_elevated,
       icon: self.icon,
-      icon_color: self.icon_color,
       label: self.label.to_string(),
       label_style: self.label_style,
       child_align: self.child_align,
@@ -151,8 +177,7 @@ struct ButtonState<'a> {
   border_radius: f32,
   req_is_elevated: bool,
   is_elevated: bool,
-  icon: u16,
-  icon_color: Color,
+  icon: ButtonIcon,
   label: String,
   label_style: LabelStyle,
   child_align: VerticalAlign,
@@ -178,7 +203,6 @@ impl Debug for ButtonState<'_> {
       .field("req_is_elevated", &self.req_is_elevated)
       .field("is_elevated", &self.is_elevated)
       .field("icon", &self.icon)
-      .field("icon_color", &self.icon_color)
       .field("label", &self.label)
       .field("label_style", &self.label_style)
       .field("child_align", &self.child_align)
@@ -292,7 +316,7 @@ impl<'a> State<'a> for ButtonState<'_> {
             .into_widget(),
           ),
         }),
-        if self.icon == 0 && self.label.is_empty() {
+        if self.icon.is_empty() && self.label.is_empty() {
           None
         } else {
           Some(StackChild {
@@ -307,18 +331,26 @@ impl<'a> State<'a> for ButtonState<'_> {
                 .align(self.child_align)
                 .children(
                   vec![
-                    if self.icon == 0 {
+                    if self.icon.is_empty() {
                       None
                     } else {
-                      Some(
-                        Icon::new(self.icon)
+                      Some(match self.icon {
+                        ButtonIcon::Icon {
+                          name: icon_name,
+                          color: icon_color,
+                        } => Icon::new(icon_name)
                           .size(40.0)
-                          .color(self.icon_color)
+                          .color(icon_color)
                           .call()
                           .into_widget(),
-                      )
+                        ButtonIcon::Image { file_path, tint } => ImageWidget::new(file_path)
+                          .size((48.0, 48.0))
+                          .tint(tint)
+                          .call()
+                          .into_widget(),
+                      })
                     },
-                    if self.icon == 0 || self.label.is_empty() {
+                    if self.icon.is_empty() || self.label.is_empty() {
                       None
                     } else {
                       Some(

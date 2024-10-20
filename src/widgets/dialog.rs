@@ -6,7 +6,7 @@ use crate::{
   boot::context,
   helpers::{consts, Animation, AnimationCount},
   models::{icon_name, Origin, TextStyle},
-  widgets::{Button, Icon, Text},
+  widgets::{button::ButtonIcon, Button, Icon, Text},
 };
 use sdl2::mouse::MouseButton;
 use skia_safe::{
@@ -516,8 +516,10 @@ impl<'a> StatelessWidget<'a> for DialogInner<'a> {
           child: Some(
             Button {
               bg_color: self.close_btn.color,
-              icon: self.close_btn.icon,
-              icon_color: self.close_btn.icon_color,
+              icon: ButtonIcon::Icon {
+                name: self.close_btn.icon,
+                color: self.close_btn.icon_color,
+              },
               label: Cow::Owned(self.close_btn.label.to_string()),
               label_style: self.close_btn.label_style,
               on_mouse_up: Arc::clone(&self.on_close),
@@ -537,8 +539,10 @@ impl<'a> StatelessWidget<'a> for DialogInner<'a> {
             child: Some(
               Button {
                 bg_color: self.ok_btn.color,
-                icon: self.ok_btn.icon,
-                icon_color: self.ok_btn.icon_color,
+                icon: ButtonIcon::Icon {
+                  name: self.ok_btn.icon,
+                  color: self.ok_btn.icon_color,
+                },
                 label: Cow::Owned(self.ok_btn.label.to_string()),
                 label_style: self.ok_btn.label_style,
                 on_mouse_up: Arc::clone(&self.on_ok),
