@@ -9,6 +9,7 @@ use crate::{
   helpers::{consts, Animation, AnimationCount},
   models::{icon_name, Lang, Origin, TextStyle},
 };
+use atomic_refcell::AtomicRefCell;
 use optarg2chain::optarg_impl;
 use rayon::prelude::*;
 use sdl2::mouse::MouseButton;
@@ -16,10 +17,7 @@ use skia_safe::{
   font_style::{Slant, Weight, Width},
   Color, FontStyle, Rect,
 };
-use std::{
-  borrow::Cow,
-  sync::{Arc, Mutex},
-};
+use std::{borrow::Cow, sync::Arc};
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct LabelStyle {
@@ -91,7 +89,7 @@ impl SelectOption {
   }
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(PartialEq)]
 pub struct Select {
   pub is_enabled: bool,
   pub size: (f32, f32),
@@ -143,7 +141,7 @@ impl<'a> StatefulWidget<'a> for Select {
   }
 }
 
-#[derive(Debug, Default, PartialEq)]
+#[derive(PartialEq)]
 struct SelectState {
   is_enabled: bool,
   bg_color: Color,
@@ -315,13 +313,15 @@ impl<'a> State<'a> for SelectState {
                           ..self.label_style.into()
                         },
                         size: (constraint.width(), constraint.height()),
-                        on_mouse_over: Arc::new(Mutex::new(|| {
+                        on_mouse_over: Arc::new(AtomicRefCell::new(|| {
                           //
                         })),
-                        on_mouse_out: Arc::new(Mutex::new(|| {
+                        on_mouse_out: Arc::new(AtomicRefCell::new(|| {
                           //
                         })),
-                        on_mouse_up: Arc::new(Mutex::new(|| {})),
+                        on_mouse_up: Arc::new(AtomicRefCell::new(|| {
+                          //
+                        })),
                         ..Default::default()
                       }
                       .into_widget()
@@ -350,7 +350,7 @@ enum SelectAnimationState {
   FadeOut,
 }
 
-#[derive(Debug, Default, PartialEq, PartialOrd)]
+#[derive(Debug, PartialEq, PartialOrd)]
 struct SelectAnimationSM {
   animation_count: AnimationCount,
   arrow_degrees: Animation<f32>,

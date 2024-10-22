@@ -4,9 +4,9 @@
   "rust-analyzer.check.extraArgs": [
     "--",
     "-A",
-    "clippy::too_many_arguments",
+    "clippy::needless_lifetimes",
     "-A",
-    "clippy::needless_lifetimes"
+    "clippy::too_many_arguments"
   ],
   "rust-analyzer.checkOnSave": true,
   "rust-analyzer.linkedProjects": ["flut_codegen/Cargo.toml", "Cargo.toml"]

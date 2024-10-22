@@ -3,10 +3,11 @@ use crate::{
   models::{Difficulty, GameCell, GameCellState, GameState},
   widgets::{BackConfirmDialog, GameOverDialog, YouWonDialog},
 };
+use atomic_refcell::AtomicRefCell;
 use flut::{
   boot::context,
   helpers::{AnimationCount, ShakeAnimationSM},
-  models::{icon_name, AudioTask, TextStyle},
+  models::{icon_name, AudioReq, TextStyle},
   widgets::{
     bar::{BarButton, TitleStyle},
     router::Navigator,
@@ -21,7 +22,7 @@ use rayon::prelude::*;
 use skia_safe::{Color, Rect};
 use std::{
   collections::{HashSet, VecDeque},
-  sync::{Arc, Mutex, RwLock},
+  sync::{Arc, RwLock},
   thread,
   time::Duration,
 };
@@ -29,25 +30,23 @@ use std::{
 const COL_COUNT: u16 = 31;
 const ROW_COUNT: u16 = 31;
 
-#[derive(Debug, Default)]
+#[derive(Default)]
 pub(crate) struct GamePage<'a> {
-  pub(crate) navigator: Arc<Mutex<Navigator<'a>>>,
+  pub(crate) navigator: Arc<AtomicRefCell<Navigator<'a>>>,
   pub(crate) difficulty: Difficulty,
 }
 
 impl<'a> StatefulWidget<'a> for GamePage<'a> {
   fn new_state(&mut self) -> Box<dyn State<'a> + 'a> {
     if let Some(audio_tx) = context::MAIN_AUDIO_TX.get() {
-      let _ = audio_tx.send(AudioTask::LoadSound("assets/avoid_the_bomb/audio/dig.wav"));
-      let _ = audio_tx.send(AudioTask::LoadSound("assets/avoid_the_bomb/audio/won.wav"));
+      let _ = audio_tx.send(AudioReq::LoadSound("assets/avoid_the_bomb/audio/dig.wav"));
+      let _ = audio_tx.send(AudioReq::LoadSound("assets/avoid_the_bomb/audio/won.wav"));
 
-      let _ = audio_tx.send(AudioTask::LoadSound(
+      let _ = audio_tx.send(AudioReq::LoadSound(
         "assets/avoid_the_bomb/audio/explode.wav",
       ));
 
-      let _ = audio_tx.send(AudioTask::LoadSound(
-        "assets/avoid_the_bomb/audio/click.wav",
-      ));
+      let _ = audio_tx.send(AudioReq::LoadSound("assets/avoid_the_bomb/audio/click.wav"));
     }
 
     Box::new(GamePageState {
@@ -57,7 +56,7 @@ impl<'a> StatefulWidget<'a> for GamePage<'a> {
   }
 }
 
-#[derive(Debug, Default)]
+#[derive(Default)]
 struct GamePageStateInner {
   difficulty: Difficulty,
   grid_model: Vec<GameCell>,
@@ -68,9 +67,8 @@ struct GamePageStateInner {
   shake_animation_sm: ShakeAnimationSM,
 }
 
-#[derive(Debug, Default)]
 struct GamePageState<'a> {
-  navigator: Arc<Mutex<Navigator<'a>>>,
+  navigator: Arc<AtomicRefCell<Navigator<'a>>>,
   inner: Arc<RwLock<GamePageStateInner>>,
 }
 
@@ -356,8 +354,8 @@ impl<'a> State<'a> for GamePageState<'a> {
     let state_arc_1 = Arc::clone(&self.inner);
     let state_arc_2 = Arc::clone(&self.inner);
     let state_arc_3 = Arc::clone(&self.inner);
-    let state = self.inner.read().unwrap();
     let navigator = Arc::clone(&self.navigator);
+    let state = self.inner.read().unwrap();
 
     Column::new()
       .children(
@@ -374,7 +372,7 @@ impl<'a> State<'a> for GamePageState<'a> {
                       is_enabled: state.game_state == GameState::Playing,
                       icon: icon_name::ARROW_BACK,
                       icon_color: Color::from_rgb(128, 0, 0),
-                      on_mouse_up: Arc::new(Mutex::new(move || {
+                      on_mouse_up: Arc::new(AtomicRefCell::new(move || {
                         // Pop up back confirm dialog
                         let mut state = state_arc_3.write().unwrap();
                         state.set_game_state(GameState::Pause);
@@ -410,15 +408,15 @@ impl<'a> State<'a> for GamePageState<'a> {
                               is_elevated: false,
                               is_cursor_fixed: true,
                               has_effect: false,
-                              on_mouse_up: Arc::new(Mutex::new(move || {
+                              on_mouse_up: Arc::new(AtomicRefCell::new(move || {
                                 if let Some(audio_tx) = context::MAIN_AUDIO_TX.get() {
-                                  let _ = audio_tx.send(AudioTask::PlaySound(
+                                  let _ = audio_tx.send(AudioReq::PlaySound(
                                     "assets/avoid_the_bomb/audio/dig.wav",
                                   ));
                                 }
 
-                                let mut state = state_arc_1.write().unwrap();
                                 let state_arc = Arc::clone(&state_arc_1);
+                                let mut state = state_arc_1.write().unwrap();
                                 state.reveal_surronding(index);
 
                                 // Win condition
@@ -430,7 +428,7 @@ impl<'a> State<'a> for GamePageState<'a> {
                                   thread::sleep(Duration::from_secs(1));
 
                                   if let Some(audio_tx) = context::MAIN_AUDIO_TX.get() {
-                                    let _ = audio_tx.send(AudioTask::PlaySound(
+                                    let _ = audio_tx.send(AudioReq::PlaySound(
                                       "assets/avoid_the_bomb/audio/won.wav",
                                     ));
                                   }
@@ -439,9 +437,9 @@ impl<'a> State<'a> for GamePageState<'a> {
                                   state.set_game_state(GameState::Won);
                                 });
                               })),
-                              on_right_mouse_up: Arc::new(Mutex::new(move || {
+                              on_right_mouse_up: Arc::new(AtomicRefCell::new(move || {
                                 if let Some(audio_tx) = context::MAIN_AUDIO_TX.get() {
-                                  let _ = audio_tx.send(AudioTask::PlaySound(
+                                  let _ = audio_tx.send(AudioReq::PlaySound(
                                     "assets/avoid_the_bomb/audio/click.wav",
                                   ));
                                 }
@@ -479,9 +477,9 @@ impl<'a> State<'a> for GamePageState<'a> {
                             ImageButton {
                               is_enabled: state.game_state == GameState::Playing,
                               file_path: "assets/avoid_the_bomb/images/flag.png",
-                              on_right_mouse_up: Arc::new(Mutex::new(move || {
+                              on_right_mouse_up: Arc::new(AtomicRefCell::new(move || {
                                 if let Some(audio_tx) = context::MAIN_AUDIO_TX.get() {
-                                  let _ = audio_tx.send(AudioTask::PlaySound(
+                                  let _ = audio_tx.send(AudioReq::PlaySound(
                                     "assets/avoid_the_bomb/audio/click.wav",
                                   ));
                                 }
@@ -505,15 +503,15 @@ impl<'a> State<'a> for GamePageState<'a> {
                                   is_elevated: false,
                                   is_cursor_fixed: true,
                                   has_effect: false,
-                                  on_mouse_up: Arc::new(Mutex::new(move || {
+                                  on_mouse_up: Arc::new(AtomicRefCell::new(move || {
                                     if let Some(audio_tx) = context::MAIN_AUDIO_TX.get() {
-                                      let _ = audio_tx.send(AudioTask::PlaySound(
+                                      let _ = audio_tx.send(AudioReq::PlaySound(
                                         "assets/avoid_the_bomb/audio/explode.wav",
                                       ));
                                     }
 
-                                    let mut state = state_arc_1.write().unwrap();
                                     let state_arc = Arc::clone(&state_arc_1);
+                                    let mut state = state_arc_1.write().unwrap();
 
                                     // Game over. Reveal the whole game board
                                     state.reveal_all();
@@ -525,15 +523,15 @@ impl<'a> State<'a> for GamePageState<'a> {
                                       state.set_game_state(GameState::Dead);
                                     });
                                   })),
-                                  on_right_mouse_up: Arc::new(Mutex::new(move || {
+                                  on_right_mouse_up: Arc::new(AtomicRefCell::new(move || {
                                     if let Some(audio_tx) = context::MAIN_AUDIO_TX.get() {
-                                      let _ = audio_tx.send(AudioTask::PlaySound(
+                                      let _ = audio_tx.send(AudioReq::PlaySound(
                                         "assets/avoid_the_bomb/audio/click.wav",
                                       ));
                                     }
 
-                                    let mut state = state_arc_2.write().unwrap();
                                     let state_arc = Arc::clone(&state_arc_2);
+                                    let mut state = state_arc_2.write().unwrap();
                                     state.set_cell_state(index, GameCellState::Flagged);
                                     state.flagged_bomb_count += 1;
 
@@ -546,7 +544,7 @@ impl<'a> State<'a> for GamePageState<'a> {
                                       thread::sleep(Duration::from_secs(1));
 
                                       if let Some(audio_tx) = context::MAIN_AUDIO_TX.get() {
-                                        let _ = audio_tx.send(AudioTask::PlaySound(
+                                        let _ = audio_tx.send(AudioReq::PlaySound(
                                           "assets/avoid_the_bomb/audio/won.wav",
                                         ));
                                       }
@@ -569,7 +567,7 @@ impl<'a> State<'a> for GamePageState<'a> {
                               ImageButton {
                                 is_enabled: state.game_state == GameState::Playing,
                                 file_path: "assets/avoid_the_bomb/images/flag.png",
-                                on_right_mouse_up: Arc::new(Mutex::new(move || {
+                                on_right_mouse_up: Arc::new(AtomicRefCell::new(move || {
                                   let mut state = state_arc_1.write().unwrap();
 
                                   if state.is_done() {
@@ -577,7 +575,7 @@ impl<'a> State<'a> for GamePageState<'a> {
                                   }
 
                                   if let Some(audio_tx) = context::MAIN_AUDIO_TX.get() {
-                                    let _ = audio_tx.send(AudioTask::PlaySound(
+                                    let _ = audio_tx.send(AudioReq::PlaySound(
                                       "assets/avoid_the_bomb/audio/click.wav",
                                     ));
                                   }
@@ -606,7 +604,7 @@ impl<'a> State<'a> for GamePageState<'a> {
             GameState::Pause => Some(
               BackConfirmDialog {
                 navigator,
-                on_close: Arc::new(Mutex::new(move || {
+                on_close: Arc::new(AtomicRefCell::new(move || {
                   // Resume the game
                   let mut state = state_arc_2.write().unwrap();
                   state.set_game_state(GameState::Playing);
@@ -617,7 +615,7 @@ impl<'a> State<'a> for GamePageState<'a> {
             GameState::Dead => Some(
               GameOverDialog {
                 navigator,
-                on_ok: Arc::new(Mutex::new(move || {
+                on_ok: Arc::new(AtomicRefCell::new(move || {
                   // Restart the game
                   let mut state = state_arc_2.write().unwrap();
                   state.init();
@@ -628,7 +626,7 @@ impl<'a> State<'a> for GamePageState<'a> {
             GameState::Won => Some(
               YouWonDialog {
                 navigator,
-                on_ok: Arc::new(Mutex::new(move || {
+                on_ok: Arc::new(AtomicRefCell::new(move || {
                   // Restart the game
                   let mut state = state_arc_2.write().unwrap();
                   state.init();

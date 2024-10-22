@@ -23,13 +23,11 @@ use skia_safe::{
 };
 use std::{
   ffi::CStr,
-  fmt::Debug,
   sync::{atomic::Ordering, mpsc},
   thread,
   time::Instant,
 };
 
-#[derive(Debug)]
 pub struct App<'a> {
   pub favicon_file_path: &'a str,
   pub title: &'a str,

@@ -1,4 +1,5 @@
 use crate::i18n::I18N;
+use atomic_refcell::AtomicRefCell;
 use flut::{
   models::{icon_name, TextStyle},
   widgets::{
@@ -10,23 +11,11 @@ use flut::{
   },
 };
 use skia_safe::{Color, Rect};
-use std::{
-  fmt::{self, Debug, Formatter},
-  sync::{Arc, Mutex},
-};
+use std::sync::Arc;
 
 pub(crate) struct BackConfirmDialog<'a> {
-  pub(crate) navigator: Arc<Mutex<Navigator<'a>>>,
-  pub(crate) on_close: Arc<Mutex<dyn FnMut() + 'a + Send>>,
-}
-
-impl Debug for BackConfirmDialog<'_> {
-  fn fmt(&self, fmt: &mut Formatter<'_>) -> fmt::Result {
-    fmt
-      .debug_struct("BackConfirmDialog")
-      .field("navigator", &self.navigator)
-      .finish_non_exhaustive()
-  }
+  pub(crate) navigator: Arc<AtomicRefCell<Navigator<'a>>>,
+  pub(crate) on_close: Arc<AtomicRefCell<dyn FnMut() + 'a + Send + Sync>>,
 }
 
 impl<'a> StatelessWidget<'a> for BackConfirmDialog<'a> {
@@ -73,8 +62,8 @@ impl<'a> StatelessWidget<'a> for BackConfirmDialog<'a> {
         ..Default::default()
       },
       on_close: Arc::clone(&self.on_close),
-      on_ok: Arc::new(Mutex::new(move || {
-        let mut navigator = navigator.lock().unwrap();
+      on_ok: Arc::new(AtomicRefCell::new(move || {
+        let mut navigator = navigator.borrow_mut();
         navigator.go("/");
       })),
       body: Some(

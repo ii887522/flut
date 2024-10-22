@@ -8,7 +8,7 @@ use rayon::prelude::*;
 use skia_safe::Rect;
 use std::{mem, sync::OnceLock};
 
-#[derive(Debug, Default)]
+#[derive(Default)]
 pub struct Column<'a> {
   align: HorizontalAlign,
   children: Vec<Widget<'a>>,

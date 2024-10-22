@@ -1,6 +1,6 @@
 use super::StackChild;
 
-#[derive(Debug, Default)]
+#[derive(Default)]
 pub struct Stack<'a> {
   pub children: Vec<StackChild<'a>>,
 }

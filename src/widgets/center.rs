@@ -2,7 +2,7 @@ use super::{Stack, StackChild, StatelessWidget, Widget};
 use crate::models::Origin;
 use skia_safe::Rect;
 
-#[derive(Debug, Default)]
+#[derive(Default)]
 pub struct Center<'a> {
   pub child: Option<Widget<'a>>,
 }

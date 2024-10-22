@@ -1,9 +1,8 @@
 use super::Widget;
 use sdl2::{event::Event, mouse::MouseButton};
 use skia_safe::{Canvas, Rect};
-use std::fmt::Debug;
 
-pub trait StatefulWidget<'a>: Debug + Send {
+pub trait StatefulWidget<'a>: Send {
   fn get_size(&self) -> (f32, f32) {
     (-1.0, -1.0)
   }
@@ -11,7 +10,7 @@ pub trait StatefulWidget<'a>: Debug + Send {
   fn new_state(&mut self) -> Box<dyn State<'a> + 'a>;
 }
 
-pub trait State<'a>: Debug {
+pub trait State<'a> {
   fn on_mouse_over(&mut self, _mouse_position: (f32, f32)) -> bool {
     false
   }

@@ -6,18 +6,19 @@ use crate::{
   helpers::consts,
   models::{Origin, TextStyle},
 };
+use atomic_refcell::AtomicRefCell;
 use skia_safe::{Color, FontStyle, Rect};
 use std::{
   borrow::Cow,
   fmt::{self, Debug, Formatter},
-  sync::{Arc, Mutex},
+  sync::Arc,
 };
 
 pub struct BarButton<'a> {
   pub is_enabled: bool,
   pub icon: u16,
   pub icon_color: Color,
-  pub on_mouse_up: Arc<Mutex<dyn FnMut() + 'a + Send>>,
+  pub on_mouse_up: Arc<AtomicRefCell<dyn FnMut() + 'a + Send + Sync>>,
 }
 
 impl Debug for BarButton<'_> {
@@ -37,7 +38,7 @@ impl Default for BarButton<'_> {
       is_enabled: true,
       icon: 0,
       icon_color: Color::BLACK,
-      on_mouse_up: Arc::new(Mutex::new(|| {})),
+      on_mouse_up: Arc::new(AtomicRefCell::new(|| {})),
     }
   }
 }
@@ -72,7 +73,6 @@ impl From<TitleStyle> for TextStyle {
   }
 }
 
-#[derive(Debug)]
 pub struct Bar<'a> {
   pub height: f32,
   pub color: Color,

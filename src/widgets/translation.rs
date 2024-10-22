@@ -1,7 +1,6 @@
 use super::{StatelessWidget, Widget};
 use skia_safe::{Canvas, Rect};
 
-#[derive(Debug)]
 pub struct Translation<'a> {
   pub translation: (f32, f32),
   pub child: Widget<'a>,

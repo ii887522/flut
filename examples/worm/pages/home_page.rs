@@ -1,4 +1,5 @@
 use crate::i18n::I18N;
+use atomic_refcell::AtomicRefCell;
 use flut::{
   models::{icon_name, HorizontalAlign, Lang, TextStyle, VerticalAlign},
   widgets::{
@@ -10,14 +11,10 @@ use flut::{
   },
 };
 use skia_safe::{Color, Rect};
-use std::{
-  process,
-  sync::{Arc, Mutex},
-};
+use std::{process, sync::Arc};
 
-#[derive(Debug)]
 pub(crate) struct HomePage<'a> {
-  pub(crate) navigator: Arc<Mutex<Navigator<'a>>>,
+  pub(crate) navigator: Arc<AtomicRefCell<Navigator<'a>>>,
 }
 
 impl<'a> StatelessWidget<'a> for HomePage<'a> {
@@ -124,8 +121,8 @@ impl<'a> StatelessWidget<'a> for HomePage<'a> {
             Lang::Id => (384.0, 64.0),
             _ => (256.0, 64.0),
           }),
-          on_mouse_up: Arc::new(Mutex::new(move || {
-            let mut navigator = navigator.lock().unwrap();
+          on_mouse_up: Arc::new(AtomicRefCell::new(move || {
+            let mut navigator = navigator.borrow_mut();
             navigator.go("/game");
           })),
           ..Default::default()
@@ -151,7 +148,7 @@ impl<'a> StatelessWidget<'a> for HomePage<'a> {
             Lang::Id => (384.0, 64.0),
             _ => (256.0, 64.0),
           }),
-          on_mouse_up: Arc::new(Mutex::new(|| process::exit(0))),
+          on_mouse_up: Arc::new(AtomicRefCell::new(|| process::exit(0))),
           ..Default::default()
         }
         .into_widget(),

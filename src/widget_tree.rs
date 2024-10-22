@@ -7,11 +7,9 @@ use sdl2::{event::Event, mouse::MouseButton, EventPump};
 use skia_safe::{Canvas, Contains, Point, Rect};
 use std::{
   collections::{HashMap, VecDeque},
-  fmt::Debug,
   sync::atomic::Ordering,
 };
 
-#[derive(Debug)]
 pub(super) struct WidgetTree<'a> {
   app_size: (f32, f32),
   widget_nodes: Vec<Option<WidgetNode<'a>>>,
@@ -20,7 +18,6 @@ pub(super) struct WidgetTree<'a> {
   empty_buildable_node_indices: Vec<u32>,
 }
 
-#[derive(Debug)]
 struct WidgetNode<'a> {
   constraint: Rect,
   widget: Widget<'a>,
@@ -28,7 +25,6 @@ struct WidgetNode<'a> {
   buildable_indices: Vec<u32>,
 }
 
-#[derive(Debug)]
 struct BuildableNode<'a> {
   buildable: Buildable<'a>,
   is_mouse_on_this: bool,
@@ -76,7 +72,7 @@ impl WidgetTree<'_> {
 
       match widget_node.widget {
         Widget::Stateless(widget) => {
-          widget_node.widget = widget.lock().unwrap().build(widget_node.constraint);
+          widget_node.widget = widget.borrow_mut().build(widget_node.constraint);
 
           if let Some(buildable_index) = self.empty_buildable_node_indices.pop() {
             widget_node.buildable_indices.push(buildable_index);
@@ -101,7 +97,7 @@ impl WidgetTree<'_> {
           widget_node_index_lifo_q.push(widget_node_index);
         }
         Widget::Stateful(widget) => {
-          let mut state = widget.lock().unwrap().new_state();
+          let mut state = widget.borrow_mut().new_state();
           widget_node.widget = state.build(widget_node.constraint);
 
           if let Some(buildable_index) = self.empty_buildable_node_indices.pop() {
@@ -127,7 +123,7 @@ impl WidgetTree<'_> {
           widget_node_index_lifo_q.push(widget_node_index);
         }
         Widget::Stack(stack) => {
-          for stack_child in stack.lock().unwrap().children.drain(..) {
+          for stack_child in stack.borrow_mut().children.drain(..) {
             let stack_child_position = stack_child.get_position();
             let stack_child_size = stack_child.get_size();
 
@@ -356,10 +352,7 @@ impl WidgetTree<'_> {
 
         match &buildable_node.buildable {
           Buildable::Stateless(widget) => {
-            widget
-              .lock()
-              .unwrap()
-              .pre_draw(canvas, widget_node.constraint);
+            widget.borrow().pre_draw(canvas, widget_node.constraint);
           }
           Buildable::Stateful(state) => {
             state.pre_draw(canvas, widget_node.constraint);
@@ -392,10 +385,10 @@ impl WidgetTree<'_> {
           }
         }
         Widget::Painter(widget) => widget.draw(canvas, widget_node.constraint),
-        widget => {
+        _ => {
           // By right after expanded all widgets, should no longer have buildable widgets like StatelessWidget,
           // StatefulWidget, else something wrong in the build logic
-          unreachable!("Cannot draw widget: {widget:?}");
+          unreachable!("Cannot draw widget");
         }
       }
 
@@ -412,8 +405,7 @@ impl WidgetTree<'_> {
           match &buildable_node.buildable {
             Buildable::Stateless(widget) => {
               widget
-                .lock()
-                .unwrap()
+                .borrow()
                 .post_draw(canvas, parent_widget_node.constraint);
             }
             Buildable::Stateful(state) => {

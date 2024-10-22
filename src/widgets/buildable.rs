@@ -1,8 +1,8 @@
 use super::{stateful_widget::State, StatelessWidget};
-use std::sync::{Arc, Mutex};
+use atomic_refcell::AtomicRefCell;
+use std::sync::Arc;
 
-#[derive(Debug)]
 pub(crate) enum Buildable<'a> {
-  Stateless(Arc<Mutex<dyn StatelessWidget<'a> + 'a>>),
+  Stateless(Arc<AtomicRefCell<dyn StatelessWidget<'a> + 'a>>),
   Stateful(Box<dyn State<'a> + 'a>),
 }

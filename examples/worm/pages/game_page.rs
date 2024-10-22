@@ -2,11 +2,12 @@ use crate::{
   models::{Direction, GameCell, WormCell},
   widgets::GameOverDialog,
 };
+use atomic_refcell::AtomicRefCell;
 use flut::{
   boot::context,
   collections::U16SparseSet,
   helpers::{AnimationCount, Clock, ShakeAnimationSM},
-  models::{AudioTask, HorizontalAlign, TextStyle},
+  models::{AudioReq, HorizontalAlign, TextStyle},
   widgets::{
     router::Navigator, stateful_widget::State, widget::*, Column, Grid, RectWidget, Spacing,
     StatefulWidget, Text, Translation, Widget,
@@ -16,35 +17,31 @@ use rand::prelude::*;
 use rayon::prelude::*;
 use sdl2::{event::Event, keyboard::Keycode};
 use skia_safe::{Color, Rect};
-use std::{
-  collections::VecDeque,
-  sync::{Arc, Mutex, RwLock},
-};
+use std::{collections::VecDeque, sync::Arc};
 
 const COL_COUNT: u16 = 41;
 const ROW_COUNT: u16 = 41;
 
-#[derive(Debug)]
 pub(crate) struct GamePage<'a> {
-  pub(crate) navigator: Arc<Mutex<Navigator<'a>>>,
+  pub(crate) navigator: Arc<AtomicRefCell<Navigator<'a>>>,
 }
 
 impl<'a> StatefulWidget<'a> for GamePage<'a> {
   fn new_state(&mut self) -> Box<dyn State<'a> + 'a> {
     if let Some(audio_tx) = context::MAIN_AUDIO_TX.get() {
-      let _ = audio_tx.send(AudioTask::LoadSound("assets/worm/audio/dead.wav"));
-      let _ = audio_tx.send(AudioTask::LoadSound("assets/worm/audio/eat.wav"));
+      let _ = audio_tx.send(AudioReq::LoadSound("assets/worm/audio/dead.wav"));
+      let _ = audio_tx.send(AudioReq::LoadSound("assets/worm/audio/eat.wav"));
     }
 
     Box::new(GamePageState {
       clock: Clock::new(30.0),
       navigator: Arc::clone(&self.navigator),
-      inner: Arc::new(RwLock::new(GamePageStateInner::new())),
+      inner: Arc::new(AtomicRefCell::new(GamePageStateInner::new())),
     })
   }
 }
 
-#[derive(Debug, Default, PartialEq, PartialOrd)]
+#[derive(Default, PartialEq, PartialOrd)]
 struct GamePageStateInner {
   grid_model: Vec<GameCell>,
   air_indices: U16SparseSet,
@@ -55,11 +52,11 @@ struct GamePageStateInner {
   shake_animation_sm: ShakeAnimationSM,
 }
 
-#[derive(Debug, Default)]
+#[derive(Default)]
 struct GamePageState<'a> {
   clock: Clock,
-  navigator: Arc<Mutex<Navigator<'a>>>,
-  inner: Arc<RwLock<GamePageStateInner>>,
+  navigator: Arc<AtomicRefCell<Navigator<'a>>>,
+  inner: Arc<AtomicRefCell<GamePageStateInner>>,
 }
 
 impl GamePageStateInner {
@@ -163,7 +160,7 @@ impl GamePageStateInner {
 
     if let GameCell::Wall | GameCell::Worm = self.grid_model[new_head.position as usize] {
       if let Some(audio_tx) = context::MAIN_AUDIO_TX.get() {
-        let _ = audio_tx.send(AudioTask::PlaySound("assets/worm/audio/dead.wav"));
+        let _ = audio_tx.send(AudioReq::PlaySound("assets/worm/audio/dead.wav"));
       }
 
       self.is_worm_dead = true;
@@ -175,7 +172,7 @@ impl GamePageStateInner {
       return;
     } else if let GameCell::Food = self.grid_model[new_head.position as usize] {
       if let Some(audio_tx) = context::MAIN_AUDIO_TX.get() {
-        let _ = audio_tx.send(AudioTask::PlaySound("assets/worm/audio/eat.wav"));
+        let _ = audio_tx.send(AudioReq::PlaySound("assets/worm/audio/eat.wav"));
       }
 
       self.spawn_food();
@@ -191,7 +188,7 @@ impl GamePageStateInner {
 
 impl<'a> State<'a> for GamePageState<'a> {
   fn process_event(&mut self, event: &Event) -> bool {
-    let mut state = self.inner.write().unwrap();
+    let mut state = self.inner.borrow_mut();
 
     if state.is_worm_dead {
       // Don't consume the event because dialog buttons might need to listen to it
@@ -241,7 +238,7 @@ impl<'a> State<'a> for GamePageState<'a> {
   }
 
   fn update(&mut self, dt: f32) -> bool {
-    let mut state = self.inner.write().unwrap();
+    let mut state = self.inner.borrow_mut();
 
     if !self.clock.update(dt) || state.is_worm_dead {
       return state.shake_animation_sm.update(dt);
@@ -259,7 +256,7 @@ impl<'a> State<'a> for GamePageState<'a> {
   fn build(&mut self, _constraint: Rect) -> Widget<'a> {
     let state_arc_1 = Arc::clone(&self.inner);
     let state_arc_2 = Arc::clone(&self.inner);
-    let state = self.inner.read().unwrap();
+    let state = self.inner.borrow();
     let score = state.worm.len() - 1;
     let navigator = Arc::clone(&self.navigator);
 
@@ -296,7 +293,7 @@ impl<'a> State<'a> for GamePageState<'a> {
                     row_count: ROW_COUNT,
                     gap: 2.0,
                     builder: Box::new(move |index| {
-                      let state = state_arc_1.read().unwrap();
+                      let state = state_arc_1.borrow();
 
                       Some(
                         RectWidget {
@@ -324,9 +321,9 @@ impl<'a> State<'a> for GamePageState<'a> {
               GameOverDialog {
                 navigator,
                 score: score as _,
-                on_ok: Arc::new(Mutex::new(move || {
+                on_ok: Arc::new(AtomicRefCell::new(move || {
                   // Restart the game
-                  let mut state = state_arc_2.write().unwrap();
+                  let mut state = state_arc_2.borrow_mut();
                   state.init();
                 })),
               }

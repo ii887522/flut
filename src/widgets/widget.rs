@@ -1,20 +1,21 @@
 use super::{PainterWidget, Stack, StackChild, StatefulWidget, StatelessWidget};
-use std::sync::{Arc, Mutex};
+use atomic_refcell::AtomicRefCell;
+use std::sync::Arc;
 
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub enum Widget<'a> {
-  Stateless(Arc<Mutex<dyn StatelessWidget<'a> + 'a + Sync>>),
-  Stateful(Arc<Mutex<dyn StatefulWidget<'a> + 'a + Sync>>),
+  Stateless(Arc<AtomicRefCell<dyn StatelessWidget<'a> + 'a + Sync>>),
+  Stateful(Arc<AtomicRefCell<dyn StatefulWidget<'a> + 'a + Sync>>),
   Painter(Arc<dyn PainterWidget + 'a + Sync>),
-  Stack(Arc<Mutex<Stack<'a>>>),
+  Stack(Arc<AtomicRefCell<Stack<'a>>>),
   StackChild(Box<StackChild<'a>>),
 }
 
 impl Widget<'_> {
   pub(super) fn get_size(&self) -> (f32, f32) {
     match self {
-      Widget::Stateless(widget) => widget.lock().unwrap().get_size(),
-      Widget::Stateful(widget) => widget.lock().unwrap().get_size(),
+      Widget::Stateless(widget) => widget.borrow().get_size(),
+      Widget::Stateful(widget) => widget.borrow().get_size(),
       Widget::Painter(widget) => widget.get_size(),
       Widget::Stack(_) => (-1.0, -1.0),
       Widget::StackChild(stack_child) => stack_child.get_size(),
@@ -48,13 +49,13 @@ pub trait IntoPainterWidget<T> {
 
 impl<'a, T: StatelessWidget<'a> + 'a + Sync> FromStatelessWidget<T> for Widget<'a> {
   fn from_widget(widget: T) -> Self {
-    Self::Stateless(Arc::new(Mutex::new(widget)))
+    Self::Stateless(Arc::new(AtomicRefCell::new(widget)))
   }
 }
 
 impl<'a, T: StatefulWidget<'a> + 'a + Sync> FromStatefulWidget<T> for Widget<'a> {
   fn from_widget(widget: T) -> Self {
-    Self::Stateful(Arc::new(Mutex::new(widget)))
+    Self::Stateful(Arc::new(AtomicRefCell::new(widget)))
   }
 }
 
@@ -66,19 +67,19 @@ impl<'a, T: PainterWidget + 'a + Sync> FromPainterWidget<T> for Widget<'a> {
 
 impl<'a> From<Stack<'a>> for Widget<'a> {
   fn from(stack: Stack<'a>) -> Self {
-    Self::Stack(Arc::new(Mutex::new(stack)))
+    Self::Stack(Arc::new(AtomicRefCell::new(stack)))
   }
 }
 
 impl<'a, T: StatelessWidget<'a> + 'a + Sync> IntoStatelessWidget<Widget<'a>> for T {
   fn into_widget(self) -> Widget<'a> {
-    Widget::Stateless(Arc::new(Mutex::new(self)))
+    Widget::Stateless(Arc::new(AtomicRefCell::new(self)))
   }
 }
 
 impl<'a, T: StatefulWidget<'a> + 'a + Sync> IntoStatefulWidget<Widget<'a>> for T {
   fn into_widget(self) -> Widget<'a> {
-    Widget::Stateful(Arc::new(Mutex::new(self)))
+    Widget::Stateful(Arc::new(AtomicRefCell::new(self)))
   }
 }
 

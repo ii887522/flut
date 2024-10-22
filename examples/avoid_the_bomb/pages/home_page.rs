@@ -1,4 +1,5 @@
 use crate::i18n::I18N;
+use atomic_refcell::AtomicRefCell;
 use flut::{
   models::{icon_name, HorizontalAlign, Lang, TextStyle, VerticalAlign},
   widgets::{
@@ -9,11 +10,10 @@ use flut::{
   },
 };
 use skia_safe::{Color, Rect};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
-#[derive(Debug)]
 pub(crate) struct HomePage<'a> {
-  pub(crate) navigator: Arc<Mutex<Navigator<'a>>>,
+  pub(crate) navigator: Arc<AtomicRefCell<Navigator<'a>>>,
 }
 
 impl<'a> StatelessWidget<'a> for HomePage<'a> {
@@ -75,8 +75,8 @@ impl<'a> StatelessWidget<'a> for HomePage<'a> {
             Lang::Id => (480.0, 64.0),
             _ => (352.0, 64.0),
           }),
-          on_mouse_up: Arc::new(Mutex::new(move || {
-            let mut navigator = navigator_arc_1.lock().unwrap();
+          on_mouse_up: Arc::new(AtomicRefCell::new(move || {
+            let mut navigator = navigator_arc_1.borrow_mut();
             navigator.go("/game?difficulty=easy");
           })),
           ..Default::default()
@@ -102,8 +102,8 @@ impl<'a> StatelessWidget<'a> for HomePage<'a> {
             Lang::Id => (480.0, 64.0),
             _ => (352.0, 64.0),
           }),
-          on_mouse_up: Arc::new(Mutex::new(move || {
-            let mut navigator = navigator_arc_2.lock().unwrap();
+          on_mouse_up: Arc::new(AtomicRefCell::new(move || {
+            let mut navigator = navigator_arc_2.borrow_mut();
             navigator.go("/game?difficulty=medium");
           })),
           ..Default::default()
@@ -129,8 +129,8 @@ impl<'a> StatelessWidget<'a> for HomePage<'a> {
             Lang::Id => (480.0, 64.0),
             _ => (352.0, 64.0),
           }),
-          on_mouse_up: Arc::new(Mutex::new(move || {
-            let mut navigator = navigator_arc_3.lock().unwrap();
+          on_mouse_up: Arc::new(AtomicRefCell::new(move || {
+            let mut navigator = navigator_arc_3.borrow_mut();
             navigator.go("/game?difficulty=hard");
           })),
           ..Default::default()

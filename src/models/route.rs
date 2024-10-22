@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-#[derive(Debug, Default, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq)]
 pub(crate) struct Route<'a> {
   pub(crate) path: &'a str,
   pub(crate) qs_params: HashMap<&'a str, &'a str>,

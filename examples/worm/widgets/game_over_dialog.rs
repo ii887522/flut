@@ -1,4 +1,5 @@
 use crate::i18n::I18N;
+use atomic_refcell::AtomicRefCell;
 use flut::{
   models::{icon_name, TextStyle, Value},
   widgets::{
@@ -10,25 +11,12 @@ use flut::{
   },
 };
 use skia_safe::{Color, Rect};
-use std::{
-  fmt::{self, Debug, Formatter},
-  sync::{Arc, Mutex},
-};
+use std::sync::Arc;
 
 pub(crate) struct GameOverDialog<'a> {
-  pub(crate) navigator: Arc<Mutex<Navigator<'a>>>,
+  pub(crate) navigator: Arc<AtomicRefCell<Navigator<'a>>>,
   pub(crate) score: u32,
-  pub(crate) on_ok: Arc<Mutex<dyn FnMut() + 'a + Send>>,
-}
-
-impl Debug for GameOverDialog<'_> {
-  fn fmt(&self, fmt: &mut Formatter<'_>) -> fmt::Result {
-    fmt
-      .debug_struct("GameOverDialog")
-      .field("navigator", &self.navigator)
-      .field("score", &self.score)
-      .finish_non_exhaustive()
-  }
+  pub(crate) on_ok: Arc<AtomicRefCell<dyn FnMut() + 'a + Send + Sync>>,
 }
 
 impl<'a> StatelessWidget<'a> for GameOverDialog<'a> {
@@ -71,8 +59,8 @@ impl<'a> StatelessWidget<'a> for GameOverDialog<'a> {
         },
         ..Default::default()
       },
-      on_close: Arc::new(Mutex::new(move || {
-        let mut navigator = navigator.lock().unwrap();
+      on_close: Arc::new(AtomicRefCell::new(move || {
+        let mut navigator = navigator.borrow_mut();
         navigator.go("/");
       })),
       on_ok: Arc::clone(&self.on_ok),

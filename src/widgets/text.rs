@@ -7,7 +7,7 @@ use optarg2chain::optarg_impl;
 use skia_safe::{font::Edging, Canvas, Font, Paint, Point, Rect};
 use std::borrow::Cow;
 
-#[derive(Debug, PartialEq)]
+#[derive(PartialEq)]
 pub struct Text {
   text: Cow<'static, str>,
   font: Font,

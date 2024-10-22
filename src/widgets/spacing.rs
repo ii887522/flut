@@ -1,7 +1,7 @@
 use super::PainterWidget;
 use skia_safe::{Canvas, Rect};
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, PartialOrd)]
+#[derive(Clone, Copy, Default, PartialEq, PartialOrd)]
 pub struct Spacing {
   pub width: f32,
   pub height: f32,

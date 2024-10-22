@@ -8,6 +8,7 @@ use crate::{
   models::{icon_name, Origin, TextStyle},
   widgets::{button::ButtonIcon, Button, Icon, Text},
 };
+use atomic_refcell::AtomicRefCell;
 use sdl2::mouse::MouseButton;
 use skia_safe::{
   font_style::{Slant, Weight, Width},
@@ -15,8 +16,8 @@ use skia_safe::{
 };
 use std::{
   borrow::Cow,
-  fmt::{self, Debug, Formatter},
-  sync::{atomic::Ordering, Arc, Mutex},
+  fmt::Debug,
+  sync::{atomic::Ordering, Arc},
 };
 
 const SIZE: (f32, f32) = (512.0, 256.0);
@@ -146,23 +147,9 @@ pub struct Dialog<'a> {
   pub close_btn: CloseButton,
   pub ok_btn: OkButton,
   pub has_ok: bool,
-  pub on_close: Arc<Mutex<dyn FnMut() + 'a + Send>>,
-  pub on_ok: Arc<Mutex<dyn FnMut() + 'a + Send>>,
+  pub on_close: Arc<AtomicRefCell<dyn FnMut() + 'a + Send + Sync>>,
+  pub on_ok: Arc<AtomicRefCell<dyn FnMut() + 'a + Send + Sync>>,
   pub body: Option<Widget<'a>>,
-}
-
-impl Debug for Dialog<'_> {
-  fn fmt(&self, fmt: &mut Formatter<'_>) -> fmt::Result {
-    fmt
-      .debug_struct("Dialog")
-      .field("color", &self.color)
-      .field("header", &self.header)
-      .field("close_btn", &self.close_btn)
-      .field("ok_btn", &self.ok_btn)
-      .field("has_ok", &self.has_ok)
-      .field("body", &self.body)
-      .finish_non_exhaustive()
-  }
 }
 
 impl Default for Dialog<'_> {
@@ -173,8 +160,8 @@ impl Default for Dialog<'_> {
       close_btn: CloseButton::default(),
       ok_btn: OkButton::default(),
       has_ok: false,
-      on_close: Arc::new(Mutex::new(|| {})),
-      on_ok: Arc::new(Mutex::new(|| {})),
+      on_close: Arc::new(AtomicRefCell::new(|| {})),
+      on_ok: Arc::new(AtomicRefCell::new(|| {})),
       body: None,
     }
   }
@@ -210,27 +197,11 @@ struct DialogState<'a> {
   close_btn: CloseButton,
   ok_btn: OkButton,
   has_ok: bool,
-  on_close: Arc<Mutex<dyn FnMut() + 'a + Send>>,
-  on_ok: Arc<Mutex<dyn FnMut() + 'a + Send>>,
+  on_close: Arc<AtomicRefCell<dyn FnMut() + 'a + Send + Sync>>,
+  on_ok: Arc<AtomicRefCell<dyn FnMut() + 'a + Send + Sync>>,
   body: Option<Widget<'a>>,
   animation_sm: DialogAnimationSM,
   is_pressed_outside_dialog: bool,
-}
-
-impl Debug for DialogState<'_> {
-  fn fmt(&self, fmt: &mut Formatter<'_>) -> fmt::Result {
-    fmt
-      .debug_struct("DialogState")
-      .field("color", &self.color)
-      .field("header", &self.header)
-      .field("close_btn", &self.close_btn)
-      .field("ok_btn", &self.ok_btn)
-      .field("has_ok", &self.has_ok)
-      .field("body", &self.body)
-      .field("animation_sm", &self.animation_sm)
-      .field("is_pressed_outside_dialog", &self.is_pressed_outside_dialog)
-      .finish_non_exhaustive()
-  }
 }
 
 impl<'a> State<'a> for DialogState<'a> {
@@ -401,25 +372,10 @@ struct DialogInner<'a> {
   close_btn: CloseButton,
   ok_btn: OkButton,
   has_ok: bool,
-  on_close: Arc<Mutex<dyn FnMut() + 'a + Send>>,
-  on_ok: Arc<Mutex<dyn FnMut() + 'a + Send>>,
+  on_close: Arc<AtomicRefCell<dyn FnMut() + 'a + Send + Sync>>,
+  on_ok: Arc<AtomicRefCell<dyn FnMut() + 'a + Send + Sync>>,
   body: Option<Widget<'a>>,
   scale: f32,
-}
-
-impl Debug for DialogInner<'_> {
-  fn fmt(&self, fmt: &mut Formatter<'_>) -> fmt::Result {
-    fmt
-      .debug_struct("DialogInner")
-      .field("color", &self.color)
-      .field("header", &self.header)
-      .field("close_btn", &self.close_btn)
-      .field("ok_btn", &self.ok_btn)
-      .field("has_ok", &self.has_ok)
-      .field("body", &self.body)
-      .field("scale", &self.scale)
-      .finish_non_exhaustive()
-  }
 }
 
 impl<'a> StatelessWidget<'a> for DialogInner<'a> {

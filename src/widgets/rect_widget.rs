@@ -1,7 +1,7 @@
 use super::PainterWidget;
 use skia_safe::{BlurStyle, Canvas, Color, MaskFilter, Paint, RRect, Rect};
 
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, PartialEq)]
 pub struct RectWidget {
   pub color: Color,
   pub border_radius: f32,

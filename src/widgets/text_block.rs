@@ -4,7 +4,7 @@ use optarg2chain::optarg_impl;
 use skia_safe::{Font, Rect};
 use std::borrow::Cow;
 
-#[derive(Debug, PartialEq)]
+#[derive(PartialEq)]
 pub struct TextBlock {
   text: Cow<'static, str>,
   font: Font,

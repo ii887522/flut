@@ -2,24 +2,12 @@ use super::{Stack, StackChild, StatelessWidget, Widget};
 use crate::models::Origin;
 use rayon::prelude::*;
 use skia_safe::Rect;
-use std::fmt::{self, Debug, Formatter};
 
 pub struct Grid<'a> {
   pub col_count: u16,
   pub row_count: u16,
   pub gap: f32,
   pub builder: Box<dyn Fn(u32) -> Option<Widget<'a>> + 'a + Send + Sync>,
-}
-
-impl Debug for Grid<'_> {
-  fn fmt(&self, fmt: &mut Formatter<'_>) -> fmt::Result {
-    fmt
-      .debug_struct("Grid")
-      .field("col_count", &self.col_count)
-      .field("row_count", &self.row_count)
-      .field("gap", &self.gap)
-      .finish_non_exhaustive()
-  }
 }
 
 impl<'a> StatelessWidget<'a> for Grid<'a> {

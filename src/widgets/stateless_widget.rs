@@ -1,8 +1,7 @@
 use super::Widget;
 use skia_safe::{Canvas, Rect};
-use std::fmt::Debug;
 
-pub trait StatelessWidget<'a>: Debug + Send {
+pub trait StatelessWidget<'a>: Send {
   fn get_size(&self) -> (f32, f32) {
     (-1.0, -1.0)
   }

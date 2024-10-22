@@ -7,6 +7,7 @@ use crate::{
   helpers::{consts, Animation, AnimationCount},
   models::{Origin, TextStyle, VerticalAlign},
 };
+use atomic_refcell::AtomicRefCell;
 use sdl2::mouse::MouseButton;
 use skia_safe::{
   font_style::{Slant, Weight, Width},
@@ -14,8 +15,8 @@ use skia_safe::{
 };
 use std::{
   borrow::Cow,
-  fmt::{self, Debug, Formatter},
-  sync::{atomic::Ordering, Arc, Mutex},
+  fmt::Debug,
+  sync::{atomic::Ordering, Arc},
 };
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -90,31 +91,12 @@ pub struct Button<'a> {
   pub child_align: VerticalAlign,
   pub is_cursor_fixed: bool,
   pub has_effect: bool,
-  pub on_mouse_over: Arc<Mutex<dyn FnMut() + 'a + Send>>,
-  pub on_mouse_out: Arc<Mutex<dyn FnMut() + 'a + Send>>,
-  pub on_mouse_down: Arc<Mutex<dyn FnMut() + 'a + Send>>,
-  pub on_mouse_up: Arc<Mutex<dyn FnMut() + 'a + Send>>,
-  pub on_right_mouse_down: Arc<Mutex<dyn FnMut() + 'a + Send>>,
-  pub on_right_mouse_up: Arc<Mutex<dyn FnMut() + 'a + Send>>,
-}
-
-impl Debug for Button<'_> {
-  fn fmt(&self, fmt: &mut Formatter<'_>) -> fmt::Result {
-    fmt
-      .debug_struct("Button")
-      .field("is_enabled", &self.is_enabled)
-      .field("bg_color", &self.bg_color)
-      .field("border_radius", &self.border_radius)
-      .field("is_elevated", &self.is_elevated)
-      .field("icon", &self.icon)
-      .field("label", &self.label)
-      .field("label_style", &self.label_style)
-      .field("size", &self.size)
-      .field("child_align", &self.child_align)
-      .field("is_cursor_fixed", &self.is_cursor_fixed)
-      .field("has_effect", &self.has_effect)
-      .finish_non_exhaustive()
-  }
+  pub on_mouse_over: Arc<AtomicRefCell<dyn FnMut() + 'a + Send + Sync>>,
+  pub on_mouse_out: Arc<AtomicRefCell<dyn FnMut() + 'a + Send + Sync>>,
+  pub on_mouse_down: Arc<AtomicRefCell<dyn FnMut() + 'a + Send + Sync>>,
+  pub on_mouse_up: Arc<AtomicRefCell<dyn FnMut() + 'a + Send + Sync>>,
+  pub on_right_mouse_down: Arc<AtomicRefCell<dyn FnMut() + 'a + Send + Sync>>,
+  pub on_right_mouse_up: Arc<AtomicRefCell<dyn FnMut() + 'a + Send + Sync>>,
 }
 
 impl Default for Button<'_> {
@@ -131,12 +113,12 @@ impl Default for Button<'_> {
       child_align: VerticalAlign::Middle,
       is_cursor_fixed: false,
       has_effect: true,
-      on_mouse_over: Arc::new(Mutex::new(|| {})),
-      on_mouse_out: Arc::new(Mutex::new(|| {})),
-      on_mouse_down: Arc::new(Mutex::new(|| {})),
-      on_mouse_up: Arc::new(Mutex::new(|| {})),
-      on_right_mouse_down: Arc::new(Mutex::new(|| {})),
-      on_right_mouse_up: Arc::new(Mutex::new(|| {})),
+      on_mouse_over: Arc::new(AtomicRefCell::new(|| {})),
+      on_mouse_out: Arc::new(AtomicRefCell::new(|| {})),
+      on_mouse_down: Arc::new(AtomicRefCell::new(|| {})),
+      on_mouse_up: Arc::new(AtomicRefCell::new(|| {})),
+      on_right_mouse_down: Arc::new(AtomicRefCell::new(|| {})),
+      on_right_mouse_up: Arc::new(AtomicRefCell::new(|| {})),
     }
   }
 }
@@ -183,35 +165,14 @@ struct ButtonState<'a> {
   child_align: VerticalAlign,
   is_cursor_fixed: bool,
   has_effect: bool,
-  on_mouse_over: Arc<Mutex<dyn FnMut() + 'a + Send>>,
-  on_mouse_out: Arc<Mutex<dyn FnMut() + 'a + Send>>,
-  on_mouse_down: Arc<Mutex<dyn FnMut() + 'a + Send>>,
-  on_mouse_up: Arc<Mutex<dyn FnMut() + 'a + Send>>,
-  on_right_mouse_down: Arc<Mutex<dyn FnMut() + 'a + Send>>,
-  on_right_mouse_up: Arc<Mutex<dyn FnMut() + 'a + Send>>,
+  on_mouse_over: Arc<AtomicRefCell<dyn FnMut() + 'a + Send + Sync>>,
+  on_mouse_out: Arc<AtomicRefCell<dyn FnMut() + 'a + Send + Sync>>,
+  on_mouse_down: Arc<AtomicRefCell<dyn FnMut() + 'a + Send + Sync>>,
+  on_mouse_up: Arc<AtomicRefCell<dyn FnMut() + 'a + Send + Sync>>,
+  on_right_mouse_down: Arc<AtomicRefCell<dyn FnMut() + 'a + Send + Sync>>,
+  on_right_mouse_up: Arc<AtomicRefCell<dyn FnMut() + 'a + Send + Sync>>,
   animation_sm: ButtonAnimationSM,
   mouse_down_position: (f32, f32),
-}
-
-impl Debug for ButtonState<'_> {
-  fn fmt(&self, fmt: &mut Formatter<'_>) -> fmt::Result {
-    fmt
-      .debug_struct("ButtonState")
-      .field("is_enabled", &self.is_enabled)
-      .field("bg_color", &self.bg_color)
-      .field("border_radius", &self.border_radius)
-      .field("req_is_elevated", &self.req_is_elevated)
-      .field("is_elevated", &self.is_elevated)
-      .field("icon", &self.icon)
-      .field("label", &self.label)
-      .field("label_style", &self.label_style)
-      .field("child_align", &self.child_align)
-      .field("is_cursor_fixed", &self.is_cursor_fixed)
-      .field("has_effect", &self.has_effect)
-      .field("animation_sm", &self.animation_sm)
-      .field("mouse_down_position", &self.mouse_down_position)
-      .finish_non_exhaustive()
-  }
 }
 
 impl<'a> State<'a> for ButtonState<'_> {
@@ -224,7 +185,7 @@ impl<'a> State<'a> for ButtonState<'_> {
       context::HAND_CURSOR.with(|hand_cursor| hand_cursor.set());
     }
 
-    self.on_mouse_over.lock().unwrap()();
+    self.on_mouse_over.borrow_mut()();
     true
   }
 
@@ -242,7 +203,7 @@ impl<'a> State<'a> for ButtonState<'_> {
     }
 
     self.is_elevated = self.req_is_elevated;
-    self.on_mouse_out.lock().unwrap()();
+    self.on_mouse_out.borrow_mut()();
     true
   }
 
@@ -260,9 +221,9 @@ impl<'a> State<'a> for ButtonState<'_> {
         }
 
         self.is_elevated = false;
-        self.on_mouse_down.lock().unwrap()();
+        self.on_mouse_down.borrow_mut()();
       }
-      MouseButton::Right => self.on_right_mouse_down.lock().unwrap()(),
+      MouseButton::Right => self.on_right_mouse_down.borrow_mut()(),
       _ => {}
     }
 
@@ -281,9 +242,9 @@ impl<'a> State<'a> for ButtonState<'_> {
         }
 
         self.is_elevated = self.req_is_elevated;
-        self.on_mouse_up.lock().unwrap()();
+        self.on_mouse_up.borrow_mut()();
       }
-      MouseButton::Right => self.on_right_mouse_up.lock().unwrap()(),
+      MouseButton::Right => self.on_right_mouse_up.borrow_mut()(),
       _ => {}
     }
 
@@ -435,7 +396,7 @@ enum ButtonAnimationState {
   FadeOut,
 }
 
-#[derive(Debug, Default, PartialEq)]
+#[derive(Debug, PartialEq)]
 struct ButtonAnimationSM {
   animation_count: AnimationCount,
   ripple_radius: Animation<f32>,
