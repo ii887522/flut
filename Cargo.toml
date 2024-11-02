@@ -1,0 +1,39 @@
+[package]
+name = "flut"
+description = "A stripped down Flutter clone that supports cross platform GUI and game development"
+version = "0.1.0"
+edition = "2021"
+publish = false
+repository = "https://github.com/ii887522/flut"
+rust-version = "1.82"
+
+[package.metadata.vcpkg]
+dependencies = ["sdl2", "sdl2-image", "sdl2-mixer"]
+git = "https://github.com/microsoft/vcpkg"
+rev = "2024.10.21"
+
+[package.metadata.vcpkg.target]
+x86_64-pc-windows-msvc = { triplet = "x64-windows-static-md" }
+
+[profile.dev]
+split-debuginfo = "packed"
+
+[profile.release]
+codegen-units = 1
+lto = true
+panic = "abort"
+split-debuginfo = "packed"
+strip = true
+
+[dependencies]
+gl = { version = "0.14", default-features = false }
+
+[dependencies.sdl2]
+version = "0.37"
+default-features = false
+features = ["image", "mixer", "static-link", "use-vcpkg"]
+
+[dependencies.skia-safe]
+version = "0.78"
+default-features = false
+features = ["binary-cache", "gl"]
