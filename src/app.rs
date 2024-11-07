@@ -1,5 +1,4 @@
 use crate::{widget_tree::WidgetTree, widgets::Widget};
-use replace_with::replace_with_or_abort;
 use sdl2::{
   event::Event,
   image::LoadSurface,
@@ -171,7 +170,9 @@ pub fn run(app: App<'_>) {
       }
     }
 
-    let Some(widget_tree) = &mut widget_tree else {
+    // Temporarily take out widget_tree so that we can perform its state transition during update and rebuild in
+    // this loop
+    let Some(mut taken_widget_tree) = widget_tree.take() else {
       continue;
     };
 
@@ -186,22 +187,22 @@ pub fn run(app: App<'_>) {
       }
     });
 
-    replace_with_or_abort(widget_tree, |mut widget_tree| {
-      for dt in desc_frame_times
-        .clone()
-        .zip(desc_frame_times.skip(1))
-        .map(|(before, after)| before - after)
-        .take(MAX_FRAME_TICK_COUNT)
-      {
-        widget_tree = widget_tree.update(dt).build();
-      }
+    for dt in desc_frame_times
+      .clone()
+      .zip(desc_frame_times.skip(1))
+      .map(|(before, after)| before - after)
+      .take(MAX_FRAME_TICK_COUNT)
+    {
+      taken_widget_tree = taken_widget_tree.update(dt).build();
+    }
 
-      canvas.clear(Color::BLACK);
-      widget_tree.draw(canvas, constraint);
-      gr_ctx.flush_and_submit();
-      window.gl_swap_window();
-      widget_tree
-    });
+    canvas.clear(Color::BLACK);
+    taken_widget_tree.draw(canvas, constraint);
+    gr_ctx.flush_and_submit();
+    window.gl_swap_window();
+
+    // Put back widget_tree after we are done working on it
+    widget_tree = Some(taken_widget_tree);
   }
 
   // Hide the window before this function cleanup so that it feels more responsive when user wants to quit the app
