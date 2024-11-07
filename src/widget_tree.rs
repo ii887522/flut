@@ -7,7 +7,7 @@ use sdl2::event::Event;
 use skia_safe::{Canvas, Rect};
 use std::mem;
 
-trait StackChildChild {}
+pub(super) trait StackChildChild {}
 impl StackChildChild for Widget<'_> {}
 impl StackChildChild for DrawableIndex {}
 
@@ -29,13 +29,13 @@ pub(super) struct Building;
 #[derive(Clone, Copy, Debug, Default, Hash, PartialEq, Eq, PartialOrd, Ord)]
 pub(super) struct Built;
 
-struct BuilderNode<'a> {
+pub(super) struct BuilderNode<'a> {
   buildable_indices: Vec<u32>,
   parent: Option<(u32, u32)>,
   widget: Box<dyn BuilderWidget<'a> + 'a + Send + Sync>,
 }
 
-struct StackNode<Child: StackChildChild> {
+pub(super) struct StackNode<Child: StackChildChild> {
   buildable_indices: Vec<u32>,
   parent: Option<(u32, u32)>,
   children: Vec<StackChildNode<Child>>,
@@ -112,11 +112,6 @@ impl<'a> From<Stack<'a>> for ExpandableNode<'a> {
   }
 }
 
-enum DrawableNode<'a> {
-  Stack(StackNode<DrawableIndex>),
-  Painter(PainterNode<'a>),
-}
-
 #[derive(Clone, Copy, Debug, Hash, PartialEq, Eq, PartialOrd, Ord)]
 enum DrawableIndex {
   Stack(u32),
@@ -165,6 +160,16 @@ impl<'a> From<Box<dyn PainterWidget + 'a + Send + Sync>> for WidgetTree<'a, Buil
       expandable_nodes: (),
       stack_nodes: SparseVec::new(),
       painter_nodes: SparseVec::from(PainterNode::from(widget)),
+    }
+  }
+}
+
+impl<'a> From<Widget<'a>> for WidgetTree<'a, Built> {
+  fn from(widget: Widget<'a>) -> Self {
+    match widget {
+      Widget::Builder(widget) => WidgetTree::from(widget).build(),
+      Widget::Painter(widget) => WidgetTree::from(widget),
+      Widget::Stack(stack) => WidgetTree::from(stack).build(),
     }
   }
 }
@@ -301,7 +306,7 @@ impl<'a> WidgetTree<'a, Built> {
   }
 
   pub(super) fn process_event(&mut self, event: Event) {
-    //
+    // todo: process event
   }
 
   pub(super) fn update(mut self, dt: f32) -> WidgetTree<'a, Building> {

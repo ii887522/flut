@@ -156,14 +156,7 @@ pub fn run(app: App<'_>) {
   const TPS: f32 = 240.0;
   const MAX_FRAME_TICK_COUNT: usize = 8;
   let constraint = Rect::from_wh(drawable_size.0 as _, drawable_size.1 as _);
-
-  let mut widget_tree = match app.child {
-    Some(Widget::Builder(widget)) => Some(WidgetTree::from(widget).build()),
-    Some(Widget::Painter(widget)) => Some(WidgetTree::from(widget)),
-    Some(Widget::Stack(stack)) => Some(WidgetTree::from(stack).build()),
-    None => None,
-  };
-
+  let mut widget_tree = app.child.map(WidgetTree::from);
   let mut event_pump = sdl.event_pump().unwrap();
   let mut now = Instant::now();
 
