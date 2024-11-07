@@ -8,5 +8,6 @@ fn main() {
     title: "Worm",
     size: (660, 720),
     favicon_file_path: "assets/worm/images/favicon.png",
+    child: None,
   });
 }

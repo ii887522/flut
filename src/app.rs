@@ -1,3 +1,5 @@
+use crate::{widget_tree::WidgetTree, widgets::Widget};
+use replace_with::replace_with_or_abort;
 use sdl2::{
   event::Event,
   image::LoadSurface,
@@ -12,15 +14,15 @@ use skia_safe::{
     gl::{Format, FramebufferInfo},
     ContextOptions, SurfaceOrigin,
   },
-  Color, ColorType,
+  Color, ColorType, Rect,
 };
 use std::{ffi::CStr, iter, time::Instant};
 
-#[derive(Clone, Copy, Debug, Hash, PartialEq, Eq, PartialOrd, Ord)]
 pub struct App<'a> {
   pub title: &'a str,
   pub size: (u32, u32),
   pub favicon_file_path: &'a str,
+  pub child: Option<Widget<'a>>,
 }
 
 impl Default for App<'_> {
@@ -29,6 +31,7 @@ impl Default for App<'_> {
       title: "",
       size: (800, 600),
       favicon_file_path: "",
+      child: None,
     }
   }
 }
@@ -152,6 +155,15 @@ pub fn run(app: App<'_>) {
   let canvas = skia_surface.canvas();
   const TPS: f32 = 240.0;
   const MAX_FRAME_TICK_COUNT: usize = 8;
+  let constraint = Rect::from_wh(drawable_size.0 as _, drawable_size.1 as _);
+
+  let mut widget_tree = match app.child {
+    Some(Widget::Builder(widget)) => Some(WidgetTree::from(widget).build()),
+    Some(Widget::Painter(widget)) => Some(WidgetTree::from(widget)),
+    Some(Widget::Stack(stack)) => Some(WidgetTree::from(stack).build()),
+    None => None,
+  };
+
   let mut event_pump = sdl.event_pump().unwrap();
   let mut now = Instant::now();
 
@@ -161,13 +173,19 @@ pub fn run(app: App<'_>) {
         break 'running;
       }
 
-      // todo: process_event(event)
+      if let Some(widget_tree) = &mut widget_tree {
+        widget_tree.process_event(event);
+      }
     }
+
+    let Some(widget_tree) = &mut widget_tree else {
+      continue;
+    };
 
     let frame_time = now.elapsed().as_secs_f32();
     now = Instant::now();
 
-    let frame_times = iter::successors(Some(frame_time), |&frame_time| {
+    let desc_frame_times = iter::successors(Some(frame_time), |&frame_time| {
       if frame_time > 0.0 {
         Some(0f32.max(frame_time - 1.0 / TPS))
       } else {
@@ -175,19 +193,22 @@ pub fn run(app: App<'_>) {
       }
     });
 
-    for dt in frame_times
-      .clone()
-      .zip(frame_times.skip(1))
-      .map(|(before, after)| before - after)
-      .take(MAX_FRAME_TICK_COUNT)
-    {
-      // todo: update(dt)
-    }
+    replace_with_or_abort(widget_tree, |mut widget_tree| {
+      for dt in desc_frame_times
+        .clone()
+        .zip(desc_frame_times.skip(1))
+        .map(|(before, after)| before - after)
+        .take(MAX_FRAME_TICK_COUNT)
+      {
+        widget_tree = widget_tree.update(dt).build();
+      }
 
-    canvas.clear(Color::BLACK);
-    // todo: draw(canvas)
-    gr_ctx.flush_and_submit();
-    window.gl_swap_window();
+      canvas.clear(Color::BLACK);
+      widget_tree.draw(canvas, constraint);
+      gr_ctx.flush_and_submit();
+      window.gl_swap_window();
+      widget_tree
+    });
   }
 
   // Hide the window before this function cleanup so that it feels more responsive when user wants to quit the app
