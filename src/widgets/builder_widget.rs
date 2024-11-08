@@ -10,6 +10,6 @@ pub trait BuilderWidget<'a> {
   }
 
   fn pre_draw(&self, _canvas: &Canvas, _constraint: Rect) {}
-  fn build(&self) -> Widget<'a>;
+  fn build(&self, constraint: Rect) -> Widget<'a>;
   fn post_draw(&self, _canvas: &Canvas, _constraint: Rect) {}
 }

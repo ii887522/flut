@@ -155,7 +155,7 @@ pub fn run(app: App<'_>) {
   const TPS: f32 = 240.0;
   const MAX_FRAME_TICK_COUNT: usize = 8;
   let constraint = Rect::from_wh(drawable_size.0 as _, drawable_size.1 as _);
-  let mut widget_tree = app.child.map(WidgetTree::from);
+  let mut widget_tree = app.child.map(|child| WidgetTree::new(child, constraint));
   let mut event_pump = sdl.event_pump().unwrap();
   let mut now = Instant::now();
 
@@ -193,7 +193,7 @@ pub fn run(app: App<'_>) {
       .map(|(before, after)| before - after)
       .take(MAX_FRAME_TICK_COUNT)
     {
-      taken_widget_tree = taken_widget_tree.update(dt).build();
+      taken_widget_tree = taken_widget_tree.update(dt).build(constraint);
     }
 
     canvas.clear(Color::BLACK);

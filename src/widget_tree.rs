@@ -164,22 +164,32 @@ impl<'a> From<Box<dyn PainterWidget + 'a + Send + Sync>> for WidgetTree<'a, Buil
   }
 }
 
-impl<'a> From<Widget<'a>> for WidgetTree<'a, Built> {
-  fn from(widget: Widget<'a>) -> Self {
-    match widget {
-      Widget::Builder(widget) => WidgetTree::from(widget).build(),
-      Widget::Painter(widget) => WidgetTree::from(widget),
-      Widget::Stack(stack) => WidgetTree::from(stack).build(),
-    }
+impl<'a, State: WidgetTreeState<'a>> WidgetTree<'a, State> {
+  fn get_constraint(&self, parent: Option<(u32, u32)>) -> Option<Rect> {
+    parent.map(|(parent_stack_index, parent_stack_child_index)| {
+      let parent_stack_child =
+        &self.stack_nodes[parent_stack_index].children[parent_stack_child_index as usize];
+
+      Rect::from_xywh(
+        parent_stack_child.position.0,
+        parent_stack_child.position.1,
+        parent_stack_child.size.0,
+        parent_stack_child.size.1,
+      )
+    })
   }
 }
 
 impl<'a> WidgetTree<'a, Building> {
-  pub(super) fn build(mut self) -> WidgetTree<'a, Built> {
+  pub(super) fn build(mut self, root_constraint: Rect) -> WidgetTree<'a, Built> {
     while let Some(expandable_node) = self.expandable_nodes.pop() {
       match expandable_node {
         ExpandableNode::Builder(builder_node) => {
-          let child = builder_node.widget.build();
+          let constraint = self
+            .get_constraint(builder_node.parent)
+            .unwrap_or(root_constraint);
+
+          let child = builder_node.widget.build(constraint);
           let buildable_index = self.buildables.push(builder_node.widget);
           let mut buildable_indices = builder_node.buildable_indices;
           buildable_indices.push(buildable_index);
@@ -233,7 +243,7 @@ impl<'a> WidgetTree<'a, Building> {
               .map(|stack_child| StackChildNode {
                 position: stack_child.position,
                 size: stack_child.size,
-                child: DrawableIndex::Painter(u32::MAX),
+                child: DrawableIndex::invalid(),
               })
               .collect(),
           };
@@ -297,6 +307,14 @@ impl<'a> WidgetTree<'a, Building> {
 }
 
 impl<'a> WidgetTree<'a, Built> {
+  pub(super) fn new(root: Widget<'a>, constraint: Rect) -> Self {
+    match root {
+      Widget::Builder(root) => WidgetTree::from(root).build(constraint),
+      Widget::Painter(root) => WidgetTree::from(root),
+      Widget::Stack(root) => WidgetTree::from(root).build(constraint),
+    }
+  }
+
   fn get_root_drawable_index(&self) -> DrawableIndex {
     if self.stack_nodes.is_empty() {
       DrawableIndex::Painter(0)
@@ -448,20 +466,6 @@ impl<'a> WidgetTree<'a, Built> {
         }
       }
     }
-  }
-
-  fn get_constraint(&self, parent: Option<(u32, u32)>) -> Option<Rect> {
-    parent.map(|(parent_stack_index, parent_stack_child_index)| {
-      let parent_stack_child =
-        &self.stack_nodes[parent_stack_index].children[parent_stack_child_index as usize];
-
-      Rect::from_xywh(
-        parent_stack_child.position.0,
-        parent_stack_child.position.1,
-        parent_stack_child.size.0,
-        parent_stack_child.size.1,
-      )
-    })
   }
 
   pub(super) fn draw(&self, canvas: &Canvas, root_constraint: Rect) {
