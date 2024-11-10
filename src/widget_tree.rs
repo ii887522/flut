@@ -189,8 +189,9 @@ impl<'a> WidgetTree<'a, Building> {
             .get_constraint(builder_node.parent)
             .unwrap_or(root_constraint);
 
-          let child = builder_node.widget.build(constraint);
-          let buildable_index = self.buildables.push(builder_node.widget);
+          let mut widget = builder_node.widget;
+          let child = widget.build(constraint);
+          let buildable_index = self.buildables.push(widget);
           let mut buildable_indices = builder_node.buildable_indices;
           buildable_indices.push(buildable_index);
 

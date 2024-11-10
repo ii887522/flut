@@ -10,7 +10,7 @@ pub struct Grid<'a> {
 }
 
 impl<'a> BuilderWidget<'a> for Grid<'a> {
-  fn build(&self, constraint: Rect) -> Widget<'a> {
+  fn build(&mut self, constraint: Rect) -> Widget<'a> {
     let child_size = (
       (constraint.width() - self.gap * (self.col_count - 1) as f32) / self.col_count as f32,
       (constraint.height() - self.gap * (self.row_count - 1) as f32) / self.row_count as f32,

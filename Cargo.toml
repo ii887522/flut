@@ -27,6 +27,7 @@ strip = true
 
 [dependencies]
 gl = { version = "0.14", default-features = false }
+optarg2chain = { version = "0.1", default-features = false }
 rayon = { version = "1.10", default-features = false }
 
 [dependencies.sdl2]

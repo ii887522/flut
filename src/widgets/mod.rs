@@ -1,15 +1,23 @@
 pub mod builder_widget;
+pub mod column;
 pub mod grid;
 pub mod painter_widget;
 pub mod rect_widget;
+pub mod row;
+pub mod spacing;
 pub mod stack;
 pub mod stack_child;
+pub mod text;
 pub mod widget;
 
 pub use builder_widget::BuilderWidget;
+pub use column::Column;
 pub use grid::Grid;
 pub use painter_widget::PainterWidget;
 pub use rect_widget::RectWidget;
+pub use row::Row;
+pub use spacing::Spacing;
 pub use stack::Stack;
 pub use stack_child::StackChild;
+pub use text::Text;
 pub use widget::Widget;

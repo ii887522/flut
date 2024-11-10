@@ -6,6 +6,16 @@ pub enum Widget<'a> {
   Stack(Stack<'a>),
 }
 
+impl Widget<'_> {
+  pub fn get_size(&self) -> (f32, f32) {
+    match self {
+      Widget::Builder(widget) => widget.get_size(),
+      Widget::Painter(widget) => widget.get_size(),
+      Widget::Stack(_) => (-1.0, -1.0),
+    }
+  }
+}
+
 pub trait FromBuilderWidget<'a> {
   fn from_widget(widget: impl BuilderWidget<'a> + 'a + Send + Sync) -> Self;
 }
