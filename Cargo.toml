@@ -26,9 +26,15 @@ split-debuginfo = "packed"
 strip = true
 
 [dependencies]
+atomic_refcell = { version = "0.1", default-features = false }
 gl = { version = "0.14", default-features = false }
 optarg2chain = { version = "0.1", default-features = false }
 rayon = { version = "1.10", default-features = false }
+
+[dependencies.fastrand]
+version = "2.2"
+default-features = false
+features = ["std"]
 
 [dependencies.sdl2]
 version = "0.37"

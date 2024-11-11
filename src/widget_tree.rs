@@ -339,50 +339,56 @@ impl<'a> WidgetTree<'a, Built> {
           // call self.update_drawable()
           let mut stack_nodes = mem::take(&mut self.stack_nodes);
 
-          stack_nodes.replace_with(stack_index, |mut stack_node| {
-            if let Some(expandable_node) =
-              self.update_drawable(dt, &mut stack_node.buildable_indices, stack_node.parent)
-            {
-              // State changed, invalidate all stack children
-              expandable_nodes.push(expandable_node);
+          let invalid_drawable_index_q =
+            stack_nodes.replace_with_and_return(stack_index, |mut stack_node| {
+              if let Some(expandable_node) =
+                self.update_drawable(dt, &mut stack_node.buildable_indices, stack_node.parent)
+              {
+                // State changed, invalidate all stack children
+                expandable_nodes.push(expandable_node);
 
-              // Invalidate all stack children
-              let drawable_index_q = stack_node
-                .children
-                .into_par_iter()
-                .map(|stack_child| stack_child.child);
+                // Invalidate all stack children after stack_nodes are available because self.invalidate() will
+                // invalidate from self.stack_nodes
+                let drawable_index_q = stack_node
+                  .children
+                  .into_par_iter()
+                  .map(|stack_child| stack_child.child);
 
-              self.invalidate(drawable_index_q);
-              None
-            } else {
-              // No state changes, proceed to update each stack child
-              // Traverse the widget tree in depth-first order to update each stack child
-              let drawable_index_q = stack_node
-                .children
-                .par_iter()
-                .map(|stack_child| stack_child.child);
+                (None, Some(drawable_index_q))
+              } else {
+                // No state changes, proceed to update each stack child
+                // Traverse the widget tree in depth-first order to update each stack child
+                let drawable_index_q = stack_node
+                  .children
+                  .par_iter()
+                  .map(|stack_child| stack_child.child);
 
-              drawable_index_lifo_q.par_extend(drawable_index_q);
-              Some(stack_node)
-            }
-          });
+                drawable_index_lifo_q.par_extend(drawable_index_q);
+                (Some(stack_node), None)
+              }
+            });
 
           // Put back self.stack_nodes after we are done working on it
           self.stack_nodes = stack_nodes;
+
+          if let Some(invalid_drawable_index_q) = invalid_drawable_index_q {
+            // Invalidate all stack children
+            self.invalidate(invalid_drawable_index_q);
+          }
         }
         DrawableIndex::Painter(painter_index) => {
           // Temporarily take out self.painter_nodes so that we no need borrow it then we can mutably borrow self to
           // call self.update_drawable()
           let mut painter_nodes = mem::take(&mut self.painter_nodes);
 
-          painter_nodes.replace_with(painter_index, |mut painter_node| {
+          painter_nodes.replace_with_and_return(painter_index, |mut painter_node| {
             if let Some(expandable_node) =
               self.update_drawable(dt, &mut painter_node.buildable_indices, painter_node.parent)
             {
               expandable_nodes.push(expandable_node);
-              None
+              (None, ())
             } else {
-              Some(painter_node)
+              (Some(painter_node), ())
             }
           });
 

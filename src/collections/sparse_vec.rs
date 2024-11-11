@@ -1,9 +1,12 @@
-use std::ops::{Index, IndexMut};
+use std::{
+  collections::VecDeque,
+  ops::{Index, IndexMut},
+};
 
 #[derive(Debug, Hash, PartialEq, Eq, PartialOrd, Ord)]
 pub struct SparseVec<T> {
   anys: Vec<Option<T>>,
-  free_indices: Vec<u32>,
+  free_indices: VecDeque<u32>,
 }
 
 impl<T> Default for SparseVec<T> {
@@ -16,7 +19,7 @@ impl<T> From<T> for SparseVec<T> {
   fn from(any: T) -> Self {
     Self {
       anys: vec![Some(any)],
-      free_indices: vec![],
+      free_indices: VecDeque::new(),
     }
   }
 }
@@ -25,12 +28,12 @@ impl<T> SparseVec<T> {
   pub const fn new() -> Self {
     Self {
       anys: vec![],
-      free_indices: vec![],
+      free_indices: VecDeque::new(),
     }
   }
 
   pub fn push(&mut self, any: T) -> u32 {
-    if let Some(free_index) = self.free_indices.pop() {
+    if let Some(free_index) = self.free_indices.pop_front() {
       self.anys[free_index as usize] = Some(any);
       free_index
     } else {
@@ -48,19 +51,26 @@ impl<T> SparseVec<T> {
     (self.anys.len() - self.free_indices.len()) as _
   }
 
-  pub fn replace_with(&mut self, index: u32, f: impl FnOnce(T) -> Option<T>) {
+  pub fn replace_with_and_return<R>(
+    &mut self,
+    index: u32,
+    f: impl FnOnce(T) -> (Option<T>, R),
+  ) -> R {
     let any = &mut self.anys[index as usize];
+    let (replacement, resp) = f(any.take().unwrap());
 
-    if let Some(replacement) = f(any.take().unwrap()) {
+    if let Some(replacement) = replacement {
       *any = Some(replacement);
     } else {
-      self.free_indices.push(index);
+      self.free_indices.push_back(index);
     }
+
+    resp
   }
 
   pub fn take(&mut self, index: u32) -> T {
     let any = self.anys[index as usize].take().unwrap();
-    self.free_indices.push(index);
+    self.free_indices.push_back(index);
     any
   }
 }
