@@ -7,7 +7,7 @@ pub trait BuilderWidget<'a> {
     (-1.0, -1.0)
   }
 
-  fn process_event(&mut self, _event: Event) {}
+  fn process_event(&mut self, _event: &Event) {}
 
   fn update(&mut self, _dt: f32) -> bool {
     false

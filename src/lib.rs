@@ -3,6 +3,7 @@
 pub mod app;
 mod boot;
 pub mod collections;
+pub mod helpers;
 pub mod models;
 mod widget_tree;
 pub mod widgets;

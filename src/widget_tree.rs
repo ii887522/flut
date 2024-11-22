@@ -324,8 +324,52 @@ impl<'a> WidgetTree<'a, Built> {
     }
   }
 
-  pub(super) fn process_event(&mut self, event: Event) {
-    // todo: process event
+  pub(super) fn process_event(&mut self, event: &Event) {
+    let mut drawable_index_lifo_q = vec![self.get_root_drawable_index()];
+
+    while let Some(drawable_index) = drawable_index_lifo_q.pop() {
+      match drawable_index {
+        DrawableIndex::Stack(stack_index) => {
+          // Temporarily take out self.stack_nodes so that we no need borrow it then we can mutably borrow self to
+          // call self.drawable_process_event()
+          let mut stack_nodes = mem::take(&mut self.stack_nodes);
+
+          stack_nodes.replace_with_and_return(stack_index, |stack_node| {
+            self.drawable_process_event(event, &stack_node.buildable_indices);
+
+            let drawable_index_q = stack_node
+              .children
+              .par_iter()
+              .map(|stack_child| stack_child.child);
+
+            drawable_index_lifo_q.par_extend(drawable_index_q);
+            (Some(stack_node), ())
+          });
+
+          // Put back self.stack_nodes after we are done working on it
+          self.stack_nodes = stack_nodes;
+        }
+        DrawableIndex::Painter(painter_index) => {
+          // Temporarily take out self.painter_nodes so that we no need borrow it then we can mutably borrow self to
+          // call self.update_drawable()
+          let mut painter_nodes = mem::take(&mut self.painter_nodes);
+
+          painter_nodes.replace_with_and_return(painter_index, |painter_node| {
+            self.drawable_process_event(event, &painter_node.buildable_indices);
+            (Some(painter_node), ())
+          });
+
+          // Put back self.painter_nodes after we are done working on it
+          self.painter_nodes = painter_nodes;
+        }
+      }
+    }
+  }
+
+  fn drawable_process_event(&mut self, event: &Event, buildable_indices: &[u32]) {
+    for &buildable_index in buildable_indices {
+      self.buildables[buildable_index].process_event(event);
+    }
   }
 
   pub(super) fn update(mut self, dt: f32) -> WidgetTree<'a, Building> {

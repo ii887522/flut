@@ -166,7 +166,7 @@ pub fn run(app: App<'_>) {
       }
 
       if let Some(widget_tree) = &mut widget_tree {
-        widget_tree.process_event(event);
+        widget_tree.process_event(&event);
       }
     }
 
