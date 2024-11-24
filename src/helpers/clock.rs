@@ -1,4 +1,4 @@
-#[derive(Clone, Copy, Debug, Default, PartialEq, PartialOrd)]
+#[derive(Debug, Default, PartialEq, PartialOrd)]
 pub struct Clock {
   tps: f32,
   accumulator: f32,
@@ -10,6 +10,10 @@ impl Clock {
       tps,
       accumulator: 0.0,
     }
+  }
+
+  pub const fn get_tps(&self) -> f32 {
+    self.tps
   }
 
   pub fn update(&mut self, dt: f32) -> bool {

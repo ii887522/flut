@@ -1,4 +1,9 @@
-use crate::{widget_tree::WidgetTree, widgets::Widget};
+use crate::{
+  boot::{audio, context},
+  helpers::Animation,
+  widget_tree::WidgetTree,
+  widgets::Widget,
+};
 use sdl2::{
   event::Event,
   image::LoadSurface,
@@ -15,12 +20,13 @@ use skia_safe::{
   },
   Color, ColorType, Rect,
 };
-use std::{ffi::CStr, iter, time::Instant};
+use std::{ffi::CStr, iter, sync::mpsc, thread, time::Instant};
 
 pub struct App<'a> {
   pub title: &'a str,
   pub size: (u32, u32),
   pub favicon_file_path: &'a str,
+  pub use_audio: bool,
   pub child: Option<Widget<'a>>,
 }
 
@@ -30,6 +36,7 @@ impl Default for App<'_> {
       title: "",
       size: (800, 600),
       favicon_file_path: "",
+      use_audio: false,
       child: None,
     }
   }
@@ -45,6 +52,13 @@ pub fn run(app: App<'_>) {
   sdl2::hint::set(windows_dpi_scaling, "1");
 
   let sdl = sdl2::init().unwrap();
+
+  if app.use_audio {
+    let (audio_tx, audio_rx) = mpsc::channel();
+    context::AUDIO_TX.set(audio_tx).unwrap();
+    thread::spawn(|| audio::main(audio_rx));
+  }
+
   let vid_subsys = sdl.video().unwrap();
   let gl_attr = vid_subsys.gl_attr();
   let mut ctx_flags_builder = gl_attr.set_context_flags();
@@ -160,7 +174,55 @@ pub fn run(app: App<'_>) {
   let mut now = Instant::now();
 
   'running: loop {
-    for event in event_pump.poll_iter() {
+    // Hot loop
+    while Animation::has() {
+      for event in event_pump.poll_iter() {
+        if let Event::Quit { .. } = event {
+          break 'running;
+        }
+
+        if let Some(widget_tree) = &mut widget_tree {
+          widget_tree.process_event(&event);
+        }
+      }
+
+      // Temporarily take out widget_tree so that we can perform its state transition during update and rebuild in
+      // this loop
+      let Some(mut taken_widget_tree) = widget_tree.take() else {
+        continue;
+      };
+
+      let frame_time = now.elapsed().as_secs_f32();
+      now = Instant::now();
+
+      let desc_frame_times = iter::successors(Some(frame_time), |&frame_time| {
+        if frame_time > 0.0 {
+          Some(0f32.max(frame_time - 1.0 / TPS))
+        } else {
+          None
+        }
+      });
+
+      for dt in desc_frame_times
+        .clone()
+        .zip(desc_frame_times.skip(1))
+        .map(|(before, after)| before - after)
+        .take(MAX_FRAME_TICK_COUNT)
+      {
+        taken_widget_tree = taken_widget_tree.update(dt).build(constraint);
+      }
+
+      canvas.clear(Color::BLACK);
+      taken_widget_tree.draw(canvas, constraint);
+      gr_ctx.flush_and_submit();
+      window.gl_swap_window();
+
+      // Put back widget_tree after we are done working on it
+      widget_tree = Some(taken_widget_tree);
+    }
+
+    // Cold loop
+    for event in event_pump.wait_iter() {
       if let Event::Quit { .. } = event {
         break 'running;
       }
@@ -168,41 +230,11 @@ pub fn run(app: App<'_>) {
       if let Some(widget_tree) = &mut widget_tree {
         widget_tree.process_event(&event);
       }
-    }
 
-    // Temporarily take out widget_tree so that we can perform its state transition during update and rebuild in
-    // this loop
-    let Some(mut taken_widget_tree) = widget_tree.take() else {
-      continue;
-    };
-
-    let frame_time = now.elapsed().as_secs_f32();
-    now = Instant::now();
-
-    let desc_frame_times = iter::successors(Some(frame_time), |&frame_time| {
-      if frame_time > 0.0 {
-        Some(0f32.max(frame_time - 1.0 / TPS))
-      } else {
-        None
+      if Animation::has() {
+        break;
       }
-    });
-
-    for dt in desc_frame_times
-      .clone()
-      .zip(desc_frame_times.skip(1))
-      .map(|(before, after)| before - after)
-      .take(MAX_FRAME_TICK_COUNT)
-    {
-      taken_widget_tree = taken_widget_tree.update(dt).build(constraint);
     }
-
-    canvas.clear(Color::BLACK);
-    taken_widget_tree.draw(canvas, constraint);
-    gr_ctx.flush_and_submit();
-    window.gl_swap_window();
-
-    // Put back widget_tree after we are done working on it
-    widget_tree = Some(taken_widget_tree);
   }
 
   // Hide the window before this function cleanup so that it feels more responsive when user wants to quit the app

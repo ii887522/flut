@@ -1,6 +1,7 @@
 use super::Widget;
 use skia_safe::Rect;
 
+#[derive(Clone)]
 pub struct StackChild<'a> {
   pub position: (f32, f32),
   pub size: (f32, f32),

@@ -12,6 +12,7 @@ fn main() {
     title: "Worm",
     size: (660, 720),
     favicon_file_path: "assets/worm/images/favicon.png",
+    use_audio: true,
     child: Some(GamePage::new().into_widget()),
   });
 }

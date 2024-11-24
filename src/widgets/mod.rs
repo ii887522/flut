@@ -8,6 +8,7 @@ pub mod spacing;
 pub mod stack;
 pub mod stack_child;
 pub mod text;
+pub mod translation;
 pub mod widget;
 
 pub use builder_widget::BuilderWidget;
@@ -20,4 +21,5 @@ pub use spacing::Spacing;
 pub use stack::Stack;
 pub use stack_child::StackChild;
 pub use text::Text;
+pub use translation::Translation;
 pub use widget::Widget;

@@ -2,10 +2,11 @@ use crate::{
   collections::SparseVec,
   widgets::{BuilderWidget, PainterWidget, Stack, StackChild, Widget},
 };
+use atomic_refcell::AtomicRefCell;
 use rayon::prelude::*;
 use sdl2::event::Event;
 use skia_safe::{Canvas, Rect};
-use std::mem;
+use std::{mem, sync::Arc};
 
 pub(super) trait StackChildChild {}
 impl StackChildChild for Widget<'_> {}
@@ -32,7 +33,7 @@ pub(super) struct Built;
 pub(super) struct BuilderNode<'a> {
   buildable_indices: Vec<u32>,
   parent: Option<(u32, u32)>,
-  widget: Box<dyn BuilderWidget<'a> + 'a + Send + Sync>,
+  widget: Arc<AtomicRefCell<dyn BuilderWidget<'a> + 'a + Send + Sync>>,
 }
 
 pub(super) struct StackNode<Child: StackChildChild> {
@@ -49,7 +50,7 @@ struct StackChildNode<Child: StackChildChild> {
 
 impl<'a> From<StackChild<'a>> for StackChildNode<Widget<'a>> {
   fn from(stack_child: StackChild<'a>) -> Self {
-    StackChildNode {
+    Self {
       position: stack_child.position,
       size: stack_child.size,
       child: stack_child.child,
@@ -57,9 +58,15 @@ impl<'a> From<StackChild<'a>> for StackChildNode<Widget<'a>> {
   }
 }
 
+impl<'a> From<&StackChild<'a>> for StackChildNode<Widget<'a>> {
+  fn from(stack_child: &StackChild<'a>) -> Self {
+    StackChild::clone(stack_child).into()
+  }
+}
+
 impl<'a> From<StackChildNode<Widget<'a>>> for StackChildNode<DrawableIndex> {
   fn from(stack_child: StackChildNode<Widget<'a>>) -> Self {
-    StackChildNode {
+    Self {
       position: stack_child.position,
       size: stack_child.size,
       child: DrawableIndex::invalid(),
@@ -70,12 +77,12 @@ impl<'a> From<StackChildNode<Widget<'a>>> for StackChildNode<DrawableIndex> {
 struct PainterNode<'a> {
   buildable_indices: Vec<u32>,
   parent: Option<(u32, u32)>,
-  widget: Box<dyn PainterWidget + 'a + Send + Sync>,
+  widget: Arc<dyn PainterWidget + 'a + Send + Sync>,
 }
 
-impl<'a> From<Box<dyn PainterWidget + 'a + Send + Sync>> for PainterNode<'a> {
-  fn from(widget: Box<dyn PainterWidget + 'a + Send + Sync>) -> Self {
-    PainterNode {
+impl<'a> From<Arc<dyn PainterWidget + 'a + Send + Sync>> for PainterNode<'a> {
+  fn from(widget: Arc<dyn PainterWidget + 'a + Send + Sync>) -> Self {
+    Self {
       buildable_indices: vec![],
       parent: None,
       widget,
@@ -88,8 +95,8 @@ pub(super) enum ExpandableNode<'a> {
   Stack(StackNode<Widget<'a>>),
 }
 
-impl<'a> From<Box<dyn BuilderWidget<'a> + 'a + Send + Sync>> for ExpandableNode<'a> {
-  fn from(widget: Box<dyn BuilderWidget<'a> + 'a + Send + Sync>) -> Self {
+impl<'a> From<Arc<AtomicRefCell<dyn BuilderWidget<'a> + 'a + Send + Sync>>> for ExpandableNode<'a> {
+  fn from(widget: Arc<AtomicRefCell<dyn BuilderWidget<'a> + 'a + Send + Sync>>) -> Self {
     Self::Builder(BuilderNode {
       buildable_indices: vec![],
       parent: None,
@@ -98,14 +105,14 @@ impl<'a> From<Box<dyn BuilderWidget<'a> + 'a + Send + Sync>> for ExpandableNode<
   }
 }
 
-impl<'a> From<Stack<'a>> for ExpandableNode<'a> {
-  fn from(stack: Stack<'a>) -> Self {
+impl<'a> From<Arc<Stack<'a>>> for ExpandableNode<'a> {
+  fn from(stack: Arc<Stack<'a>>) -> Self {
     Self::Stack(StackNode {
       buildable_indices: vec![],
       parent: None,
       children: stack
         .children
-        .into_par_iter()
+        .par_iter()
         .map(StackChildNode::from)
         .collect(),
     })
@@ -125,14 +132,16 @@ impl DrawableIndex {
 }
 
 pub(super) struct WidgetTree<'a, State: WidgetTreeState<'a>> {
-  buildables: SparseVec<Box<dyn BuilderWidget<'a> + 'a + Send + Sync>>,
+  buildables: SparseVec<Arc<AtomicRefCell<dyn BuilderWidget<'a> + 'a + Send + Sync>>>,
   expandable_nodes: State::ExpandableNodes,
   stack_nodes: SparseVec<StackNode<DrawableIndex>>,
   painter_nodes: SparseVec<PainterNode<'a>>,
 }
 
-impl<'a> From<Box<dyn BuilderWidget<'a> + 'a + Send + Sync>> for WidgetTree<'a, Building> {
-  fn from(widget: Box<dyn BuilderWidget<'a> + 'a + Send + Sync>) -> Self {
+impl<'a> From<Arc<AtomicRefCell<dyn BuilderWidget<'a> + 'a + Send + Sync>>>
+  for WidgetTree<'a, Building>
+{
+  fn from(widget: Arc<AtomicRefCell<dyn BuilderWidget<'a> + 'a + Send + Sync>>) -> Self {
     Self {
       buildables: SparseVec::new(),
       expandable_nodes: vec![ExpandableNode::from(widget)],
@@ -142,8 +151,8 @@ impl<'a> From<Box<dyn BuilderWidget<'a> + 'a + Send + Sync>> for WidgetTree<'a, 
   }
 }
 
-impl<'a> From<Stack<'a>> for WidgetTree<'a, Building> {
-  fn from(stack: Stack<'a>) -> Self {
+impl<'a> From<Arc<Stack<'a>>> for WidgetTree<'a, Building> {
+  fn from(stack: Arc<Stack<'a>>) -> Self {
     Self {
       buildables: SparseVec::new(),
       expandable_nodes: vec![ExpandableNode::from(stack)],
@@ -153,8 +162,8 @@ impl<'a> From<Stack<'a>> for WidgetTree<'a, Building> {
   }
 }
 
-impl<'a> From<Box<dyn PainterWidget + 'a + Send + Sync>> for WidgetTree<'a, Built> {
-  fn from(widget: Box<dyn PainterWidget + 'a + Send + Sync>) -> Self {
+impl<'a> From<Arc<dyn PainterWidget + 'a + Send + Sync>> for WidgetTree<'a, Built> {
+  fn from(widget: Arc<dyn PainterWidget + 'a + Send + Sync>) -> Self {
     Self {
       buildables: SparseVec::new(),
       expandable_nodes: (),
@@ -189,8 +198,8 @@ impl<'a> WidgetTree<'a, Building> {
             .get_constraint(builder_node.parent)
             .unwrap_or(root_constraint);
 
-          let mut widget = builder_node.widget;
-          let child = widget.build(constraint);
+          let widget = builder_node.widget;
+          let child = widget.borrow_mut().build(constraint);
           let buildable_index = self.buildables.push(widget);
           let mut buildable_indices = builder_node.buildable_indices;
           buildable_indices.push(buildable_index);
@@ -211,7 +220,7 @@ impl<'a> WidgetTree<'a, Building> {
                 parent: builder_node.parent,
                 children: stack
                   .children
-                  .into_par_iter()
+                  .par_iter()
                   .map(StackChildNode::from)
                   .collect(),
               });
@@ -273,7 +282,7 @@ impl<'a> WidgetTree<'a, Building> {
                   parent: Some((drawable_stack_index, stack_child_index as _)),
                   children: stack
                     .children
-                    .into_par_iter()
+                    .par_iter()
                     .map(StackChildNode::from)
                     .collect(),
                 });
@@ -368,7 +377,9 @@ impl<'a> WidgetTree<'a, Built> {
 
   fn drawable_process_event(&mut self, event: &Event, buildable_indices: &[u32]) {
     for &buildable_index in buildable_indices {
-      self.buildables[buildable_index].process_event(event);
+      self.buildables[buildable_index]
+        .borrow_mut()
+        .process_event(event);
     }
   }
 
@@ -458,7 +469,7 @@ impl<'a> WidgetTree<'a, Built> {
   ) -> Option<ExpandableNode<'a>> {
     let dirty_buildable_index_index = buildable_indices.iter().enumerate().find_map(
       |(buildable_index_index, &buildable_index)| {
-        if self.buildables[buildable_index].update(dt) {
+        if self.buildables[buildable_index].borrow_mut().update(dt) {
           Some(buildable_index_index)
         } else {
           None
@@ -532,12 +543,16 @@ impl<'a> WidgetTree<'a, Built> {
             .unwrap_or(root_constraint);
 
           for &buildable_index in &stack_node.buildable_indices {
-            self.buildables[buildable_index].pre_draw(canvas, constraint);
+            self.buildables[buildable_index]
+              .borrow()
+              .pre_draw(canvas, constraint);
           }
 
           if stack_node.children.is_empty() {
             for &buildable_index in stack_node.buildable_indices.iter().rev() {
-              self.buildables[buildable_index].post_draw(canvas, constraint);
+              self.buildables[buildable_index]
+                .borrow()
+                .post_draw(canvas, constraint);
             }
 
             self.post_draw(canvas, root_constraint, stack_node.parent);
@@ -561,13 +576,17 @@ impl<'a> WidgetTree<'a, Built> {
             .unwrap_or(root_constraint);
 
           for &buildable_index in &painter_node.buildable_indices {
-            self.buildables[buildable_index].pre_draw(canvas, constraint);
+            self.buildables[buildable_index]
+              .borrow()
+              .pre_draw(canvas, constraint);
           }
 
           painter_node.widget.draw(canvas, constraint);
 
           for &buildable_index in painter_node.buildable_indices.iter().rev() {
-            self.buildables[buildable_index].post_draw(canvas, constraint);
+            self.buildables[buildable_index]
+              .borrow()
+              .post_draw(canvas, constraint);
           }
 
           self.post_draw(canvas, root_constraint, painter_node.parent);
@@ -589,7 +608,9 @@ impl<'a> WidgetTree<'a, Built> {
         .unwrap_or(root_constraint);
 
       for &buildable_index in parent_stack_node.buildable_indices.iter().rev() {
-        self.buildables[buildable_index].post_draw(canvas, constraint);
+        self.buildables[buildable_index]
+          .borrow()
+          .post_draw(canvas, constraint);
       }
 
       parent = parent_stack_node.parent;

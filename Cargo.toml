@@ -36,6 +36,11 @@ version = "2.2"
 default-features = false
 features = ["std"]
 
+[dependencies.replace_with]
+version = "0.1"
+default-features = false
+features = ["std"]
+
 [dependencies.sdl2]
 version = "0.37"
 default-features = false
