@@ -3,14 +3,16 @@ use atomic_refcell::AtomicRefCell;
 use flut::{
   boot::context,
   helpers::{Clock, ShakeAnimation},
-  models::{AudioReq, FontCfg, HorizontalAlign},
+  models::{AudioReq, FontCfg, HorizontalAlign, IconName},
   widgets::{
-    widget::*, BuilderWidget, Column, Dialog, Grid, RectWidget, Spacing, Text, Translation, Widget,
+    dialog::Header, widget::*, BuilderWidget, Column, Dialog, Grid, RectWidget, Spacing, Text,
+    Translation, Widget,
   },
 };
 use sdl2::{event::Event, keyboard::Keycode};
 use skia_safe::{Color, Rect};
 use std::{
+  borrow::Cow,
   collections::{HashSet, VecDeque},
   sync::Arc,
 };
@@ -324,6 +326,11 @@ impl<'a> BuilderWidget<'a> for GamePage {
           Some(
             Dialog::new()
               .color(Color::from_rgb(255, 128, 128))
+              .header(Header {
+                icon: Some(IconName::Skull),
+                title: Cow::Borrowed("You died..."),
+                ..Default::default()
+              })
               .call()
               .into_widget(),
           )
