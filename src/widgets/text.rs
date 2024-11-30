@@ -1,7 +1,7 @@
 use super::PainterWidget;
 use crate::{boot::context, models::FontCfg};
 use optarg2chain::optarg_impl;
-use skia_safe::{Canvas, Color, Font, FontStyle, Paint, Point, Rect};
+use skia_safe::{font::Edging, Canvas, Color, Font, FontStyle, Paint, Point, Rect};
 use std::borrow::Cow;
 
 pub struct Text {
@@ -36,6 +36,7 @@ impl Text {
         Font::new(typeface, font_cfg.font_size as f32)
       });
 
+      font.set_edging(Edging::AntiAlias);
       let (_, bound) = font.measure_str(&text, None);
 
       Self {

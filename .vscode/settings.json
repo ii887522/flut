@@ -8,5 +8,6 @@
     "-A",
     "clippy::too_many_arguments"
   ],
-  "rust-analyzer.checkOnSave": true
+  "rust-analyzer.checkOnSave": true,
+  "rust-analyzer.linkedProjects": ["flut_codegen/Cargo.toml", "Cargo.toml"]
 }

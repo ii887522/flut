@@ -1,9 +1,12 @@
 pub mod builder_widget;
 pub mod column;
+pub mod dialog;
 pub mod grid;
+pub mod icon;
 pub mod painter_widget;
 pub mod rect_widget;
 pub mod row;
+pub mod scale;
 pub mod spacing;
 pub mod stack;
 pub mod stack_child;
@@ -13,10 +16,13 @@ pub mod widget;
 
 pub use builder_widget::BuilderWidget;
 pub use column::Column;
+pub use dialog::Dialog;
 pub use grid::Grid;
+pub use icon::Icon;
 pub use painter_widget::PainterWidget;
 pub use rect_widget::RectWidget;
 pub use row::Row;
+pub use scale::Scale;
 pub use spacing::Spacing;
 pub use stack::Stack;
 pub use stack_child::StackChild;

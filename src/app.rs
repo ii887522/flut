@@ -20,7 +20,13 @@ use skia_safe::{
   },
   Color, ColorType, Rect,
 };
-use std::{ffi::CStr, iter, sync::mpsc, thread, time::Instant};
+use std::{
+  ffi::CStr,
+  iter,
+  sync::{atomic::Ordering, mpsc},
+  thread,
+  time::Instant,
+};
 
 pub struct App<'a> {
   pub title: &'a str,
@@ -143,6 +149,14 @@ pub fn run(app: App<'_>) {
     skia_safe::gpu::direct_contexts::make_gl(skia_interface, &skia_ctx_opts).unwrap();
 
   let drawable_size = window.drawable_size();
+
+  context::DRAWABLE_SIZE
+    .0
+    .store(drawable_size.0 as _, Ordering::Relaxed);
+
+  context::DRAWABLE_SIZE
+    .1
+    .store(drawable_size.1 as _, Ordering::Relaxed);
 
   let backend_render_target = backend_render_targets::make_gl(
     (drawable_size.0 as _, drawable_size.1 as _),

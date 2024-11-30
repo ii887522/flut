@@ -1,14 +1,18 @@
+use super::Animation;
+
 #[derive(Debug, Default, PartialEq, PartialOrd)]
 pub struct Clock {
   tps: f32,
   accumulator: f32,
+  animation: Animation,
 }
 
 impl Clock {
-  pub const fn new(tps: f32) -> Self {
+  pub fn new(tps: f32) -> Self {
     Self {
       tps,
       accumulator: 0.0,
+      animation: Animation::new(),
     }
   }
 

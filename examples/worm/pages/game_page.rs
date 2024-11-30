@@ -2,13 +2,12 @@ use crate::models::{Direction, GameCell, WormCell};
 use atomic_refcell::AtomicRefCell;
 use flut::{
   boot::context,
-  helpers::{shake_animation::ShakeAnimationAny, Animation, Clock, ShakeAnimation},
+  helpers::{Clock, ShakeAnimation},
   models::{AudioReq, FontCfg, HorizontalAlign},
   widgets::{
-    widget::*, BuilderWidget, Column, Grid, RectWidget, Spacing, Text, Translation, Widget,
+    widget::*, BuilderWidget, Column, Dialog, Grid, RectWidget, Spacing, Text, Translation, Widget,
   },
 };
-use replace_with::replace_with_or_abort;
 use sdl2::{event::Event, keyboard::Keycode};
 use skia_safe::{Color, Rect};
 use std::{
@@ -24,11 +23,10 @@ pub(crate) struct GamePage {
   grid_model: Arc<AtomicRefCell<[GameCell; CELL_COUNT as usize]>>,
   air_indices: HashSet<u16>,
   worm: VecDeque<WormCell>, // Front is tail, back is head
-  clock: Clock,
+  clock: Option<Clock>,
   next_worm_head_direction: Option<Direction>,
   is_worm_dead: bool,
-  animation: Option<Animation>,
-  shake_animation: ShakeAnimationAny,
+  shake_animation: Option<ShakeAnimation>,
 }
 
 impl GamePage {
@@ -38,13 +36,10 @@ impl GamePage {
       grid_model: Arc::new(AtomicRefCell::new([GameCell::Air; CELL_COUNT as usize])),
       air_indices: (0..CELL_COUNT).collect(),
       worm: VecDeque::new(),
-      clock: Clock::new(30.0),
+      clock: Some(Clock::new(30.0)),
       next_worm_head_direction: None,
       is_worm_dead: false,
-      animation: Some(Animation::new()),
-      shake_animation: ShakeAnimationAny::Idle(
-        ShakeAnimation::new().duration(0.5).strength(32.0).call(),
-      ),
+      shake_animation: None,
     };
 
     for i in 0..COL_COUNT {
@@ -119,12 +114,8 @@ impl GamePage {
 
   fn kill_worm(&mut self) {
     self.is_worm_dead = true;
-    self.animation = None;
-
-    replace_with_or_abort(&mut self.shake_animation, |shake_animation| {
-      let shake_animation = shake_animation.as_idle().unwrap();
-      ShakeAnimationAny::Move(shake_animation.shake())
-    });
+    self.clock = None;
+    self.shake_animation = Some(ShakeAnimation::new().duration(0.5).strength(32.0).call());
 
     if let Some(audio_tx) = context::AUDIO_TX.get() {
       let _ = audio_tx.send(AudioReq::PlaySound("assets/worm/audio/dead.wav"));
@@ -187,17 +178,17 @@ impl<'a> BuilderWidget<'a> for GamePage {
   }
 
   fn update(&mut self, dt: f32) -> bool {
-    let is_shaking = matches!(self.shake_animation, ShakeAnimationAny::Move(_));
+    let is_shaking = self.shake_animation.is_some();
 
-    replace_with_or_abort(
-      &mut self.shake_animation,
-      |shake_animation| match shake_animation {
-        ShakeAnimationAny::Idle(_) => shake_animation,
-        ShakeAnimationAny::Move(shake_animation) => shake_animation.update(dt),
-      },
-    );
+    if let Some(shake_animation) = self.shake_animation.take() {
+      self.shake_animation = shake_animation.update(dt);
+    }
 
-    if !self.clock.update(dt) || self.is_worm_dead {
+    let Some(clock) = &mut self.clock else {
+      return is_shaking;
+    };
+
+    if !clock.update(dt) || self.is_worm_dead {
       return is_shaking;
     }
 
@@ -274,50 +265,76 @@ impl<'a> BuilderWidget<'a> for GamePage {
   fn build(&mut self, _constraint: Rect) -> Widget<'a> {
     let grid_model = Arc::clone(&self.grid_model);
 
-    Translation {
-      translation: self.shake_animation.get_translation(),
-      child: Column {
-        align: HorizontalAlign::Center,
-        children: vec![
-          Spacing {
-            height: 16.0,
-            ..Default::default()
-          }
-          .into_widget(),
-          Text::new()
-            .text((self.worm.len() - 1).to_string())
-            .font_cfg(FontCfg {
-              font_size: 48,
-              ..Default::default()
-            })
-            .color(Color::WHITE)
-            .call()
+    Column {
+      children: vec![
+        Some(
+          Translation {
+            translation: if let Some(shake_animation) = self.shake_animation.as_ref() {
+              shake_animation.get_translation()
+            } else {
+              (0.0, 0.0)
+            },
+            child: Column {
+              align: HorizontalAlign::Center,
+              children: vec![
+                Spacing {
+                  height: 16.0,
+                  ..Default::default()
+                }
+                .into_widget(),
+                Text::new()
+                  .text((self.worm.len() - 1).to_string())
+                  .font_cfg(FontCfg {
+                    font_size: 48,
+                    ..Default::default()
+                  })
+                  .color(Color::WHITE)
+                  .call()
+                  .into_widget(),
+                Spacing {
+                  height: 16.0,
+                  ..Default::default()
+                }
+                .into_widget(),
+                Grid {
+                  col_count: COL_COUNT as _,
+                  row_count: ROW_COUNT as _,
+                  gap: 2.0,
+                  builder: Box::new(move |index| {
+                    RectWidget {
+                      color: match grid_model.borrow()[index as usize] {
+                        GameCell::Air => Color::DARK_GRAY,
+                        GameCell::Worm => Color::from_rgb(243, 125, 121),
+                        GameCell::Wall => Color::RED,
+                        GameCell::Food => Color::GREEN,
+                      },
+                      ..Default::default()
+                    }
+                    .into_widget()
+                  }),
+                }
+                .into_widget(),
+              ],
+            }
             .into_widget(),
-          Spacing {
-            height: 16.0,
-            ..Default::default()
           }
           .into_widget(),
-          Grid {
-            col_count: COL_COUNT as _,
-            row_count: ROW_COUNT as _,
-            gap: 2.0,
-            builder: Box::new(move |index| {
-              RectWidget {
-                color: match grid_model.borrow()[index as usize] {
-                  GameCell::Air => Color::DARK_GRAY,
-                  GameCell::Worm => Color::from_rgb(243, 125, 121),
-                  GameCell::Wall => Color::RED,
-                  GameCell::Food => Color::GREEN,
-                },
-              }
-              .into_widget()
-            }),
-          }
-          .into_widget(),
-        ],
-      }
-      .into_widget(),
+        ),
+        if self.is_worm_dead {
+          Some(
+            Dialog::new()
+              .color(Color::from_rgb(255, 128, 128))
+              .call()
+              .into_widget(),
+          )
+        } else {
+          None
+        },
+      ]
+      .into_iter()
+      .flatten()
+      .collect(),
+      ..Default::default()
     }
     .into_widget()
   }
