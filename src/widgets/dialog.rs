@@ -5,12 +5,20 @@ use crate::{
   models::{FontCfg, IconName},
 };
 use optarg2chain::optarg_impl;
+use rayon::iter::Either;
 use replace_with::replace_with_or_abort;
-use sdl2::event::Event;
-use skia_safe::{font_style::Weight, Color, Rect};
+use sdl2::mouse::MouseButton;
+use skia_safe::{font_style::Weight, Color, Contains, Point, Rect};
 use std::{borrow::Cow, sync::atomic::Ordering};
 
 const SIZE: (f32, f32) = (512.0, 256.0);
+
+thread_local! {
+  static POSITION: (f32, f32) = (
+    (context::DRAWABLE_SIZE.0.load(Ordering::Relaxed) - SIZE.0) * 0.5,
+    (context::DRAWABLE_SIZE.1.load(Ordering::Relaxed) - SIZE.1) * 0.5,
+  );
+}
 
 pub struct Header {
   pub icon: Option<IconName>,
@@ -39,19 +47,19 @@ impl Default for Header {
 pub struct Dialog {
   color: Color,
   header: Header,
-  background_alpha: MaybeTransition,
-  scale: MaybeTransition,
+  animation: DialogAnimationAny,
 }
 
 #[optarg_impl]
 impl Dialog {
   #[optarg_method(DialogNewBuilder, call)]
   pub fn new(#[optarg(Color::BLACK)] color: Color, #[optarg_default] header: Header) -> Self {
+    let animation = DialogAnimationAny::new();
+
     Self {
       color,
       header,
-      background_alpha: MaybeTransition::Move(Transition::new(0.0, 128.0).duration(0.125).call()),
-      scale: MaybeTransition::Move(Transition::new(0.0, 1.0).duration(0.125).call()),
+      animation,
     }
   }
 }
@@ -63,63 +71,73 @@ impl<'a> BuilderWidget<'a> for Dialog {
     (0.0, 0.0)
   }
 
-  fn process_event(&mut self, event: &Event) {
-    todo!();
+  fn on_mouse_up(&mut self, mouse_btn: MouseButton, mouse_position: (f32, f32)) {
+    if mouse_btn != MouseButton::Left
+      || POSITION
+        .with(|&position| Rect::from_xywh(position.0, position.1, SIZE.0, SIZE.1))
+        .contains(Point::new(mouse_position.0, mouse_position.1))
+    {
+      return;
+    }
+
+    if let DialogAnimationAny::PoppedUp(popped_up) = self.animation {
+      self.animation = DialogAnimationAny::ScalingDown(popped_up.vibrate());
+    }
   }
 
   fn update(&mut self, dt: f32) -> bool {
-    let is_animating = matches!(self.background_alpha, MaybeTransition::Move(_))
-      || matches!(self.scale, MaybeTransition::Move(_));
-
-    replace_with_or_abort(
-      &mut self.background_alpha,
-      |background_alpha| match background_alpha {
-        MaybeTransition::Idle(_) => background_alpha,
-        MaybeTransition::Move(background_alpha) => background_alpha.update(dt),
-      },
+    let is_animating = matches!(
+      self.animation,
+      DialogAnimationAny::PoppingUp(_)
+        | DialogAnimationAny::ScalingDown(_)
+        | DialogAnimationAny::ScalingUp(_)
     );
 
-    replace_with_or_abort(&mut self.scale, |scale| match scale {
-      MaybeTransition::Idle(_) => scale,
-      MaybeTransition::Move(scale) => scale.update(dt),
+    replace_with_or_abort(&mut self.animation, |animation| match animation {
+      DialogAnimationAny::PoppingUp(popping_up) => match popping_up.update(dt) {
+        Either::Left(popping_up) => DialogAnimationAny::PoppingUp(popping_up),
+        Either::Right(popped_up) => DialogAnimationAny::PoppedUp(popped_up),
+      },
+      DialogAnimationAny::PoppedUp(popped_up) => DialogAnimationAny::PoppedUp(popped_up),
+      DialogAnimationAny::ScalingDown(scaling_down) => match scaling_down.update(dt) {
+        Either::Left(scaling_down) => DialogAnimationAny::ScalingDown(scaling_down),
+        Either::Right(scaling_up) => DialogAnimationAny::ScalingUp(scaling_up),
+      },
+      DialogAnimationAny::ScalingUp(scaling_up) => match scaling_up.update(dt) {
+        Either::Left(scaling_up) => DialogAnimationAny::ScalingUp(scaling_up),
+        Either::Right(popped_up) => DialogAnimationAny::PoppedUp(popped_up),
+      },
     });
 
     is_animating
   }
 
   fn build(&mut self, _constraint: Rect) -> Widget<'a> {
-    let drawable_size = (
-      context::DRAWABLE_SIZE.0.load(Ordering::Relaxed),
-      context::DRAWABLE_SIZE.1.load(Ordering::Relaxed),
-    );
-
-    let position = (
-      (drawable_size.0 - SIZE.0) * 0.5,
-      (drawable_size.1 - SIZE.1) * 0.5,
-    );
-
     Stack {
       children: vec![
         // Background
         StackChild {
           position: (0.0, 0.0),
-          size: drawable_size,
+          size: (
+            context::DRAWABLE_SIZE.0.load(Ordering::Relaxed),
+            context::DRAWABLE_SIZE.1.load(Ordering::Relaxed),
+          ),
           child: RectWidget {
-            color: Color::from_argb(self.background_alpha.get_now() as _, 0, 0, 0),
+            color: Color::from_argb(self.animation.get_background_alpha(), 0, 0, 0),
             ..Default::default()
           }
           .into_widget(),
         },
         // Foreground
         StackChild {
-          position,
+          position: POSITION.with(|&position| position),
           size: SIZE,
           child: Scale {
-            scale: self.scale.get_now(),
+            scale: self.animation.get_scale(),
             child: Stack {
               children: vec![
                 Some(StackChild {
-                  position,
+                  position: POSITION.with(|&position| position),
                   size: SIZE,
                   child: RectWidget {
                     color: self.color,
@@ -128,7 +146,7 @@ impl<'a> BuilderWidget<'a> for Dialog {
                   .into_widget(),
                 }),
                 self.header.icon.map(|header_icon| StackChild {
-                  position: (position.0 + 16.0, position.1 + 16.0),
+                  position: POSITION.with(|&position| (position.0 + 16.0, position.1 + 16.0)),
                   size: (0.0, 0.0),
                   child: Icon::new(header_icon)
                     .size(64)
@@ -140,7 +158,7 @@ impl<'a> BuilderWidget<'a> for Dialog {
                   None
                 } else {
                   Some(StackChild {
-                    position: (position.0 + 84.0, position.1 + 32.0),
+                    position: POSITION.with(|&position| (position.0 + 84.0, position.1 + 32.0)),
                     size: (0.0, 0.0),
                     child: Text::new()
                       .text(self.header.title.to_string())
@@ -162,5 +180,106 @@ impl<'a> BuilderWidget<'a> for Dialog {
       ],
     }
     .into()
+  }
+}
+
+#[derive(Debug, Default, PartialEq, PartialOrd)]
+struct PoppingUp {
+  background_alpha: Transition,
+  scale: Transition,
+}
+
+#[derive(Clone, Copy, Debug, Default, Hash, PartialEq, Eq, PartialOrd, Ord)]
+struct PoppedUp;
+
+#[derive(Debug, Default, PartialEq, PartialOrd)]
+struct ScalingDown {
+  scale: Transition,
+}
+
+#[derive(Debug, Default, PartialEq, PartialOrd)]
+struct ScalingUp {
+  scale: Transition,
+}
+
+#[derive(Debug, PartialEq, PartialOrd)]
+enum DialogAnimationAny {
+  PoppingUp(PoppingUp),
+  PoppedUp(PoppedUp),
+  ScalingDown(ScalingDown),
+  ScalingUp(ScalingUp),
+}
+
+impl DialogAnimationAny {
+  fn new() -> Self {
+    Self::PoppingUp(PoppingUp {
+      background_alpha: Transition::new(0.0, 128.0).duration(0.125).call(),
+      scale: Transition::new(0.0, 1.0).duration(0.125).call(),
+    })
+  }
+
+  const fn get_background_alpha(&self) -> u8 {
+    match self {
+      DialogAnimationAny::PoppingUp(popping_up) => popping_up.background_alpha.get_now() as _,
+      DialogAnimationAny::PoppedUp(_)
+      | DialogAnimationAny::ScalingDown(_)
+      | DialogAnimationAny::ScalingUp(_) => 128,
+    }
+  }
+
+  const fn get_scale(&self) -> f32 {
+    match self {
+      DialogAnimationAny::PoppingUp(popping_up) => popping_up.scale.get_now(),
+      DialogAnimationAny::PoppedUp(_) => 1.0,
+      DialogAnimationAny::ScalingDown(scaling_down) => scaling_down.scale.get_now(),
+      DialogAnimationAny::ScalingUp(scaling_up) => scaling_up.scale.get_now(),
+    }
+  }
+}
+
+impl PoppingUp {
+  fn update(self, dt: f32) -> Either<Self, PoppedUp> {
+    let MaybeTransition::Move(background_alpha) = self.background_alpha.update(dt) else {
+      return Either::Right(PoppedUp);
+    };
+
+    let MaybeTransition::Move(scale) = self.scale.update(dt) else {
+      return Either::Right(PoppedUp);
+    };
+
+    Either::Left(Self {
+      background_alpha,
+      scale,
+    })
+  }
+}
+
+impl PoppedUp {
+  fn vibrate(self) -> ScalingDown {
+    ScalingDown {
+      scale: Transition::new(1.0, 0.9).duration(0.08).call(),
+    }
+  }
+}
+
+impl ScalingDown {
+  fn update(self, dt: f32) -> Either<Self, ScalingUp> {
+    let MaybeTransition::Move(scale) = self.scale.update(dt) else {
+      return Either::Right(ScalingUp {
+        scale: Transition::new(0.9, 1.0).duration(0.08).call(),
+      });
+    };
+
+    Either::Left(Self { scale })
+  }
+}
+
+impl ScalingUp {
+  fn update(self, dt: f32) -> Either<Self, PoppedUp> {
+    let MaybeTransition::Move(scale) = self.scale.update(dt) else {
+      return Either::Right(PoppedUp);
+    };
+
+    Either::Left(Self { scale })
   }
 }

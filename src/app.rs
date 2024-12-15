@@ -196,7 +196,7 @@ pub fn run(app: App<'_>) {
         }
 
         if let Some(widget_tree) = &mut widget_tree {
-          widget_tree.process_event(&event);
+          widget_tree.process_event(&event, constraint, (app.size.0 as _, app.size.1 as _));
         }
       }
 
@@ -242,7 +242,7 @@ pub fn run(app: App<'_>) {
       }
 
       if let Some(widget_tree) = &mut widget_tree {
-        widget_tree.process_event(&event);
+        widget_tree.process_event(&event, constraint, (app.size.0 as _, app.size.1 as _));
       }
 
       if Animation::has() {

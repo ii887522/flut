@@ -146,35 +146,31 @@ impl<'a> BuilderWidget<'a> for GamePage {
       Event::KeyDown {
         keycode: Some(Keycode::W | Keycode::Up),
         ..
-      } => {
-        if worm_head.direction != Direction::Down {
-          self.next_worm_head_direction = Some(Direction::Up);
-        }
+      } if worm_head.direction != Direction::Down => {
+        self.next_worm_head_direction = Some(Direction::Up);
       }
+
       Event::KeyDown {
         keycode: Some(Keycode::D | Keycode::Right),
         ..
-      } => {
-        if worm_head.direction != Direction::Left {
-          self.next_worm_head_direction = Some(Direction::Right);
-        }
+      } if worm_head.direction != Direction::Left => {
+        self.next_worm_head_direction = Some(Direction::Right);
       }
+
       Event::KeyDown {
         keycode: Some(Keycode::S | Keycode::Down),
         ..
-      } => {
-        if worm_head.direction != Direction::Up {
-          self.next_worm_head_direction = Some(Direction::Down);
-        }
+      } if worm_head.direction != Direction::Up => {
+        self.next_worm_head_direction = Some(Direction::Down);
       }
+
       Event::KeyDown {
         keycode: Some(Keycode::A | Keycode::Left),
         ..
-      } => {
-        if worm_head.direction != Direction::Right {
-          self.next_worm_head_direction = Some(Direction::Left);
-        }
+      } if worm_head.direction != Direction::Right => {
+        self.next_worm_head_direction = Some(Direction::Left);
       }
+
       _ => {}
     }
   }
@@ -208,10 +204,12 @@ impl<'a> BuilderWidget<'a> for GamePage {
           drop(grid_model);
           self.kill_worm();
         }
+
         GameCell::Food => {
           drop(grid_model);
           self.eat_food();
         }
+
         GameCell::Air => {
           drop(grid_model);
           self.move_worm();
@@ -222,10 +220,12 @@ impl<'a> BuilderWidget<'a> for GamePage {
           drop(grid_model);
           self.kill_worm();
         }
+
         GameCell::Food => {
           drop(grid_model);
           self.eat_food();
         }
+
         GameCell::Air => {
           drop(grid_model);
           self.move_worm();
@@ -236,10 +236,12 @@ impl<'a> BuilderWidget<'a> for GamePage {
           drop(grid_model);
           self.kill_worm();
         }
+
         GameCell::Food => {
           drop(grid_model);
           self.eat_food();
         }
+
         GameCell::Air => {
           drop(grid_model);
           self.move_worm();
@@ -250,10 +252,12 @@ impl<'a> BuilderWidget<'a> for GamePage {
           drop(grid_model);
           self.kill_worm();
         }
+
         GameCell::Food => {
           drop(grid_model);
           self.eat_food();
         }
+
         GameCell::Air => {
           drop(grid_model);
           self.move_worm();

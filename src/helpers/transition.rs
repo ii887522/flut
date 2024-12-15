@@ -36,6 +36,10 @@ impl Transition {
     }
   }
 
+  pub const fn get_now(&self) -> f32 {
+    self.now
+  }
+
   pub fn update(self, dt: f32) -> MaybeTransition {
     let Some(timer) = self.timer.update(dt) else {
       return MaybeTransition::Idle(self.to);

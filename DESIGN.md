@@ -139,7 +139,7 @@ impl PainterWidget for RectWidget {
 }
 
 WidgetTree<Building> {
-  buildables: vec![],
+  buildable_nodes: vec![],
   free_buildable_indices: vec![],
   expandable_nodes: vec![
     BuilderNode {
@@ -156,7 +156,13 @@ WidgetTree<Building> {
 // Can be accessed by build()
 
 WidgetTree<Building> {
-  buildables: vec![GamePage],
+  buildable_nodes: vec![
+    BuildableNode {
+      is_mouse_over: false,
+      mouse_downed_btn: MouseButton::Unknown,
+      widget: GamePage,
+    },
+  ],
   free_buildable_indices: vec![],
   expandable_nodes: vec![
     BuilderNode {
@@ -182,7 +188,18 @@ WidgetTree<Building> {
 // Can be accessed by build()
 
 WidgetTree<Building> {
-  buildables: vec![GamePage, Grid],
+  buildable_nodes: vec![
+    BuildableNode {
+      is_mouse_over: false,
+      mouse_downed_btn: MouseButton::Unknown,
+      widget: GamePage,
+    },
+    BuildableNode {
+      is_mouse_over: false,
+      mouse_downed_btn: MouseButton::Unknown,
+      widget: Grid,
+    },
+  ],
   free_buildable_indices: vec![],
   expandable_nodes: vec![
     StackNode {
@@ -221,7 +238,18 @@ WidgetTree<Building> {
 // Can be accessed by build()
 
 WidgetTree<Built> {
-  buildables: vec![GamePage, Grid],
+  buildable_nodes: vec![
+    BuildableNode {
+      is_mouse_over: false,
+      mouse_downed_btn: MouseButton::Unknown,
+      widget: GamePage,
+    },
+    BuildableNode {
+      is_mouse_over: false,
+      mouse_downed_btn: MouseButton::Unknown,
+      widget: Grid,
+    },
+  ],
   free_buildable_indices: vec![],
   expandable_nodes: (),
   stack_nodes: vec![

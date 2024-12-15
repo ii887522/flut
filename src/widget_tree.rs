@@ -4,8 +4,8 @@ use crate::{
 };
 use atomic_refcell::AtomicRefCell;
 use rayon::prelude::*;
-use sdl2::event::Event;
-use skia_safe::{Canvas, Rect};
+use sdl2::{event::Event, mouse::MouseButton};
+use skia_safe::{Canvas, Contains, Point, Rect};
 use std::{mem, sync::Arc};
 
 pub(super) trait StackChildChild {}
@@ -29,6 +29,12 @@ pub(super) struct Building;
 
 #[derive(Clone, Copy, Debug, Default, Hash, PartialEq, Eq, PartialOrd, Ord)]
 pub(super) struct Built;
+
+struct BuildableNode<'a> {
+  mouse_downed_btn: MouseButton,
+  is_mouse_over: bool,
+  widget: Arc<AtomicRefCell<dyn BuilderWidget<'a> + 'a + Send + Sync>>,
+}
 
 pub(super) struct BuilderNode<'a> {
   buildable_indices: Vec<u32>,
@@ -131,8 +137,14 @@ impl DrawableIndex {
   }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct ConstrainedDrawableIndex {
+  index: DrawableIndex,
+  constraint: Rect,
+}
+
 pub(super) struct WidgetTree<'a, State: WidgetTreeState<'a>> {
-  buildables: SparseVec<Arc<AtomicRefCell<dyn BuilderWidget<'a> + 'a + Send + Sync>>>,
+  buildable_nodes: SparseVec<BuildableNode<'a>>,
   expandable_nodes: State::ExpandableNodes,
   stack_nodes: SparseVec<StackNode<DrawableIndex>>,
   painter_nodes: SparseVec<PainterNode<'a>>,
@@ -143,7 +155,7 @@ impl<'a> From<Arc<AtomicRefCell<dyn BuilderWidget<'a> + 'a + Send + Sync>>>
 {
   fn from(widget: Arc<AtomicRefCell<dyn BuilderWidget<'a> + 'a + Send + Sync>>) -> Self {
     Self {
-      buildables: SparseVec::new(),
+      buildable_nodes: SparseVec::new(),
       expandable_nodes: vec![ExpandableNode::from(widget)],
       stack_nodes: SparseVec::new(),
       painter_nodes: SparseVec::new(),
@@ -154,7 +166,7 @@ impl<'a> From<Arc<AtomicRefCell<dyn BuilderWidget<'a> + 'a + Send + Sync>>>
 impl<'a> From<Arc<Stack<'a>>> for WidgetTree<'a, Building> {
   fn from(stack: Arc<Stack<'a>>) -> Self {
     Self {
-      buildables: SparseVec::new(),
+      buildable_nodes: SparseVec::new(),
       expandable_nodes: vec![ExpandableNode::from(stack)],
       stack_nodes: SparseVec::new(),
       painter_nodes: SparseVec::new(),
@@ -165,7 +177,7 @@ impl<'a> From<Arc<Stack<'a>>> for WidgetTree<'a, Building> {
 impl<'a> From<Arc<dyn PainterWidget + 'a + Send + Sync>> for WidgetTree<'a, Built> {
   fn from(widget: Arc<dyn PainterWidget + 'a + Send + Sync>) -> Self {
     Self {
-      buildables: SparseVec::new(),
+      buildable_nodes: SparseVec::new(),
       expandable_nodes: (),
       stack_nodes: SparseVec::new(),
       painter_nodes: SparseVec::from(PainterNode::from(widget)),
@@ -200,7 +212,15 @@ impl<'a> WidgetTree<'a, Building> {
 
           let widget = builder_node.widget;
           let child = widget.borrow_mut().build(constraint);
-          let buildable_index = self.buildables.push(widget);
+
+          // todo: Query mouse input to restore mouse_downed_btn and is_mouse_over
+          let buildable_node = BuildableNode {
+            mouse_downed_btn: MouseButton::Unknown,
+            is_mouse_over: false,
+            widget,
+          };
+
+          let buildable_index = self.buildable_nodes.push(buildable_node);
           let mut buildable_indices = builder_node.buildable_indices;
           buildable_indices.push(buildable_index);
 
@@ -214,6 +234,7 @@ impl<'a> WidgetTree<'a, Building> {
 
               self.expandable_nodes.push(expandable_node);
             }
+
             Widget::Stack(stack) => {
               let expandable_node = ExpandableNode::Stack(StackNode {
                 buildable_indices,
@@ -227,6 +248,7 @@ impl<'a> WidgetTree<'a, Building> {
 
               self.expandable_nodes.push(expandable_node);
             }
+
             Widget::Painter(widget) => {
               let painter_node = PainterNode {
                 buildable_indices,
@@ -243,6 +265,7 @@ impl<'a> WidgetTree<'a, Building> {
             }
           }
         }
+
         ExpandableNode::Stack(stack_node) => {
           let drawable_stack_node = StackNode {
             buildable_indices: stack_node.buildable_indices,
@@ -276,6 +299,7 @@ impl<'a> WidgetTree<'a, Building> {
 
                 self.expandable_nodes.push(expandable_node);
               }
+
               Widget::Stack(stack) => {
                 let expandable_node = ExpandableNode::Stack(StackNode {
                   buildable_indices: vec![],
@@ -289,6 +313,7 @@ impl<'a> WidgetTree<'a, Building> {
 
                 self.expandable_nodes.push(expandable_node);
               }
+
               Widget::Painter(widget) => {
                 let painter_node = PainterNode {
                   buildable_indices: vec![],
@@ -308,7 +333,7 @@ impl<'a> WidgetTree<'a, Building> {
     }
 
     WidgetTree {
-      buildables: self.buildables,
+      buildable_nodes: self.buildable_nodes,
       expandable_nodes: (),
       stack_nodes: self.stack_nodes,
       painter_nodes: self.painter_nodes,
@@ -333,23 +358,101 @@ impl<'a> WidgetTree<'a, Built> {
     }
   }
 
-  pub(super) fn process_event(&mut self, event: &Event) {
-    let mut drawable_index_lifo_q = vec![self.get_root_drawable_index()];
+  pub(super) fn process_event(
+    &mut self,
+    event: &Event,
+    root_constraint: Rect,
+    app_size: (f32, f32),
+  ) {
+    let mut drawable_index_lifo_q = vec![ConstrainedDrawableIndex {
+      index: self.get_root_drawable_index(),
+      constraint: root_constraint,
+    }];
 
     while let Some(drawable_index) = drawable_index_lifo_q.pop() {
-      match drawable_index {
+      let is_mouse_moved = if let &Event::MouseMotion { x, y, .. } = event {
+        // Dialog size is zero but actually cover the whole app, will consider mouse always move on the dialog
+        drawable_index.constraint.size().is_empty()
+          || drawable_index.constraint.contains(Point::new(
+            x as f32 * root_constraint.width() / app_size.0,
+            y as f32 * root_constraint.height() / app_size.1,
+          ))
+      } else {
+        false
+      };
+
+      match drawable_index.index {
         DrawableIndex::Stack(stack_index) => {
           // Temporarily take out self.stack_nodes so that we no need borrow it then we can mutably borrow self to
           // call self.drawable_process_event()
           let mut stack_nodes = mem::take(&mut self.stack_nodes);
 
           stack_nodes.replace_with_and_return(stack_index, |stack_node| {
-            self.drawable_process_event(event, &stack_node.buildable_indices);
+            match *event {
+              Event::MouseButtonDown {
+                mouse_btn, x, y, ..
+              } => {
+                self.drawable_on_mouse_down(
+                  mouse_btn,
+                  (
+                    x as f32 * root_constraint.width() / app_size.0,
+                    y as f32 * root_constraint.height() / app_size.1,
+                  ),
+                  &stack_node.buildable_indices,
+                );
+              }
 
-            let drawable_index_q = stack_node
-              .children
-              .par_iter()
-              .map(|stack_child| stack_child.child);
+              Event::MouseButtonUp {
+                mouse_btn, x, y, ..
+              } => {
+                self.drawable_on_mouse_up(
+                  mouse_btn,
+                  (
+                    x as f32 * root_constraint.width() / app_size.0,
+                    y as f32 * root_constraint.height() / app_size.1,
+                  ),
+                  &stack_node.buildable_indices,
+                );
+              }
+
+              Event::MouseMotion { x, y, .. } => {
+                if is_mouse_moved {
+                  self.drawable_on_mouse_over(
+                    (
+                      x as f32 * root_constraint.width() / app_size.0,
+                      y as f32 * root_constraint.height() / app_size.1,
+                    ),
+                    &stack_node.buildable_indices,
+                  );
+                } else {
+                  self.drawable_on_mouse_out(
+                    (
+                      x as f32 * root_constraint.width() / app_size.0,
+                      y as f32 * root_constraint.height() / app_size.1,
+                    ),
+                    &stack_node.buildable_indices,
+                  );
+                }
+              }
+
+              _ => {
+                self.drawable_process_event(event, &stack_node.buildable_indices);
+              }
+            }
+
+            let drawable_index_q =
+              stack_node
+                .children
+                .par_iter()
+                .map(|stack_child| ConstrainedDrawableIndex {
+                  index: stack_child.child,
+                  constraint: Rect::from_xywh(
+                    stack_child.position.0,
+                    stack_child.position.1,
+                    stack_child.size.0,
+                    stack_child.size.1,
+                  ),
+                });
 
             drawable_index_lifo_q.par_extend(drawable_index_q);
             (Some(stack_node), ())
@@ -358,13 +461,65 @@ impl<'a> WidgetTree<'a, Built> {
           // Put back self.stack_nodes after we are done working on it
           self.stack_nodes = stack_nodes;
         }
+
         DrawableIndex::Painter(painter_index) => {
           // Temporarily take out self.painter_nodes so that we no need borrow it then we can mutably borrow self to
           // call self.update_drawable()
           let mut painter_nodes = mem::take(&mut self.painter_nodes);
 
           painter_nodes.replace_with_and_return(painter_index, |painter_node| {
-            self.drawable_process_event(event, &painter_node.buildable_indices);
+            match *event {
+              Event::MouseButtonDown {
+                mouse_btn, x, y, ..
+              } => {
+                self.drawable_on_mouse_down(
+                  mouse_btn,
+                  (
+                    x as f32 * root_constraint.width() / app_size.0,
+                    y as f32 * root_constraint.height() / app_size.1,
+                  ),
+                  &painter_node.buildable_indices,
+                );
+              }
+
+              Event::MouseButtonUp {
+                mouse_btn, x, y, ..
+              } => {
+                self.drawable_on_mouse_up(
+                  mouse_btn,
+                  (
+                    x as f32 * root_constraint.width() / app_size.0,
+                    y as f32 * root_constraint.height() / app_size.1,
+                  ),
+                  &painter_node.buildable_indices,
+                );
+              }
+
+              Event::MouseMotion { x, y, .. } => {
+                if is_mouse_moved {
+                  self.drawable_on_mouse_over(
+                    (
+                      x as f32 * root_constraint.width() / app_size.0,
+                      y as f32 * root_constraint.height() / app_size.1,
+                    ),
+                    &painter_node.buildable_indices,
+                  );
+                } else {
+                  self.drawable_on_mouse_out(
+                    (
+                      x as f32 * root_constraint.width() / app_size.0,
+                      y as f32 * root_constraint.height() / app_size.1,
+                    ),
+                    &painter_node.buildable_indices,
+                  );
+                }
+              }
+
+              _ => {
+                self.drawable_process_event(event, &painter_node.buildable_indices);
+              }
+            }
+
             (Some(painter_node), ())
           });
 
@@ -375,11 +530,78 @@ impl<'a> WidgetTree<'a, Built> {
     }
   }
 
+  fn drawable_on_mouse_down(
+    &mut self,
+    mouse_btn: MouseButton,
+    mouse_position: (f32, f32),
+    buildable_indices: &[u32],
+  ) {
+    for &buildable_index in buildable_indices {
+      let buildable_node = &mut self.buildable_nodes[buildable_index];
+
+      if !buildable_node.is_mouse_over {
+        break;
+      }
+
+      buildable_node.mouse_downed_btn = mouse_btn;
+      let mut builder_widget = buildable_node.widget.borrow_mut();
+      builder_widget.on_mouse_down(mouse_btn, mouse_position);
+    }
+  }
+
+  fn drawable_on_mouse_up(
+    &mut self,
+    mouse_btn: MouseButton,
+    mouse_position: (f32, f32),
+    buildable_indices: &[u32],
+  ) {
+    for &buildable_index in buildable_indices {
+      let buildable_node = &mut self.buildable_nodes[buildable_index];
+
+      if !buildable_node.is_mouse_over || buildable_node.mouse_downed_btn != mouse_btn {
+        break;
+      }
+
+      buildable_node.mouse_downed_btn = MouseButton::Unknown;
+      let mut builder_widget = buildable_node.widget.borrow_mut();
+      builder_widget.on_mouse_up(mouse_btn, mouse_position);
+    }
+  }
+
+  fn drawable_on_mouse_over(&mut self, mouse_position: (f32, f32), buildable_indices: &[u32]) {
+    for &buildable_index in buildable_indices {
+      let buildable_node = &mut self.buildable_nodes[buildable_index];
+
+      if buildable_node.is_mouse_over {
+        break;
+      }
+
+      buildable_node.is_mouse_over = true;
+      let mut builder_widget = buildable_node.widget.borrow_mut();
+      builder_widget.on_mouse_over(mouse_position);
+    }
+  }
+
+  fn drawable_on_mouse_out(&mut self, mouse_position: (f32, f32), buildable_indices: &[u32]) {
+    for &buildable_index in buildable_indices {
+      let buildable_node = &mut self.buildable_nodes[buildable_index];
+
+      if !buildable_node.is_mouse_over {
+        break;
+      }
+
+      buildable_node.is_mouse_over = false;
+      buildable_node.mouse_downed_btn = MouseButton::Unknown;
+      let mut builder_widget = buildable_node.widget.borrow_mut();
+      builder_widget.on_mouse_out(mouse_position);
+    }
+  }
+
   fn drawable_process_event(&mut self, event: &Event, buildable_indices: &[u32]) {
     for &buildable_index in buildable_indices {
-      self.buildables[buildable_index]
-        .borrow_mut()
-        .process_event(event);
+      let buildable_node = &self.buildable_nodes[buildable_index];
+      let mut builder_widget = buildable_node.widget.borrow_mut();
+      builder_widget.process_event(event);
     }
   }
 
@@ -431,6 +653,7 @@ impl<'a> WidgetTree<'a, Built> {
             self.invalidate(invalid_drawable_index_q);
           }
         }
+
         DrawableIndex::Painter(painter_index) => {
           // Temporarily take out self.painter_nodes so that we no need borrow it then we can mutably borrow self to
           // call self.update_drawable()
@@ -454,7 +677,7 @@ impl<'a> WidgetTree<'a, Built> {
     }
 
     WidgetTree {
-      buildables: self.buildables,
+      buildable_nodes: self.buildable_nodes,
       expandable_nodes,
       stack_nodes: self.stack_nodes,
       painter_nodes: self.painter_nodes,
@@ -469,7 +692,9 @@ impl<'a> WidgetTree<'a, Built> {
   ) -> Option<ExpandableNode<'a>> {
     let dirty_buildable_index_index = buildable_indices.iter().enumerate().find_map(
       |(buildable_index_index, &buildable_index)| {
-        if self.buildables[buildable_index].borrow_mut().update(dt) {
+        let mut buildable_node = self.buildable_nodes[buildable_index].widget.borrow_mut();
+
+        if buildable_node.update(dt) {
           Some(buildable_index_index)
         } else {
           None
@@ -479,12 +704,12 @@ impl<'a> WidgetTree<'a, Built> {
 
     // This is the dirty_buildable that will be rebuilt later in WidgetTree Building state
     let dirty_buildable_index = buildable_indices.swap_remove(dirty_buildable_index_index);
-    let dirty_buildable = self.buildables.take(dirty_buildable_index);
+    let dirty_buildable_node = self.buildable_nodes.take(dirty_buildable_index);
 
     // The rest of buildables that are children of dirty_buildable are no use anymore since we are going to recreate
     // them anyway. It is ok to drop them
     for buildable_index in buildable_indices.drain(dirty_buildable_index_index..) {
-      self.buildables.take(buildable_index);
+      self.buildable_nodes.take(buildable_index);
     }
 
     let builder_node = ExpandableNode::Builder(BuilderNode {
@@ -493,7 +718,7 @@ impl<'a> WidgetTree<'a, Built> {
       buildable_indices: mem::take(buildable_indices),
 
       parent,
-      widget: dirty_buildable,
+      widget: dirty_buildable_node.widget,
     });
 
     Some(builder_node)
@@ -508,7 +733,7 @@ impl<'a> WidgetTree<'a, Built> {
           let stack_node = self.stack_nodes.take(stack_index);
 
           for &buildable_index in &stack_node.buildable_indices {
-            self.buildables.take(buildable_index);
+            self.buildable_nodes.take(buildable_index);
           }
 
           // Traverse the widget tree in depth-first order to invalidate each stack child
@@ -519,11 +744,12 @@ impl<'a> WidgetTree<'a, Built> {
 
           drawable_index_lifo_q.par_extend(drawable_index_q);
         }
+
         DrawableIndex::Painter(painter_index) => {
           let painter_node = self.painter_nodes.take(painter_index);
 
           for &buildable_index in &painter_node.buildable_indices {
-            self.buildables.take(buildable_index);
+            self.buildable_nodes.take(buildable_index);
           }
         }
       }
@@ -543,16 +769,14 @@ impl<'a> WidgetTree<'a, Built> {
             .unwrap_or(root_constraint);
 
           for &buildable_index in &stack_node.buildable_indices {
-            self.buildables[buildable_index]
-              .borrow()
-              .pre_draw(canvas, constraint);
+            let builder_widget = self.buildable_nodes[buildable_index].widget.borrow();
+            builder_widget.pre_draw(canvas, constraint);
           }
 
           if stack_node.children.is_empty() {
             for &buildable_index in stack_node.buildable_indices.iter().rev() {
-              self.buildables[buildable_index]
-                .borrow()
-                .post_draw(canvas, constraint);
+              let builder_widget = self.buildable_nodes[buildable_index].widget.borrow();
+              builder_widget.post_draw(canvas, constraint);
             }
 
             self.post_draw(canvas, root_constraint, stack_node.parent);
@@ -568,6 +792,7 @@ impl<'a> WidgetTree<'a, Built> {
 
           drawable_index_lifo_q.par_extend(drawable_index_q);
         }
+
         DrawableIndex::Painter(painter_index) => {
           let painter_node = &self.painter_nodes[painter_index];
 
@@ -576,17 +801,15 @@ impl<'a> WidgetTree<'a, Built> {
             .unwrap_or(root_constraint);
 
           for &buildable_index in &painter_node.buildable_indices {
-            self.buildables[buildable_index]
-              .borrow()
-              .pre_draw(canvas, constraint);
+            let builder_widget = self.buildable_nodes[buildable_index].widget.borrow();
+            builder_widget.pre_draw(canvas, constraint);
           }
 
           painter_node.widget.draw(canvas, constraint);
 
           for &buildable_index in painter_node.buildable_indices.iter().rev() {
-            self.buildables[buildable_index]
-              .borrow()
-              .post_draw(canvas, constraint);
+            let builder_widget = self.buildable_nodes[buildable_index].widget.borrow();
+            builder_widget.post_draw(canvas, constraint);
           }
 
           self.post_draw(canvas, root_constraint, painter_node.parent);
@@ -608,9 +831,8 @@ impl<'a> WidgetTree<'a, Built> {
         .unwrap_or(root_constraint);
 
       for &buildable_index in parent_stack_node.buildable_indices.iter().rev() {
-        self.buildables[buildable_index]
-          .borrow()
-          .post_draw(canvas, constraint);
+        let builder_widget = self.buildable_nodes[buildable_index].widget.borrow();
+        builder_widget.post_draw(canvas, constraint);
       }
 
       parent = parent_stack_node.parent;
