@@ -1,2 +1,0 @@
-1. cargo install cargo-vcpkg
-2. cargo vcpkg build

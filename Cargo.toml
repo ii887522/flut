@@ -18,7 +18,7 @@ split-debuginfo = "packed"
 strip = true
 
 [package.metadata.vcpkg]
-dependencies = ["sdl2", "sdl2-image", "sdl2-ttf", "sdl2-mixer"]
+dependencies = ["sdl2[vulkan]", "sdl2-image", "sdl2-ttf", "sdl2-mixer"]
 git = "https://github.com/microsoft/vcpkg"
 rev = "2025.02.14"
 
