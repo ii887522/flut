@@ -10,7 +10,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - run: sudo apt install autoconf automake libtool pkg-config
+      - run: sudo apt install libltdl-dev
       - uses: dtolnay/rust-toolchain@1.85
         with:
           components: clippy,rustfmt
