@@ -7,10 +7,9 @@ on:
 
 jobs:
   deploy-worm:
-    runs-on: ubuntu-latest
+    runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
-      - run: sudo apt install libltdl-dev
       - uses: dtolnay/rust-toolchain@1.85
         with:
           components: clippy,rustfmt
@@ -20,7 +19,7 @@ jobs:
       - run: cargo vcpkg --verbose build
       - run: cargo clippy --all-targets --all-features
       - run: cargo build --example worm --release
-      - run: cp target/release/examples/worm.exe worm.exe
+      - run: copy target/release/examples/worm.exe worm.exe
       - uses: actions/upload-artifact@v4
         with:
           name: worm
