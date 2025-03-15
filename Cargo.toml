@@ -1,0 +1,41 @@
+[package]
+name = "flut"
+description = "A simple cross platform GUI framework written in Rust suitable for 2D game and app development"
+version = "0.1.0"
+edition = "2024"
+publish = false
+repository = "https://github.com/ii887522/flut"
+rust-version = "1.85"
+
+[profile.dev]
+split-debuginfo = "packed"
+
+[profile.release]
+codegen-units = 1
+lto = true
+panic = "abort"
+split-debuginfo = "packed"
+strip = true
+
+[package.metadata.vcpkg]
+dependencies = ["sdl2", "sdl2-image", "sdl2-ttf", "sdl2-mixer"]
+git = "https://github.com/microsoft/vcpkg"
+rev = "2025.02.14"
+
+[package.metadata.vcpkg.target]
+x86_64-pc-windows-msvc = { triplet = "x64-windows-static-md" }
+
+[dependencies]
+vulkano = { version = "0.35", default-features = false }
+
+[dependencies.sdl2]
+version = "0.37"
+default-features = false
+features = [
+  "image",
+  "mixer",
+  "ttf",
+  "raw-window-handle",
+  "static-link",
+  "use-vcpkg",
+]
