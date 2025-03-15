@@ -16,7 +16,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - run: cargo install cargo-vcpkg
       - run: cargo fmt --all -- --check
-      - run: cargo vcpkg build
+      - run: cargo vcpkg build --verbose
       - run: cargo clippy --all-targets --all-features
       - run: cargo build --example worm --release
       - run: cp target/release/examples/worm.exe worm.exe
