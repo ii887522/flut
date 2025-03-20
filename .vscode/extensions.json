@@ -6,6 +6,7 @@
     "eamodio.gitlens",
     "EditorConfig.EditorConfig",
     "esbenp.prettier-vscode",
+    "filippofracascia.glsl-language-support",
     "github.vscode-github-actions",
     "mhutchie.git-graph",
     "rust-lang.rust-analyzer",

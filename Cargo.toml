@@ -26,7 +26,7 @@ rev = "2025.02.14"
 x86_64-pc-windows-msvc = { triplet = "x64-windows-static-md" }
 
 [dependencies]
-vulkano = { version = "0.35", default-features = false }
+vulkano-shaders = { version = "0.35", default-features = false }
 
 [dependencies.sdl2]
 version = "0.37"
@@ -39,3 +39,8 @@ features = [
   "static-link",
   "use-vcpkg",
 ]
+
+[dependencies.vulkano]
+version = "0.35"
+default-features = false
+features = ["macros", "x11"]
