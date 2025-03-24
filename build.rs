@@ -6,14 +6,13 @@ fn main() {
   // Tell the build script to only run again if source shaders changed
   println!("cargo:rerun-if-changed=glsl");
 
-  const OUT_DIR_PATH: &str = "assets/shaders";
+  const OUT_DIR_PATH: &str = "target/shaders";
 
   // Create destination path if necessary
   fs::create_dir_all(OUT_DIR_PATH).unwrap();
 
   let compiler = shaderc::Compiler::new().unwrap();
   let mut compile_options = shaderc::CompileOptions::new().unwrap();
-  compile_options.add_macro_definition("EP", Some("main"));
   compile_options.set_optimization_level(OptimizationLevel::Performance);
 
   for glsl_file in fs::read_dir("glsl").unwrap() {

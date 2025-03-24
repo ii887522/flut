@@ -6,13 +6,15 @@ use ash::{
     self, ApplicationInfo, CompositeAlphaFlagsKHR, DeviceCreateInfo, DeviceQueueCreateInfo,
     DeviceQueueInfo2, Extent2D, Handle, Image, ImageAspectFlags, ImageSubresourceRange,
     ImageUsageFlags, ImageView, ImageViewCreateInfo, ImageViewType, InstanceCreateFlags,
-    InstanceCreateInfo, PhysicalDeviceProperties2, PhysicalDeviceType, PresentModeKHR, Queue,
-    QueueFamilyProperties2, QueueFlags, SharingMode, SurfaceKHR, SwapchainCreateInfoKHR,
-    SwapchainKHR, ValidationFeatureEnableEXT, ValidationFeaturesEXT,
+    InstanceCreateInfo, PhysicalDeviceProperties2, PhysicalDeviceType,
+    PipelineShaderStageCreateInfo, PipelineVertexInputStateCreateInfo, PresentModeKHR, Queue,
+    QueueFamilyProperties2, QueueFlags, ShaderModuleCreateInfo, ShaderStageFlags, SharingMode,
+    SurfaceKHR, SwapchainCreateInfoKHR, SwapchainKHR, ValidationFeatureEnableEXT,
+    ValidationFeaturesEXT, VertexInputBindingDescription,
   },
 };
 use sdl2::video::Window;
-use std::ffi::c_void;
+use std::ffi::{CString, c_void};
 
 pub(super) struct VkEngine {
   _entry: Entry,
@@ -357,6 +359,68 @@ impl VkEngine {
       })
     }
     .collect();
+
+    const VERT_SHADER_CODE: &[u8] = include_bytes!("../target/shaders/basic.vert.spv");
+    const FRAG_SHADER_CODE: &[u8] = include_bytes!("../target/shaders/basic.frag.spv");
+
+    let vert_shader_create_info = ShaderModuleCreateInfo {
+      code_size: VERT_SHADER_CODE.len(),
+      p_code: VERT_SHADER_CODE.as_ptr() as *const _,
+      ..Default::default()
+    };
+
+    let frag_shader_create_info = ShaderModuleCreateInfo {
+      code_size: FRAG_SHADER_CODE.len(),
+      p_code: FRAG_SHADER_CODE.as_ptr() as *const _,
+      ..Default::default()
+    };
+
+    let vert_shader = unsafe {
+      device
+        .create_shader_module(&vert_shader_create_info, None)
+        .unwrap()
+    };
+
+    let frag_shader = unsafe {
+      device
+        .create_shader_module(&frag_shader_create_info, None)
+        .unwrap()
+    };
+
+    let shader_entry_point_name = CString::new("main").unwrap();
+
+    let vert_shader_stage_create_info = PipelineShaderStageCreateInfo {
+      stage: ShaderStageFlags::VERTEX,
+      module: vert_shader,
+      p_name: shader_entry_point_name.as_ptr(),
+      ..Default::default()
+    };
+
+    let frag_shader_stage_create_info = PipelineShaderStageCreateInfo {
+      stage: ShaderStageFlags::FRAGMENT,
+      module: frag_shader,
+      p_name: shader_entry_point_name.as_ptr(),
+      ..Default::default()
+    };
+
+    // let vert_binding_desc = VertexInputBindingDescription {
+    //   binding: 0,
+    //   stride: todo!(),
+    //   input_rate: todo!(),
+    // };
+
+    // let vert_input_stage_create_info = PipelineVertexInputStateCreateInfo {
+    //   vertex_binding_description_count: todo!(),
+    //   p_vertex_binding_descriptions: todo!(),
+    //   vertex_attribute_description_count: todo!(),
+    //   p_vertex_attribute_descriptions: todo!(),
+    //   ..Default::default()
+    // };
+
+    unsafe {
+      device.destroy_shader_module(frag_shader, None);
+      device.destroy_shader_module(vert_shader, None);
+    };
 
     Self {
       _entry: entry,

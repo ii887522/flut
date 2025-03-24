@@ -3,6 +3,7 @@
 
 mod string_slice;
 mod vk_engine;
+mod shaders;
 
 use optarg2chain::optarg_fn;
 use sdl2::{event::Event, image::LoadSurface, surface::Surface};
