@@ -1,9 +1,10 @@
 #![deny(clippy::all, elided_lifetimes_in_paths)]
 #![allow(clippy::needless_lifetimes, clippy::too_many_arguments)]
 
+mod pipelines;
+mod shaders;
 mod string_slice;
 mod vk_engine;
-mod shaders;
 
 use optarg2chain::optarg_fn;
 use sdl2::{event::Event, image::LoadSurface, surface::Surface};
@@ -43,7 +44,7 @@ pub fn run_app<'a>(
   // Call window.show() as early as possible to minimize the perceived startup time
   window.show();
 
-  let vk_engine = unsafe { VkEngine::new(&window, prefer_dgpu) };
+  let vk_engine = VkEngine::new(&window, prefer_dgpu);
 
   // Register `()` event for triggering acquire swapchain image at the next iteration in case the swapchain is recreated
   event_subsys.register_custom_event::<()>().unwrap();
