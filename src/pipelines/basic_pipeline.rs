@@ -2,14 +2,15 @@ use crate::shaders::{BasicFragShader, BasicVertShader};
 use ash::{
   Device,
   vk::{
-    AttachmentDescription2, AttachmentLoadOp, AttachmentReference2, AttachmentStoreOp,
-    ColorComponentFlags, CullModeFlags, Extent2D, Format, FrontFace, GraphicsPipelineCreateInfo,
-    ImageLayout, Offset2D, Pipeline, PipelineBindPoint, PipelineCache,
-    PipelineColorBlendAttachmentState, PipelineColorBlendStateCreateInfo, PipelineCreateFlags,
-    PipelineInputAssemblyStateCreateInfo, PipelineLayout, PipelineLayoutCreateInfo,
-    PipelineMultisampleStateCreateInfo, PipelineRasterizationStateCreateInfo,
-    PipelineViewportStateCreateInfo, PolygonMode, PrimitiveTopology, Rect2D, RenderPass,
-    RenderPassCreateInfo2, SampleCountFlags, SubpassDescription2, Viewport,
+    self, AccessFlags, AttachmentDescription2, AttachmentLoadOp, AttachmentReference2,
+    AttachmentStoreOp, ColorComponentFlags, CullModeFlags, DependencyFlags, Extent2D, Format,
+    FrontFace, GraphicsPipelineCreateInfo, ImageLayout, Offset2D, Pipeline, PipelineBindPoint,
+    PipelineCache, PipelineColorBlendAttachmentState, PipelineColorBlendStateCreateInfo,
+    PipelineCreateFlags, PipelineInputAssemblyStateCreateInfo, PipelineLayout,
+    PipelineLayoutCreateInfo, PipelineMultisampleStateCreateInfo,
+    PipelineRasterizationStateCreateInfo, PipelineStageFlags, PipelineViewportStateCreateInfo,
+    PolygonMode, PrimitiveTopology, Rect2D, RenderPass, RenderPassCreateInfo2, SampleCountFlags,
+    SubpassDependency2, SubpassDescription2, Viewport,
   },
 };
 use std::rc::Rc;
@@ -26,8 +27,8 @@ impl BasicPipeline {
     device: Rc<Device>,
     surface_extent: Extent2D,
     surface_format: Format,
-    vert_shader: BasicVertShader<'_>,
-    frag_shader: BasicFragShader<'_>,
+    vert_shader: &BasicVertShader<'_>,
+    frag_shader: &BasicFragShader<'_>,
   ) -> Self {
     let input_assembly_state_create_info = PipelineInputAssemblyStateCreateInfo {
       topology: PrimitiveTopology::TRIANGLE_LIST,
@@ -113,11 +114,24 @@ impl BasicPipeline {
       ..Default::default()
     };
 
+    let subpass_dep = SubpassDependency2 {
+      src_subpass: vk::SUBPASS_EXTERNAL,
+      dst_subpass: 0,
+      src_stage_mask: PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
+      src_access_mask: AccessFlags::empty(),
+      dst_stage_mask: PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
+      dst_access_mask: AccessFlags::COLOR_ATTACHMENT_WRITE,
+      dependency_flags: DependencyFlags::BY_REGION,
+      ..Default::default()
+    };
+
     let render_pass_create_info = RenderPassCreateInfo2 {
       attachment_count: 1,
       p_attachments: &color_attachment_desc,
       subpass_count: 1,
       p_subpasses: &subpass_desc,
+      dependency_count: 1,
+      p_dependencies: &subpass_dep,
       ..Default::default()
     };
 

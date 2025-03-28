@@ -27,6 +27,7 @@ x86_64-pc-windows-msvc = { triplet = "x64-windows-static-md" }
 
 [dependencies]
 optarg2chain = { version = "0.1", default-features = false }
+presser = { version = "0.3", default-features = false }
 
 [dependencies.ash]
 version = "0.38"

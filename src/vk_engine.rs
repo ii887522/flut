@@ -1,46 +1,82 @@
 use crate::{
   pipelines::BasicPipeline,
-  shaders::{BasicFragShader, BasicVertShader},
+  shaders::{BasicFragShader, BasicVertShader, BasicVertex},
   string_slice::StringSlice,
 };
 use ash::{
   Device, Entry, Instance,
   khr::{surface, swapchain},
   vk::{
-    self, ApplicationInfo, ClearColorValue, ClearValue, CommandBuffer, CommandBufferAllocateInfo,
-    CommandBufferBeginInfo, CommandBufferLevel, CommandPool, CommandPoolCreateInfo,
-    CompositeAlphaFlagsKHR, DeviceCreateInfo, DeviceQueueCreateInfo, DeviceQueueInfo2, Extent2D,
-    Framebuffer, FramebufferCreateInfo, Handle, Image, ImageAspectFlags, ImageSubresourceRange,
-    ImageUsageFlags, ImageView, ImageViewCreateInfo, ImageViewType, InstanceCreateFlags,
-    InstanceCreateInfo, Offset2D, PhysicalDeviceProperties2, PhysicalDeviceType, PipelineBindPoint,
-    PresentModeKHR, Queue, QueueFamilyProperties2, QueueFlags, Rect2D, RenderPassBeginInfo,
-    SharingMode, SubpassBeginInfo, SubpassContents, SubpassEndInfo, SurfaceKHR,
-    SwapchainCreateInfoKHR, SwapchainKHR, ValidationFeatureEnableEXT, ValidationFeaturesEXT,
+    self, ApplicationInfo, BindBufferMemoryInfo, Buffer, BufferCreateInfo,
+    BufferMemoryRequirementsInfo2, BufferUsageFlags, ClearColorValue, ClearValue, CommandBuffer,
+    CommandBufferAllocateInfo, CommandBufferBeginInfo, CommandBufferLevel, CommandPool,
+    CommandPoolCreateInfo, CompositeAlphaFlagsKHR, DeviceCreateInfo, DeviceQueueCreateInfo,
+    DeviceQueueInfo2, Extent2D, Fence, FenceCreateFlags, FenceCreateInfo, Framebuffer,
+    FramebufferCreateInfo, Handle, Image, ImageAspectFlags, ImageSubresourceRange, ImageUsageFlags,
+    ImageView, ImageViewCreateInfo, ImageViewType, InstanceCreateFlags, InstanceCreateInfo,
+    MemoryRequirements2, Offset2D, PhysicalDevice, PhysicalDeviceProperties2, PhysicalDeviceType,
+    PipelineBindPoint, PipelineStageFlags, PresentInfoKHR, PresentModeKHR, Queue,
+    QueueFamilyProperties2, QueueFlags, Rect2D, RenderPassBeginInfo, Semaphore,
+    SemaphoreCreateInfo, SharingMode, SubmitInfo, SubpassBeginInfo, SubpassContents,
+    SubpassEndInfo, SurfaceKHR, SwapchainCreateInfoKHR, SwapchainKHR, ValidationFeatureEnableEXT,
+    ValidationFeaturesEXT,
   },
 };
+use gpu_allocator::{
+  AllocationSizes, AllocatorDebugSettings, MemoryLocation,
+  vulkan::{Allocation, AllocationCreateDesc, AllocationScheme, Allocator, AllocatorCreateDesc},
+};
 use sdl2::video::Window;
-use std::{ffi::c_void, rc::Rc};
+use std::{ffi::c_void, mem, rc::Rc};
 
-pub(super) struct VkEngine {
+const MAX_IN_FLIGHT_FRAME_COUNT: usize = 3;
+const MIN_ALLOC_SIZE: u64 = 4 * 1024 * 1024;
+
+const VERTICES: &[BasicVertex] = &[
+  BasicVertex {
+    position: (-0.5, -0.5),
+  },
+  BasicVertex {
+    position: (0.0, 0.5),
+  },
+  BasicVertex {
+    position: (0.5, -0.25),
+  },
+];
+
+pub(super) struct VkEngine<'a> {
+  window: &'a Window,
   _entry: Entry,
   instance: Instance,
   surface: SurfaceKHR,
   surface_instance: surface::Instance,
+  physical_device: PhysicalDevice,
+  graphics_queue_family_index: u32,
+  present_queue_family_index: u32,
   device: Rc<Device>,
   graphics_queue: Queue,
   present_queue: Queue,
   swapchain_device: swapchain::Device,
+  basic_vert_shader: BasicVertShader<'a>,
+  basic_frag_shader: BasicFragShader<'a>,
+  memory_allocator: Option<Allocator>,
+  vert_buffer: Buffer,
+  vert_buffer_alloc: Allocation,
+  command_pool: CommandPool,
+  image_avail_semaphores: Vec<Semaphore>,
+  render_done_semaphores: Vec<Semaphore>,
+  in_flight_fences: Vec<Fence>,
   swapchain: SwapchainKHR,
   swapchain_images: Vec<Image>,
   swapchain_image_views: Vec<ImageView>,
-  basic_pipeline: BasicPipeline,
+  basic_pipeline: Option<BasicPipeline>,
   swapchain_framebuffers: Vec<Framebuffer>,
-  command_pool: CommandPool,
   swapchain_command_buffers: Vec<CommandBuffer>,
+  frame_index: usize,
 }
 
-impl VkEngine {
-  pub(super) fn new(window: &Window, prefer_dgpu: bool) -> Self {
+impl<'a> VkEngine<'a> {
+  pub(super) fn new(window: &'a Window, prefer_dgpu: bool) -> Self {
     let entry = unsafe { Entry::load().unwrap() };
 
     let enabled_layers = StringSlice::from(
@@ -268,9 +304,213 @@ impl VkEngine {
     let graphics_queue = unsafe { device.get_device_queue2(&graphics_queue_info) };
     let present_queue = unsafe { device.get_device_queue2(&present_queue_info) };
 
+    let swapchain_device = swapchain::Device::new(&instance, &device);
+
+    let basic_vert_shader = BasicVertShader::new(device.clone());
+    let basic_frag_shader = BasicFragShader::new(device.clone());
+
+    let mut memory_allocator = Allocator::new(&AllocatorCreateDesc {
+      instance: instance.clone(),
+      device: (*device).clone(),
+      physical_device,
+      debug_settings: AllocatorDebugSettings::default(),
+      buffer_device_address: false,
+      allocation_sizes: AllocationSizes::new(MIN_ALLOC_SIZE, MIN_ALLOC_SIZE),
+    })
+    .unwrap();
+
+    let vert_buffer_create_info = BufferCreateInfo {
+      size: mem::size_of_val(VERTICES) as _,
+      usage: BufferUsageFlags::VERTEX_BUFFER,
+      sharing_mode: SharingMode::EXCLUSIVE,
+      ..Default::default()
+    };
+
+    let vert_buffer = unsafe {
+      device
+        .create_buffer(&vert_buffer_create_info, None)
+        .unwrap()
+    };
+
+    let vert_buffer_mem_req_info = BufferMemoryRequirementsInfo2 {
+      buffer: vert_buffer,
+      ..Default::default()
+    };
+
+    let mut vert_buffer_mem_req = MemoryRequirements2::default();
+
+    unsafe {
+      device.get_buffer_memory_requirements2(&vert_buffer_mem_req_info, &mut vert_buffer_mem_req);
+    }
+
+    let mut vert_buffer_alloc = memory_allocator
+      .allocate(&AllocationCreateDesc {
+        name: "vert_buffer",
+        requirements: vert_buffer_mem_req.memory_requirements,
+        location: MemoryLocation::CpuToGpu,
+        linear: true,
+        allocation_scheme: AllocationScheme::DedicatedBuffer(vert_buffer),
+      })
+      .unwrap();
+
+    let bind_vert_buffer_mem_info = BindBufferMemoryInfo {
+      buffer: vert_buffer,
+      memory: unsafe { vert_buffer_alloc.memory() },
+      memory_offset: vert_buffer_alloc.offset(),
+      ..Default::default()
+    };
+
+    unsafe {
+      device
+        .bind_buffer_memory2(&[bind_vert_buffer_mem_info])
+        .unwrap();
+    }
+
+    let mut mapped_vert_buffer_alloc = vert_buffer_alloc.try_as_mapped_slab().unwrap();
+    presser::copy_from_slice_to_offset(VERTICES, &mut mapped_vert_buffer_alloc, 0).unwrap();
+
+    let command_pool_create_info = CommandPoolCreateInfo {
+      queue_family_index: graphics_queue_family_index as _,
+      ..Default::default()
+    };
+
+    let command_pool = unsafe {
+      device
+        .create_command_pool(&command_pool_create_info, None)
+        .unwrap()
+    };
+
+    let (image_avail_semaphores, (render_done_semaphores, in_flight_fences)): (
+      Vec<Semaphore>,
+      (Vec<Semaphore>, Vec<Fence>),
+    ) = (0..MAX_IN_FLIGHT_FRAME_COUNT)
+      .map(|_| {
+        let image_avail_semaphore_create_info = SemaphoreCreateInfo::default();
+        let render_done_semaphore_create_info = SemaphoreCreateInfo::default();
+
+        let in_flight_fence_create_info = FenceCreateInfo {
+          flags: FenceCreateFlags::SIGNALED,
+          ..Default::default()
+        };
+
+        unsafe {
+          (
+            device
+              .create_semaphore(&image_avail_semaphore_create_info, None)
+              .unwrap(),
+            (
+              device
+                .create_semaphore(&render_done_semaphore_create_info, None)
+                .unwrap(),
+              device
+                .create_fence(&in_flight_fence_create_info, None)
+                .unwrap(),
+            ),
+          )
+        }
+      })
+      .unzip();
+
+    let mut this = Self {
+      window,
+      _entry: entry,
+      instance,
+      surface,
+      surface_instance,
+      physical_device,
+      graphics_queue_family_index: graphics_queue_family_index as _,
+      present_queue_family_index: present_queue_family_index as _,
+      device,
+      graphics_queue,
+      present_queue,
+      swapchain_device,
+      basic_vert_shader,
+      basic_frag_shader,
+      memory_allocator: Some(memory_allocator),
+      vert_buffer,
+      vert_buffer_alloc,
+      command_pool,
+      image_avail_semaphores,
+      render_done_semaphores,
+      in_flight_fences,
+      swapchain: SwapchainKHR::null(),
+      swapchain_images: vec![],
+      swapchain_image_views: vec![],
+      basic_pipeline: None,
+      swapchain_framebuffers: vec![],
+      swapchain_command_buffers: vec![],
+      frame_index: 0,
+    };
+
+    // Create a new swapchain and its dependents during initialization
+    this.on_swapchain_suboptimal();
+    this
+  }
+
+  pub(super) fn draw(&mut self) {
+    unsafe {
+      let in_flight_fence = self.in_flight_fences[self.frame_index];
+      let image_avail_semaphore = self.image_avail_semaphores[self.frame_index];
+      let render_done_semaphore = self.render_done_semaphores[self.frame_index];
+
+      self
+        .device
+        .wait_for_fences(&[in_flight_fence], true, u64::MAX)
+        .unwrap();
+
+      let (swapchain_image_index, is_swapchain_suboptimal) = self
+        .swapchain_device
+        .acquire_next_image(
+          self.swapchain,
+          u64::MAX,
+          image_avail_semaphore,
+          Fence::null(),
+        )
+        .unwrap();
+
+      self.device.reset_fences(&[in_flight_fence]).unwrap();
+      let wait_dst_stage_mask = PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT;
+      let swapchain_command_buffer = self.swapchain_command_buffers[swapchain_image_index as usize];
+
+      let queue_submit_info = SubmitInfo {
+        wait_semaphore_count: 1,
+        p_wait_semaphores: &image_avail_semaphore,
+        p_wait_dst_stage_mask: &wait_dst_stage_mask,
+        command_buffer_count: 1,
+        p_command_buffers: &swapchain_command_buffer,
+        signal_semaphore_count: 1,
+        p_signal_semaphores: &render_done_semaphore,
+        ..Default::default()
+      };
+
+      self
+        .device
+        .queue_submit(self.graphics_queue, &[queue_submit_info], in_flight_fence)
+        .unwrap();
+
+      let present_info = PresentInfoKHR {
+        wait_semaphore_count: 1,
+        p_wait_semaphores: &render_done_semaphore,
+        swapchain_count: 1,
+        p_swapchains: &self.swapchain,
+        p_image_indices: &swapchain_image_index,
+        ..Default::default()
+      };
+
+      let is_swapchain_suboptimal = self
+        .swapchain_device
+        .queue_present(self.present_queue, &present_info)
+        .unwrap();
+
+      self.frame_index = (self.frame_index + 1) % self.in_flight_fences.len();
+    }
+  }
+
+  fn on_swapchain_suboptimal(&mut self) {
     let surface_capabilities = unsafe {
-      surface_instance
-        .get_physical_device_surface_capabilities(physical_device, surface)
+      self
+        .surface_instance
+        .get_physical_device_surface_capabilities(self.physical_device, self.surface)
         .unwrap()
     };
 
@@ -283,15 +523,16 @@ impl VkEngine {
     };
 
     let surface_format = unsafe {
-      surface_instance
-        .get_physical_device_surface_formats(physical_device, surface)
+      self
+        .surface_instance
+        .get_physical_device_surface_formats(self.physical_device, self.surface)
         .unwrap()[0]
     };
 
     let surface_extent = if surface_capabilities.current_extent.width != u32::MAX {
       surface_capabilities.current_extent
     } else {
-      let (drawable_width, drawable_height) = window.vulkan_drawable_size();
+      let (drawable_width, drawable_height) = self.window.vulkan_drawable_size();
 
       Extent2D {
         width: drawable_width.clamp(
@@ -305,25 +546,48 @@ impl VkEngine {
       }
     };
 
-    let surface_sharing_mode = if graphics_queue_family_index == present_queue_family_index {
-      SharingMode::EXCLUSIVE
-    } else {
-      SharingMode::CONCURRENT
-    };
+    let surface_sharing_mode =
+      if self.graphics_queue_family_index == self.present_queue_family_index {
+        SharingMode::EXCLUSIVE
+      } else {
+        SharingMode::CONCURRENT
+      };
 
     let surface_queue_family_indices = if surface_sharing_mode == SharingMode::EXCLUSIVE {
       vec![]
     } else {
       vec![
-        graphics_queue_family_index as _,
-        present_queue_family_index as _,
+        self.graphics_queue_family_index,
+        self.present_queue_family_index,
       ]
     };
 
-    let swapchain_device = swapchain::Device::new(&instance, &device);
+    unsafe {
+      self.device.device_wait_idle().unwrap();
+
+      self.swapchain_framebuffers.iter().for_each(|&framebuffer| {
+        self.device.destroy_framebuffer(framebuffer, None);
+      });
+    }
+
+    if let Some(basic_pipeline) = &self.basic_pipeline {
+      basic_pipeline.drop();
+    }
+
+    unsafe {
+      self.swapchain_image_views.iter().for_each(|&image_view| {
+        self.device.destroy_image_view(image_view, None);
+      });
+
+      if !self.swapchain.is_null() {
+        self
+          .swapchain_device
+          .destroy_swapchain(self.swapchain, None);
+      }
+    }
 
     let swapchain_create_info = SwapchainCreateInfoKHR {
-      surface,
+      surface: self.surface,
       min_image_count,
       image_format: surface_format.format,
       image_color_space: surface_format.color_space,
@@ -341,12 +605,18 @@ impl VkEngine {
     };
 
     let swapchain = unsafe {
-      swapchain_device
+      self
+        .swapchain_device
         .create_swapchain(&swapchain_create_info, None)
         .unwrap()
     };
 
-    let swapchain_images = unsafe { swapchain_device.get_swapchain_images(swapchain).unwrap() };
+    let swapchain_images = unsafe {
+      self
+        .swapchain_device
+        .get_swapchain_images(swapchain)
+        .unwrap()
+    };
 
     let swapchain_image_views = unsafe {
       swapchain_images.iter().map(|&image| {
@@ -364,23 +634,24 @@ impl VkEngine {
           ..Default::default()
         };
 
-        device
+        self
+          .device
           .create_image_view(&image_view_create_info, None)
           .unwrap()
       })
     }
     .collect::<Vec<_>>();
 
-    let basic_vert_shader = BasicVertShader::new(&device);
-    let basic_frag_shader = BasicFragShader::new(&device);
-
     let basic_pipeline = BasicPipeline::new(
-      device.clone(),
+      self.device.clone(),
       surface_extent,
       surface_format.format,
-      basic_vert_shader,
-      basic_frag_shader,
+      &self.basic_vert_shader,
+      &self.basic_frag_shader,
     );
+
+    self.basic_frag_shader.drop();
+    self.basic_vert_shader.drop();
 
     let swapchain_framebuffers = unsafe {
       swapchain_image_views
@@ -396,33 +667,24 @@ impl VkEngine {
             ..Default::default()
           };
 
-          device
+          self
+            .device
             .create_framebuffer(&framebuffer_create_info, None)
             .unwrap()
         })
         .collect::<Vec<_>>()
     };
 
-    let command_pool_create_info = CommandPoolCreateInfo {
-      queue_family_index: graphics_queue_family_index as _,
-      ..Default::default()
-    };
-
-    let command_pool = unsafe {
-      device
-        .create_command_pool(&command_pool_create_info, None)
-        .unwrap()
-    };
-
     let swapchain_command_buffer_alloc_info = CommandBufferAllocateInfo {
-      command_pool,
+      command_pool: self.command_pool,
       level: CommandBufferLevel::PRIMARY,
       command_buffer_count: swapchain_framebuffers.len() as _,
       ..Default::default()
     };
 
     let swapchain_command_buffers = unsafe {
-      device
+      self
+        .device
         .allocate_command_buffers(&swapchain_command_buffer_alloc_info)
         .unwrap()
     };
@@ -459,59 +721,80 @@ impl VkEngine {
         let subpass_end_info = SubpassEndInfo::default();
 
         unsafe {
-          device
+          self
+            .device
             .begin_command_buffer(command_buffer, &command_buffer_begin_info)
             .unwrap();
 
-          device.cmd_begin_render_pass2(
+          self.device.cmd_begin_render_pass2(
             command_buffer,
             &render_pass_begin_info,
             &subpass_begin_info,
           );
 
-          device.cmd_bind_pipeline(
+          self.device.cmd_bind_pipeline(
             command_buffer,
             PipelineBindPoint::GRAPHICS,
             basic_pipeline.pipeline,
           );
 
-          device.cmd_draw(command_buffer, 3, 1, 0, 0);
-          device.cmd_end_render_pass2(command_buffer, &subpass_end_info);
-          device.end_command_buffer(command_buffer).unwrap();
+          self.device.cmd_bind_vertex_buffers2(
+            command_buffer,
+            0,
+            &[self.vert_buffer],
+            &[0],
+            None,
+            None,
+          );
+
+          self
+            .device
+            .cmd_draw(command_buffer, VERTICES.len() as _, 1, 0, 0);
+
+          self
+            .device
+            .cmd_end_render_pass2(command_buffer, &subpass_end_info);
+
+          self.device.end_command_buffer(command_buffer).unwrap();
         }
       });
 
-    Self {
-      _entry: entry,
-      instance,
-      surface,
-      surface_instance,
-      device,
-      graphics_queue,
-      present_queue,
-      swapchain_device,
-      swapchain,
-      swapchain_images,
-      swapchain_image_views,
-      basic_pipeline,
-      swapchain_framebuffers,
-      command_pool,
-      swapchain_command_buffers,
-    }
+    self.swapchain = swapchain;
+    self.swapchain_images = swapchain_images;
+    self.swapchain_image_views = swapchain_image_views;
+    self.basic_pipeline = Some(basic_pipeline);
+    self.swapchain_framebuffers = swapchain_framebuffers;
+    self.swapchain_command_buffers = swapchain_command_buffers;
   }
 }
 
-impl Drop for VkEngine {
+impl Drop for VkEngine<'_> {
   fn drop(&mut self) {
     unsafe {
+      self.device.device_wait_idle().unwrap();
+
+      self.in_flight_fences.iter().for_each(|&fence| {
+        self.device.destroy_fence(fence, None);
+      });
+
+      self.render_done_semaphores.iter().for_each(|&semaphore| {
+        self.device.destroy_semaphore(semaphore, None);
+      });
+
+      self.image_avail_semaphores.iter().for_each(|&semaphore| {
+        self.device.destroy_semaphore(semaphore, None);
+      });
+
       self.device.destroy_command_pool(self.command_pool, None);
+      self.device.destroy_buffer(self.vert_buffer, None);
+      drop(mem::take(&mut self.memory_allocator));
 
       self.swapchain_framebuffers.iter().for_each(|&framebuffer| {
         self.device.destroy_framebuffer(framebuffer, None);
       });
     }
 
-    self.basic_pipeline.drop();
+    self.basic_pipeline.as_ref().unwrap().drop();
 
     unsafe {
       self.swapchain_image_views.iter().for_each(|&image_view| {

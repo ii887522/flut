@@ -2,17 +2,17 @@ use ash::{
   Device,
   vk::{PipelineShaderStageCreateInfo, ShaderModule, ShaderModuleCreateInfo, ShaderStageFlags},
 };
-use std::ffi::CString;
+use std::{ffi::CString, rc::Rc};
 
 pub(crate) struct BasicFragShader<'a> {
-  device: &'a Device,
+  device: Rc<Device>,
   shader: ShaderModule,
   _entry_point_name: CString,
   pub(crate) shader_stage_create_info: PipelineShaderStageCreateInfo<'a>,
 }
 
 impl<'a> BasicFragShader<'a> {
-  pub(crate) fn new(device: &'a Device) -> Self {
+  pub(crate) fn new(device: Rc<Device>) -> Self {
     const SHADER_CODE: &[u8] = include_bytes!("../../target/shaders/basic.frag.spv");
 
     let shader_create_info = ShaderModuleCreateInfo {
@@ -43,10 +43,8 @@ impl<'a> BasicFragShader<'a> {
       shader_stage_create_info,
     }
   }
-}
 
-impl Drop for BasicFragShader<'_> {
-  fn drop(&mut self) {
+  pub(crate) fn drop(&self) {
     unsafe {
       self.device.destroy_shader_module(self.shader, None);
     }

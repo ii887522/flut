@@ -6,14 +6,16 @@ use ash::{
     VertexInputBindingDescription, VertexInputRate,
   },
 };
-use std::{ffi::CString, mem};
+use std::{ffi::CString, mem, rc::Rc};
 
+#[repr(C, align(8))]
+#[derive(Clone, Copy)]
 pub(crate) struct Vertex {
-  position: (f32, f32),
+  pub(crate) position: (f32, f32),
 }
 
 pub(crate) struct BasicVertShader<'a> {
-  device: &'a Device,
+  device: Rc<Device>,
   shader: ShaderModule,
   _entry_point_name: CString,
   pub(crate) shader_stage_create_info: PipelineShaderStageCreateInfo<'a>,
@@ -23,7 +25,7 @@ pub(crate) struct BasicVertShader<'a> {
 }
 
 impl<'a> BasicVertShader<'a> {
-  pub(crate) fn new(device: &'a Device) -> Self {
+  pub(crate) fn new(device: Rc<Device>) -> Self {
     const SHADER_CODE: &[u8] = include_bytes!("../../target/shaders/basic.vert.spv");
 
     let shader_create_info = ShaderModuleCreateInfo {
@@ -78,10 +80,8 @@ impl<'a> BasicVertShader<'a> {
       vert_input_stage_create_info,
     }
   }
-}
 
-impl Drop for BasicVertShader<'_> {
-  fn drop(&mut self) {
+  pub(crate) fn drop(&self) {
     unsafe {
       self.device.destroy_shader_module(self.shader, None);
     }
