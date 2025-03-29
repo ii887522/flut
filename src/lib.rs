@@ -44,7 +44,7 @@ pub fn run_app<'a>(
   // Call window.show() as early as possible to minimize the perceived startup time
   window.show();
 
-  let mut vk_engine = VkEngine::new(&window, prefer_dgpu);
+  let mut vk_engine = VkEngine::new(window, prefer_dgpu);
 
   // Register `()` event for triggering acquire swapchain image at the next iteration in case the swapchain is recreated
   event_subsys.register_custom_event::<()>().unwrap();

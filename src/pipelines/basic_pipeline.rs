@@ -29,6 +29,7 @@ impl BasicPipeline {
     surface_format: Format,
     vert_shader: &BasicVertShader<'_>,
     frag_shader: &BasicFragShader<'_>,
+    base_pipeline: Option<&BasicPipeline>,
   ) -> Self {
     let input_assembly_state_create_info = PipelineInputAssemblyStateCreateInfo {
       topology: PrimitiveTopology::TRIANGLE_LIST,
@@ -147,7 +148,11 @@ impl BasicPipeline {
     ];
 
     let pipeline_create_info = GraphicsPipelineCreateInfo {
-      flags: PipelineCreateFlags::ALLOW_DERIVATIVES,
+      flags: if base_pipeline.is_some() {
+        PipelineCreateFlags::DERIVATIVE | PipelineCreateFlags::ALLOW_DERIVATIVES
+      } else {
+        PipelineCreateFlags::ALLOW_DERIVATIVES
+      },
       stage_count: shader_stage_create_infos.len() as _,
       p_stages: shader_stage_create_infos.as_ptr(),
       p_vertex_input_state: &vert_shader.vert_input_stage_create_info,
@@ -159,6 +164,12 @@ impl BasicPipeline {
       layout,
       render_pass,
       subpass: 0,
+      base_pipeline_handle: if let Some(base_pipeline) = base_pipeline {
+        base_pipeline.pipeline
+      } else {
+        Pipeline::null()
+      },
+      base_pipeline_index: -1,
       ..Default::default()
     };
 

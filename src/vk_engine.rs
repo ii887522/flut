@@ -9,14 +9,14 @@ use ash::{
   vk::{
     self, ApplicationInfo, BindBufferMemoryInfo, Buffer, BufferCreateInfo,
     BufferMemoryRequirementsInfo2, BufferUsageFlags, ClearColorValue, ClearValue, CommandBuffer,
-    CommandBufferAllocateInfo, CommandBufferBeginInfo, CommandBufferLevel, CommandPool,
-    CommandPoolCreateInfo, CompositeAlphaFlagsKHR, DeviceCreateInfo, DeviceQueueCreateInfo,
-    DeviceQueueInfo2, Extent2D, Fence, FenceCreateFlags, FenceCreateInfo, Framebuffer,
-    FramebufferCreateInfo, Handle, Image, ImageAspectFlags, ImageSubresourceRange, ImageUsageFlags,
-    ImageView, ImageViewCreateInfo, ImageViewType, InstanceCreateFlags, InstanceCreateInfo,
-    MemoryRequirements2, Offset2D, PhysicalDevice, PhysicalDeviceProperties2, PhysicalDeviceType,
-    PipelineBindPoint, PipelineStageFlags, PresentInfoKHR, PresentModeKHR, Queue,
-    QueueFamilyProperties2, QueueFlags, Rect2D, RenderPassBeginInfo, Semaphore,
+    CommandBufferAllocateInfo, CommandBufferBeginInfo, CommandBufferLevel, CommandBufferUsageFlags,
+    CommandPool, CommandPoolCreateInfo, CompositeAlphaFlagsKHR, DeviceCreateInfo,
+    DeviceQueueCreateInfo, DeviceQueueInfo2, Extent2D, Fence, FenceCreateFlags, FenceCreateInfo,
+    Framebuffer, FramebufferCreateInfo, Handle, Image, ImageAspectFlags, ImageSubresourceRange,
+    ImageUsageFlags, ImageView, ImageViewCreateInfo, ImageViewType, InstanceCreateFlags,
+    InstanceCreateInfo, MemoryRequirements2, Offset2D, PhysicalDevice, PhysicalDeviceProperties2,
+    PhysicalDeviceType, PipelineBindPoint, PipelineStageFlags, PresentInfoKHR, PresentModeKHR,
+    Queue, QueueFamilyProperties2, QueueFlags, Rect2D, RenderPassBeginInfo, Semaphore,
     SemaphoreCreateInfo, SharingMode, SubmitInfo, SubpassBeginInfo, SubpassContents,
     SubpassEndInfo, SurfaceKHR, SwapchainCreateInfoKHR, SwapchainKHR, ValidationFeatureEnableEXT,
     ValidationFeaturesEXT,
@@ -45,7 +45,7 @@ const VERTICES: &[BasicVertex] = &[
 ];
 
 pub(super) struct VkEngine<'a> {
-  window: &'a Window,
+  window: Window,
   _entry: Entry,
   instance: Instance,
   surface: SurfaceKHR,
@@ -61,7 +61,7 @@ pub(super) struct VkEngine<'a> {
   basic_frag_shader: BasicFragShader<'a>,
   memory_allocator: Option<Allocator>,
   vert_buffer: Buffer,
-  vert_buffer_alloc: Allocation,
+  _vert_buffer_alloc: Allocation,
   command_pool: CommandPool,
   image_avail_semaphores: Vec<Semaphore>,
   render_done_semaphores: Vec<Semaphore>,
@@ -76,7 +76,7 @@ pub(super) struct VkEngine<'a> {
 }
 
 impl<'a> VkEngine<'a> {
-  pub(super) fn new(window: &'a Window, prefer_dgpu: bool) -> Self {
+  pub(super) fn new(window: Window, prefer_dgpu: bool) -> Self {
     let entry = unsafe { Entry::load().unwrap() };
 
     let enabled_layers = StringSlice::from(
@@ -428,7 +428,7 @@ impl<'a> VkEngine<'a> {
       basic_frag_shader,
       memory_allocator: Some(memory_allocator),
       vert_buffer,
-      vert_buffer_alloc,
+      _vert_buffer_alloc: vert_buffer_alloc,
       command_pool,
       image_avail_semaphores,
       render_done_semaphores,
@@ -458,15 +458,20 @@ impl<'a> VkEngine<'a> {
         .wait_for_fences(&[in_flight_fence], true, u64::MAX)
         .unwrap();
 
-      let (swapchain_image_index, is_swapchain_suboptimal) = self
-        .swapchain_device
-        .acquire_next_image(
+      // If after acquired a swapchain image found that the swapchain is suboptimal, we still proceed to submit command buffer
+      // because the swapchain image is already acquired and need to be presented before call on_swapchain_suboptimal()
+      // to ensure no swapchain images are holding by draw() forever causing deadlock
+      let (swapchain_image_index, _is_swapchain_suboptimal) =
+        match self.swapchain_device.acquire_next_image(
           self.swapchain,
           u64::MAX,
           image_avail_semaphore,
           Fence::null(),
-        )
-        .unwrap();
+        ) {
+          Ok(resp) => resp,
+          Err(vk::Result::ERROR_OUT_OF_DATE_KHR) => return self.on_swapchain_suboptimal(),
+          Err(err) => panic!("{err}"),
+        };
 
       self.device.reset_fences(&[in_flight_fence]).unwrap();
       let wait_dst_stage_mask = PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT;
@@ -497,10 +502,14 @@ impl<'a> VkEngine<'a> {
         ..Default::default()
       };
 
-      let is_swapchain_suboptimal = self
+      match self
         .swapchain_device
         .queue_present(self.present_queue, &present_info)
-        .unwrap();
+      {
+        Ok(false) => {} // Swapchain is optimal
+        Ok(true) | Err(vk::Result::ERROR_OUT_OF_DATE_KHR) => return self.on_swapchain_suboptimal(), // Swapchain is suboptimal
+        Err(err) => panic!("{err}"),
+      };
 
       self.frame_index = (self.frame_index + 1) % self.in_flight_fences.len();
     }
@@ -512,21 +521,6 @@ impl<'a> VkEngine<'a> {
         .surface_instance
         .get_physical_device_surface_capabilities(self.physical_device, self.surface)
         .unwrap()
-    };
-
-    let min_image_count = surface_capabilities.min_image_count + 1;
-
-    let min_image_count = if surface_capabilities.max_image_count > 0 {
-      min_image_count.min(surface_capabilities.max_image_count)
-    } else {
-      min_image_count
-    };
-
-    let surface_format = unsafe {
-      self
-        .surface_instance
-        .get_physical_device_surface_formats(self.physical_device, self.surface)
-        .unwrap()[0]
     };
 
     let surface_extent = if surface_capabilities.current_extent.width != u32::MAX {
@@ -544,6 +538,25 @@ impl<'a> VkEngine<'a> {
           surface_capabilities.max_image_extent.height,
         ),
       }
+    };
+
+    if surface_extent.width == 0 || surface_extent.height == 0 {
+      return;
+    }
+
+    let min_image_count = surface_capabilities.min_image_count + 1;
+
+    let min_image_count = if surface_capabilities.max_image_count > 0 {
+      min_image_count.min(surface_capabilities.max_image_count)
+    } else {
+      min_image_count
+    };
+
+    let surface_format = unsafe {
+      self
+        .surface_instance
+        .get_physical_device_surface_formats(self.physical_device, self.surface)
+        .unwrap()[0]
     };
 
     let surface_sharing_mode =
@@ -565,16 +578,16 @@ impl<'a> VkEngine<'a> {
     unsafe {
       self.device.device_wait_idle().unwrap();
 
+      if !self.swapchain_command_buffers.is_empty() {
+        self
+          .device
+          .free_command_buffers(self.command_pool, &self.swapchain_command_buffers);
+      }
+
       self.swapchain_framebuffers.iter().for_each(|&framebuffer| {
         self.device.destroy_framebuffer(framebuffer, None);
       });
-    }
 
-    if let Some(basic_pipeline) = &self.basic_pipeline {
-      basic_pipeline.drop();
-    }
-
-    unsafe {
       self.swapchain_image_views.iter().for_each(|&image_view| {
         self.device.destroy_image_view(image_view, None);
       });
@@ -648,10 +661,12 @@ impl<'a> VkEngine<'a> {
       surface_format.format,
       &self.basic_vert_shader,
       &self.basic_frag_shader,
+      self.basic_pipeline.as_ref(),
     );
 
-    self.basic_frag_shader.drop();
-    self.basic_vert_shader.drop();
+    if let Some(basic_pipeline) = &self.basic_pipeline {
+      basic_pipeline.drop();
+    }
 
     let swapchain_framebuffers = unsafe {
       swapchain_image_views
@@ -699,7 +714,10 @@ impl<'a> VkEngine<'a> {
       .iter()
       .zip(swapchain_framebuffers.iter())
       .for_each(|(&command_buffer, &framebuffer)| {
-        let command_buffer_begin_info = CommandBufferBeginInfo::default();
+        let command_buffer_begin_info = CommandBufferBeginInfo {
+          flags: CommandBufferUsageFlags::SIMULTANEOUS_USE,
+          ..Default::default()
+        };
 
         let render_pass_begin_info = RenderPassBeginInfo {
           render_pass: basic_pipeline.render_pass,
@@ -788,6 +806,8 @@ impl Drop for VkEngine<'_> {
       self.device.destroy_command_pool(self.command_pool, None);
       self.device.destroy_buffer(self.vert_buffer, None);
       drop(mem::take(&mut self.memory_allocator));
+      self.basic_frag_shader.drop();
+      self.basic_vert_shader.drop();
 
       self.swapchain_framebuffers.iter().for_each(|&framebuffer| {
         self.device.destroy_framebuffer(framebuffer, None);
