@@ -5,6 +5,7 @@ mod pipelines;
 mod shaders;
 mod string_slice;
 mod vk_engine;
+mod vk_buffer;
 
 use optarg2chain::optarg_fn;
 use sdl2::{event::Event, image::LoadSurface, surface::Surface};

@@ -61,7 +61,7 @@ impl BasicPipeline {
     let rasterization_state_create_info = PipelineRasterizationStateCreateInfo {
       polygon_mode: PolygonMode::FILL,
       cull_mode: CullModeFlags::NONE,
-      front_face: FrontFace::COUNTER_CLOCKWISE,
+      front_face: FrontFace::CLOCKWISE,
       line_width: 1.0,
       ..Default::default()
     };
@@ -186,8 +186,10 @@ impl BasicPipeline {
       pipeline: pipelines[0],
     }
   }
+}
 
-  pub(crate) fn drop(&self) {
+impl Drop for BasicPipeline {
+  fn drop(&mut self) {
     unsafe {
       self.device.destroy_pipeline(self.pipeline, None);
       self.device.destroy_render_pass(self.render_pass, None);

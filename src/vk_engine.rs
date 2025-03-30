@@ -2,32 +2,32 @@ use crate::{
   pipelines::BasicPipeline,
   shaders::{BasicFragShader, BasicVertShader, BasicVertex},
   string_slice::StringSlice,
+  vk_buffer::VkBuffer,
 };
 use ash::{
   Device, Entry, Instance,
   khr::{surface, swapchain},
   vk::{
-    self, ApplicationInfo, BindBufferMemoryInfo, Buffer, BufferCreateInfo,
-    BufferMemoryRequirementsInfo2, BufferUsageFlags, ClearColorValue, ClearValue, CommandBuffer,
+    self, ApplicationInfo, BufferUsageFlags, ClearColorValue, ClearValue, CommandBuffer,
     CommandBufferAllocateInfo, CommandBufferBeginInfo, CommandBufferLevel, CommandBufferUsageFlags,
-    CommandPool, CommandPoolCreateInfo, CompositeAlphaFlagsKHR, DeviceCreateInfo,
-    DeviceQueueCreateInfo, DeviceQueueInfo2, Extent2D, Fence, FenceCreateFlags, FenceCreateInfo,
-    Framebuffer, FramebufferCreateInfo, Handle, Image, ImageAspectFlags, ImageSubresourceRange,
-    ImageUsageFlags, ImageView, ImageViewCreateInfo, ImageViewType, InstanceCreateFlags,
-    InstanceCreateInfo, MemoryRequirements2, Offset2D, PhysicalDevice, PhysicalDeviceProperties2,
-    PhysicalDeviceType, PipelineBindPoint, PipelineStageFlags, PresentInfoKHR, PresentModeKHR,
-    Queue, QueueFamilyProperties2, QueueFlags, Rect2D, RenderPassBeginInfo, Semaphore,
-    SemaphoreCreateInfo, SharingMode, SubmitInfo, SubpassBeginInfo, SubpassContents,
-    SubpassEndInfo, SurfaceKHR, SwapchainCreateInfoKHR, SwapchainKHR, ValidationFeatureEnableEXT,
-    ValidationFeaturesEXT,
+    CommandPool, CommandPoolCreateFlags, CommandPoolCreateInfo, CompositeAlphaFlagsKHR,
+    DeviceCreateInfo, DeviceQueueCreateInfo, DeviceQueueInfo2, Extent2D, Fence, FenceCreateFlags,
+    FenceCreateInfo, Framebuffer, FramebufferCreateInfo, Handle, Image, ImageAspectFlags,
+    ImageSubresourceRange, ImageUsageFlags, ImageView, ImageViewCreateInfo, ImageViewType,
+    IndexType, InstanceCreateFlags, InstanceCreateInfo, Offset2D, PhysicalDevice,
+    PhysicalDeviceProperties2, PhysicalDeviceType, PipelineBindPoint, PipelineStageFlags,
+    PresentInfoKHR, PresentModeKHR, Queue, QueueFamilyProperties2, QueueFlags, Rect2D,
+    RenderPassBeginInfo, Semaphore, SemaphoreCreateInfo, SharingMode, SubmitInfo, SubpassBeginInfo,
+    SubpassContents, SubpassEndInfo, SurfaceKHR, SwapchainCreateInfoKHR, SwapchainKHR,
+    ValidationFeatureEnableEXT, ValidationFeaturesEXT,
   },
 };
 use gpu_allocator::{
-  AllocationSizes, AllocatorDebugSettings, MemoryLocation,
-  vulkan::{Allocation, AllocationCreateDesc, AllocationScheme, Allocator, AllocatorCreateDesc},
+  AllocationSizes, AllocatorDebugSettings,
+  vulkan::{Allocator, AllocatorCreateDesc},
 };
 use sdl2::video::Window;
-use std::{ffi::c_void, mem, rc::Rc};
+use std::{cell::RefCell, ffi::c_void, mem, rc::Rc};
 
 const MAX_IN_FLIGHT_FRAME_COUNT: usize = 3;
 const MIN_ALLOC_SIZE: u64 = 4 * 1024 * 1024;
@@ -37,12 +37,17 @@ const VERTICES: &[BasicVertex] = &[
     position: (-0.5, -0.5),
   },
   BasicVertex {
-    position: (0.0, 0.5),
+    position: (0.5, -0.5),
   },
   BasicVertex {
-    position: (0.5, -0.25),
+    position: (0.5, 0.5),
+  },
+  BasicVertex {
+    position: (-0.5, 0.5),
   },
 ];
+
+const INDICES: &[u16] = &[0, 1, 2, 2, 3, 0];
 
 pub(super) struct VkEngine<'a> {
   window: Window,
@@ -59,9 +64,9 @@ pub(super) struct VkEngine<'a> {
   swapchain_device: swapchain::Device,
   basic_vert_shader: BasicVertShader<'a>,
   basic_frag_shader: BasicFragShader<'a>,
-  memory_allocator: Option<Allocator>,
-  vert_buffer: Buffer,
-  _vert_buffer_alloc: Allocation,
+  memory_allocator: Option<Rc<RefCell<Allocator>>>,
+  vert_buffer: Option<VkBuffer<'a>>,
+  index_buffer: Option<VkBuffer<'a>>,
   command_pool: CommandPool,
   image_avail_semaphores: Vec<Semaphore>,
   render_done_semaphores: Vec<Semaphore>,
@@ -309,65 +314,94 @@ impl<'a> VkEngine<'a> {
     let basic_vert_shader = BasicVertShader::new(device.clone());
     let basic_frag_shader = BasicFragShader::new(device.clone());
 
-    let mut memory_allocator = Allocator::new(&AllocatorCreateDesc {
-      instance: instance.clone(),
-      device: (*device).clone(),
-      physical_device,
-      debug_settings: AllocatorDebugSettings::default(),
-      buffer_device_address: false,
-      allocation_sizes: AllocationSizes::new(MIN_ALLOC_SIZE, MIN_ALLOC_SIZE),
-    })
-    .unwrap();
-
-    let vert_buffer_create_info = BufferCreateInfo {
-      size: mem::size_of_val(VERTICES) as _,
-      usage: BufferUsageFlags::VERTEX_BUFFER,
-      sharing_mode: SharingMode::EXCLUSIVE,
-      ..Default::default()
-    };
-
-    let vert_buffer = unsafe {
-      device
-        .create_buffer(&vert_buffer_create_info, None)
-        .unwrap()
-    };
-
-    let vert_buffer_mem_req_info = BufferMemoryRequirementsInfo2 {
-      buffer: vert_buffer,
-      ..Default::default()
-    };
-
-    let mut vert_buffer_mem_req = MemoryRequirements2::default();
-
-    unsafe {
-      device.get_buffer_memory_requirements2(&vert_buffer_mem_req_info, &mut vert_buffer_mem_req);
-    }
-
-    let mut vert_buffer_alloc = memory_allocator
-      .allocate(&AllocationCreateDesc {
-        name: "vert_buffer",
-        requirements: vert_buffer_mem_req.memory_requirements,
-        location: MemoryLocation::CpuToGpu,
-        linear: true,
-        allocation_scheme: AllocationScheme::DedicatedBuffer(vert_buffer),
+    let memory_allocator = Rc::new(RefCell::new(
+      Allocator::new(&AllocatorCreateDesc {
+        instance: instance.clone(),
+        device: (*device).clone(),
+        physical_device,
+        debug_settings: AllocatorDebugSettings::default(),
+        buffer_device_address: false,
+        allocation_sizes: AllocationSizes::new(MIN_ALLOC_SIZE, MIN_ALLOC_SIZE),
       })
-      .unwrap();
+      .unwrap(),
+    ));
 
-    let bind_vert_buffer_mem_info = BindBufferMemoryInfo {
-      buffer: vert_buffer,
-      memory: unsafe { vert_buffer_alloc.memory() },
-      memory_offset: vert_buffer_alloc.offset(),
-      ..Default::default()
-    };
+    let vert_buffer = VkBuffer::new(
+      device.clone(),
+      memory_allocator.clone(),
+      "vert_buffer",
+      BufferUsageFlags::VERTEX_BUFFER,
+      VERTICES,
+    );
+
+    let index_buffer = VkBuffer::new(
+      device.clone(),
+      memory_allocator.clone(),
+      "index_buffer",
+      BufferUsageFlags::INDEX_BUFFER,
+      INDICES,
+    );
 
     unsafe {
       device
-        .bind_buffer_memory2(&[bind_vert_buffer_mem_info])
+        .bind_buffer_memory2(&[
+          vert_buffer.bind_staging_buffer_mem_info,
+          vert_buffer.bind_buffer_mem_info,
+          index_buffer.bind_staging_buffer_mem_info,
+          index_buffer.bind_buffer_mem_info,
+        ])
         .unwrap();
     }
 
-    let mut mapped_vert_buffer_alloc = vert_buffer_alloc.try_as_mapped_slab().unwrap();
-    presser::copy_from_slice_to_offset(VERTICES, &mut mapped_vert_buffer_alloc, 0).unwrap();
+    let staging_command_pool_create_info = CommandPoolCreateInfo {
+      flags: CommandPoolCreateFlags::TRANSIENT,
+      queue_family_index: graphics_queue_family_index as _, // Graphics queue family implicitly supports transfer operations
+      ..Default::default()
+    };
+
+    let staging_command_pool = unsafe {
+      device
+        .create_command_pool(&staging_command_pool_create_info, None)
+        .unwrap()
+    };
+
+    let staging_command_buffer_alloc_info = CommandBufferAllocateInfo {
+      command_pool: staging_command_pool,
+      level: CommandBufferLevel::PRIMARY,
+      command_buffer_count: 1,
+      ..Default::default()
+    };
+
+    let staging_command_buffer = unsafe {
+      device
+        .allocate_command_buffers(&staging_command_buffer_alloc_info)
+        .unwrap()[0]
+    };
+
+    let staging_command_buffer_begin_info = CommandBufferBeginInfo {
+      flags: CommandBufferUsageFlags::ONE_TIME_SUBMIT,
+      ..Default::default()
+    };
+
+    let queue_submit_info = SubmitInfo {
+      command_buffer_count: 1,
+      p_command_buffers: &staging_command_buffer,
+      ..Default::default()
+    };
+
+    unsafe {
+      device
+        .begin_command_buffer(staging_command_buffer, &staging_command_buffer_begin_info)
+        .unwrap();
+
+      device.cmd_copy_buffer2(staging_command_buffer, &vert_buffer.copy_buffer_info);
+      device.cmd_copy_buffer2(staging_command_buffer, &index_buffer.copy_buffer_info);
+      device.end_command_buffer(staging_command_buffer).unwrap();
+
+      device
+        .queue_submit(graphics_queue, &[queue_submit_info], Fence::null())
+        .unwrap();
+    }
 
     let command_pool_create_info = CommandPoolCreateInfo {
       queue_family_index: graphics_queue_family_index as _,
@@ -427,8 +461,8 @@ impl<'a> VkEngine<'a> {
       basic_vert_shader,
       basic_frag_shader,
       memory_allocator: Some(memory_allocator),
-      vert_buffer,
-      _vert_buffer_alloc: vert_buffer_alloc,
+      vert_buffer: Some(vert_buffer),
+      index_buffer: Some(index_buffer),
       command_pool,
       image_avail_semaphores,
       render_done_semaphores,
@@ -444,6 +478,14 @@ impl<'a> VkEngine<'a> {
 
     // Create a new swapchain and its dependents during initialization
     this.on_swapchain_suboptimal();
+
+    unsafe {
+      this.device.queue_wait_idle(graphics_queue).unwrap();
+      this.device.destroy_command_pool(staging_command_pool, None);
+      this.index_buffer.as_mut().unwrap().drop_staging();
+      this.vert_buffer.as_mut().unwrap().drop_staging();
+    }
+
     this
   }
 
@@ -664,9 +706,7 @@ impl<'a> VkEngine<'a> {
       self.basic_pipeline.as_ref(),
     );
 
-    if let Some(basic_pipeline) = &self.basic_pipeline {
-      basic_pipeline.drop();
-    }
+    drop(mem::take(&mut self.basic_pipeline));
 
     let swapchain_framebuffers = unsafe {
       swapchain_image_views
@@ -759,15 +799,22 @@ impl<'a> VkEngine<'a> {
           self.device.cmd_bind_vertex_buffers2(
             command_buffer,
             0,
-            &[self.vert_buffer],
+            &[self.vert_buffer.as_ref().unwrap().buffer],
             &[0],
             None,
             None,
           );
 
+          self.device.cmd_bind_index_buffer(
+            command_buffer,
+            self.index_buffer.as_ref().unwrap().buffer,
+            0,
+            IndexType::UINT16,
+          );
+
           self
             .device
-            .cmd_draw(command_buffer, VERTICES.len() as _, 1, 0, 0);
+            .cmd_draw_indexed(command_buffer, INDICES.len() as _, 1, 0, 0, 0);
 
           self
             .device
@@ -804,7 +851,8 @@ impl Drop for VkEngine<'_> {
       });
 
       self.device.destroy_command_pool(self.command_pool, None);
-      self.device.destroy_buffer(self.vert_buffer, None);
+      drop(mem::take(&mut self.index_buffer));
+      drop(mem::take(&mut self.vert_buffer));
       drop(mem::take(&mut self.memory_allocator));
       self.basic_frag_shader.drop();
       self.basic_vert_shader.drop();
@@ -814,7 +862,7 @@ impl Drop for VkEngine<'_> {
       });
     }
 
-    self.basic_pipeline.as_ref().unwrap().drop();
+    drop(mem::take(&mut self.basic_pipeline));
 
     unsafe {
       self.swapchain_image_views.iter().for_each(|&image_view| {
