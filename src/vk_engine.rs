@@ -1,6 +1,6 @@
 use crate::{
   pipelines::BasicPipeline,
-  shaders::{BasicFragShader, BasicVertShader, BasicVertex},
+  shaders::{BasicFragShader, BasicInstance, BasicVertShader, BasicVertex},
   string_slice::StringSlice,
   vk_buffer::VkBuffer,
 };
@@ -31,6 +31,10 @@ use std::{cell::RefCell, ffi::c_void, mem, rc::Rc};
 
 const MAX_IN_FLIGHT_FRAME_COUNT: usize = 3;
 const MIN_ALLOC_SIZE: u64 = 4 * 1024 * 1024;
+
+const INSTANCES: &[BasicInstance] = &[BasicInstance {
+  color: (0.9569, 0.4902, 0.4745),
+}];
 
 const VERTICES: &[BasicVertex] = &[
   BasicVertex {
@@ -65,6 +69,7 @@ pub(super) struct VkEngine<'a> {
   basic_vert_shader: BasicVertShader<'a>,
   basic_frag_shader: BasicFragShader<'a>,
   memory_allocator: Option<Rc<RefCell<Allocator>>>,
+  inst_buffer: Option<VkBuffer<'a>>,
   vert_buffer: Option<VkBuffer<'a>>,
   index_buffer: Option<VkBuffer<'a>>,
   command_pool: CommandPool,
@@ -326,6 +331,14 @@ impl<'a> VkEngine<'a> {
       .unwrap(),
     ));
 
+    let inst_buffer = VkBuffer::new(
+      device.clone(),
+      memory_allocator.clone(),
+      "inst_buffer",
+      BufferUsageFlags::VERTEX_BUFFER,
+      INSTANCES,
+    );
+
     let vert_buffer = VkBuffer::new(
       device.clone(),
       memory_allocator.clone(),
@@ -345,6 +358,8 @@ impl<'a> VkEngine<'a> {
     unsafe {
       device
         .bind_buffer_memory2(&[
+          inst_buffer.bind_staging_buffer_mem_info,
+          inst_buffer.bind_buffer_mem_info,
           vert_buffer.bind_staging_buffer_mem_info,
           vert_buffer.bind_buffer_mem_info,
           index_buffer.bind_staging_buffer_mem_info,
@@ -394,6 +409,7 @@ impl<'a> VkEngine<'a> {
         .begin_command_buffer(staging_command_buffer, &staging_command_buffer_begin_info)
         .unwrap();
 
+      device.cmd_copy_buffer2(staging_command_buffer, &inst_buffer.copy_buffer_info);
       device.cmd_copy_buffer2(staging_command_buffer, &vert_buffer.copy_buffer_info);
       device.cmd_copy_buffer2(staging_command_buffer, &index_buffer.copy_buffer_info);
       device.end_command_buffer(staging_command_buffer).unwrap();
@@ -461,6 +477,7 @@ impl<'a> VkEngine<'a> {
       basic_vert_shader,
       basic_frag_shader,
       memory_allocator: Some(memory_allocator),
+      inst_buffer: Some(inst_buffer),
       vert_buffer: Some(vert_buffer),
       index_buffer: Some(index_buffer),
       command_pool,
@@ -484,6 +501,7 @@ impl<'a> VkEngine<'a> {
       this.device.destroy_command_pool(staging_command_pool, None);
       this.index_buffer.as_mut().unwrap().drop_staging();
       this.vert_buffer.as_mut().unwrap().drop_staging();
+      this.inst_buffer.as_mut().unwrap().drop_staging();
     }
 
     this
@@ -799,8 +817,11 @@ impl<'a> VkEngine<'a> {
           self.device.cmd_bind_vertex_buffers2(
             command_buffer,
             0,
-            &[self.vert_buffer.as_ref().unwrap().buffer],
-            &[0],
+            &[
+              self.vert_buffer.as_ref().unwrap().buffer,
+              self.inst_buffer.as_ref().unwrap().buffer,
+            ],
+            &[0, 0],
             None,
             None,
           );
@@ -812,9 +833,14 @@ impl<'a> VkEngine<'a> {
             IndexType::UINT16,
           );
 
-          self
-            .device
-            .cmd_draw_indexed(command_buffer, INDICES.len() as _, 1, 0, 0, 0);
+          self.device.cmd_draw_indexed(
+            command_buffer,
+            INDICES.len() as _,
+            INSTANCES.len() as _,
+            0,
+            0,
+            0,
+          );
 
           self
             .device
@@ -853,6 +879,7 @@ impl Drop for VkEngine<'_> {
       self.device.destroy_command_pool(self.command_pool, None);
       drop(mem::take(&mut self.index_buffer));
       drop(mem::take(&mut self.vert_buffer));
+      drop(mem::take(&mut self.inst_buffer));
       drop(mem::take(&mut self.memory_allocator));
       self.basic_frag_shader.drop();
       self.basic_vert_shader.drop();

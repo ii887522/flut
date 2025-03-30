@@ -8,6 +8,12 @@ use ash::{
 };
 use std::{ffi::CString, mem, rc::Rc};
 
+#[repr(C, align(4))]
+#[derive(Clone, Copy)]
+pub(crate) struct Instance {
+  pub(crate) color: (f32, f32, f32),
+}
+
 #[repr(C, align(8))]
 #[derive(Clone, Copy)]
 pub(crate) struct Vertex {
@@ -19,8 +25,8 @@ pub(crate) struct BasicVertShader<'a> {
   shader: ShaderModule,
   _entry_point_name: CString,
   pub(crate) shader_stage_create_info: PipelineShaderStageCreateInfo<'a>,
-  _binding_desc: Box<VertexInputBindingDescription>,
-  _position_desc: Box<VertexInputAttributeDescription>,
+  _binding_descs: Vec<VertexInputBindingDescription>,
+  _attr_descs: Vec<VertexInputAttributeDescription>,
   pub(crate) vert_input_stage_create_info: PipelineVertexInputStateCreateInfo<'a>,
 }
 
@@ -49,24 +55,39 @@ impl<'a> BasicVertShader<'a> {
       ..Default::default()
     };
 
-    let binding_desc = Box::new(VertexInputBindingDescription {
-      binding: 0,
-      stride: size_of::<Vertex>() as _,
-      input_rate: VertexInputRate::VERTEX,
-    });
+    let vert_binding_descs = vec![
+      VertexInputBindingDescription {
+        binding: 0,
+        stride: size_of::<Vertex>() as _,
+        input_rate: VertexInputRate::VERTEX,
+      },
+      VertexInputBindingDescription {
+        binding: 1,
+        stride: size_of::<Instance>() as _,
+        input_rate: VertexInputRate::INSTANCE,
+      },
+    ];
 
-    let position_desc = Box::new(VertexInputAttributeDescription {
-      location: 0,
-      binding: 0,
-      format: Format::R32G32_SFLOAT,
-      offset: mem::offset_of!(Vertex, position) as _,
-    });
+    let vert_attr_descs = vec![
+      VertexInputAttributeDescription {
+        location: 0,
+        binding: 0,
+        format: Format::R32G32_SFLOAT,
+        offset: mem::offset_of!(Vertex, position) as _,
+      },
+      VertexInputAttributeDescription {
+        location: 1,
+        binding: 1,
+        format: Format::R32G32B32_SFLOAT,
+        offset: mem::offset_of!(Instance, color) as _,
+      },
+    ];
 
     let vert_input_stage_create_info = PipelineVertexInputStateCreateInfo {
-      vertex_binding_description_count: 1,
-      p_vertex_binding_descriptions: &*binding_desc,
-      vertex_attribute_description_count: 1,
-      p_vertex_attribute_descriptions: &*position_desc,
+      vertex_binding_description_count: vert_binding_descs.len() as _,
+      p_vertex_binding_descriptions: vert_binding_descs.as_ptr(),
+      vertex_attribute_description_count: vert_attr_descs.len() as _,
+      p_vertex_attribute_descriptions: vert_attr_descs.as_ptr(),
       ..Default::default()
     };
 
@@ -75,8 +96,8 @@ impl<'a> BasicVertShader<'a> {
       shader,
       _entry_point_name: shader_entry_point_name,
       shader_stage_create_info,
-      _binding_desc: binding_desc,
-      _position_desc: position_desc,
+      _binding_descs: vert_binding_descs,
+      _attr_descs: vert_attr_descs,
       vert_input_stage_create_info,
     }
   }

@@ -3,4 +3,5 @@ pub(super) mod basic_vert_shader;
 
 pub(super) use basic_frag_shader::BasicFragShader;
 pub(super) use basic_vert_shader::BasicVertShader;
+pub(super) use basic_vert_shader::Instance as BasicInstance;
 pub(super) use basic_vert_shader::Vertex as BasicVertex;
