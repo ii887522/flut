@@ -1,8 +1,8 @@
 use crate::{
-  pipelines::BasicPipeline,
+  buffers::{StaticBuffer, StreamBuffer},
+  pipelines::{BasicPipeline, basic_pipeline::PushConstant},
   shaders::{BasicFragShader, BasicInstance, BasicVertShader, BasicVertex},
   string_slice::StringSlice,
-  vk_buffer::VkBuffer,
 };
 use ash::{
   Device, Entry, Instance,
@@ -17,9 +17,9 @@ use ash::{
     IndexType, InstanceCreateFlags, InstanceCreateInfo, Offset2D, PhysicalDevice,
     PhysicalDeviceProperties2, PhysicalDeviceType, PipelineBindPoint, PipelineStageFlags,
     PresentInfoKHR, PresentModeKHR, Queue, QueueFamilyProperties2, QueueFlags, Rect2D,
-    RenderPassBeginInfo, Semaphore, SemaphoreCreateInfo, SharingMode, SubmitInfo, SubpassBeginInfo,
-    SubpassContents, SubpassEndInfo, SurfaceKHR, SwapchainCreateInfoKHR, SwapchainKHR,
-    ValidationFeatureEnableEXT, ValidationFeaturesEXT,
+    RenderPassBeginInfo, Semaphore, SemaphoreCreateInfo, ShaderStageFlags, SharingMode, SubmitInfo,
+    SubpassBeginInfo, SubpassContents, SubpassEndInfo, SurfaceKHR, SwapchainCreateInfoKHR,
+    SwapchainKHR, ValidationFeatureEnableEXT, ValidationFeaturesEXT,
   },
 };
 use gpu_allocator::{
@@ -31,23 +31,20 @@ use std::{cell::RefCell, ffi::c_void, mem, rc::Rc};
 
 const MAX_IN_FLIGHT_FRAME_COUNT: usize = 3;
 const MIN_ALLOC_SIZE: u64 = 4 * 1024 * 1024;
-
-const INSTANCES: &[BasicInstance] = &[BasicInstance {
-  color: (0.9569, 0.4902, 0.4745),
-}];
+const INSTANCES: &[BasicInstance] = &[BasicInstance::new((384.0, 384.0), (243, 125, 121))];
 
 const VERTICES: &[BasicVertex] = &[
   BasicVertex {
-    position: (-0.5, -0.5),
+    position: (0.0, 0.0),
   },
   BasicVertex {
-    position: (0.5, -0.5),
+    position: (0.05, 0.0),
   },
   BasicVertex {
-    position: (0.5, 0.5),
+    position: (0.05, 0.05),
   },
   BasicVertex {
-    position: (-0.5, 0.5),
+    position: (0.0, 0.05),
   },
 ];
 
@@ -69,9 +66,9 @@ pub(super) struct VkEngine<'a> {
   basic_vert_shader: BasicVertShader<'a>,
   basic_frag_shader: BasicFragShader<'a>,
   memory_allocator: Option<Rc<RefCell<Allocator>>>,
-  inst_buffer: Option<VkBuffer<'a>>,
-  vert_buffer: Option<VkBuffer<'a>>,
-  index_buffer: Option<VkBuffer<'a>>,
+  inst_buffer: Option<StreamBuffer<'a>>,
+  vert_buffer: Option<StaticBuffer<'a>>,
+  index_buffer: Option<StaticBuffer<'a>>,
   command_pool: CommandPool,
   image_avail_semaphores: Vec<Semaphore>,
   render_done_semaphores: Vec<Semaphore>,
@@ -331,15 +328,18 @@ impl<'a> VkEngine<'a> {
       .unwrap(),
     ));
 
-    let inst_buffer = VkBuffer::new(
+    let mut inst_buffer = StreamBuffer::new(
       device.clone(),
       memory_allocator.clone(),
       "inst_buffer",
+      mem::size_of_val(INSTANCES) as _,
       BufferUsageFlags::VERTEX_BUFFER,
-      INSTANCES,
     );
 
-    let vert_buffer = VkBuffer::new(
+    let mut mapped_inst_alloc = inst_buffer.alloc.try_as_mapped_slab().unwrap();
+    presser::copy_from_slice_to_offset(INSTANCES, &mut mapped_inst_alloc, 0).unwrap();
+
+    let vert_buffer = StaticBuffer::new(
       device.clone(),
       memory_allocator.clone(),
       "vert_buffer",
@@ -347,7 +347,7 @@ impl<'a> VkEngine<'a> {
       VERTICES,
     );
 
-    let index_buffer = VkBuffer::new(
+    let index_buffer = StaticBuffer::new(
       device.clone(),
       memory_allocator.clone(),
       "index_buffer",
@@ -358,7 +358,6 @@ impl<'a> VkEngine<'a> {
     unsafe {
       device
         .bind_buffer_memory2(&[
-          inst_buffer.bind_staging_buffer_mem_info,
           inst_buffer.bind_buffer_mem_info,
           vert_buffer.bind_staging_buffer_mem_info,
           vert_buffer.bind_buffer_mem_info,
@@ -409,7 +408,6 @@ impl<'a> VkEngine<'a> {
         .begin_command_buffer(staging_command_buffer, &staging_command_buffer_begin_info)
         .unwrap();
 
-      device.cmd_copy_buffer2(staging_command_buffer, &inst_buffer.copy_buffer_info);
       device.cmd_copy_buffer2(staging_command_buffer, &vert_buffer.copy_buffer_info);
       device.cmd_copy_buffer2(staging_command_buffer, &index_buffer.copy_buffer_info);
       device.end_command_buffer(staging_command_buffer).unwrap();
@@ -501,7 +499,6 @@ impl<'a> VkEngine<'a> {
       this.device.destroy_command_pool(staging_command_pool, None);
       this.index_buffer.as_mut().unwrap().drop_staging();
       this.vert_buffer.as_mut().unwrap().drop_staging();
-      this.inst_buffer.as_mut().unwrap().drop_staging();
     }
 
     this
@@ -796,6 +793,10 @@ impl<'a> VkEngine<'a> {
 
         let subpass_end_info = SubpassEndInfo::default();
 
+        let push_const = PushConstant {
+          camera_size: (surface_extent.width as _, surface_extent.height as _),
+        };
+
         unsafe {
           self
             .device
@@ -831,6 +832,14 @@ impl<'a> VkEngine<'a> {
             self.index_buffer.as_ref().unwrap().buffer,
             0,
             IndexType::UINT16,
+          );
+
+          self.device.cmd_push_constants(
+            command_buffer,
+            basic_pipeline.layout,
+            ShaderStageFlags::VERTEX,
+            0,
+            crate::as_bytes(&push_const),
           );
 
           self.device.cmd_draw_indexed(
@@ -887,11 +896,9 @@ impl Drop for VkEngine<'_> {
       self.swapchain_framebuffers.iter().for_each(|&framebuffer| {
         self.device.destroy_framebuffer(framebuffer, None);
       });
-    }
 
-    drop(mem::take(&mut self.basic_pipeline));
+      drop(mem::take(&mut self.basic_pipeline));
 
-    unsafe {
       self.swapchain_image_views.iter().for_each(|&image_view| {
         self.device.destroy_image_view(image_view, None);
       });

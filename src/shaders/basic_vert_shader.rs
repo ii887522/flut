@@ -11,7 +11,21 @@ use std::{ffi::CString, mem, rc::Rc};
 #[repr(C, align(4))]
 #[derive(Clone, Copy)]
 pub(crate) struct Instance {
-  pub(crate) color: (f32, f32, f32),
+  position: (f32, f32),
+  color: (f32, f32, f32),
+}
+
+impl Instance {
+  pub(crate) const fn new(position: (f32, f32), color: (u8, u8, u8)) -> Self {
+    Self {
+      position,
+      color: (
+        color.0 as f32 / 255.0,
+        color.1 as f32 / 255.0,
+        color.2 as f32 / 255.0,
+      ),
+    }
+  }
 }
 
 #[repr(C, align(8))]
@@ -77,6 +91,12 @@ impl<'a> BasicVertShader<'a> {
       },
       VertexInputAttributeDescription {
         location: 1,
+        binding: 1,
+        format: Format::R32G32_SFLOAT,
+        offset: mem::offset_of!(Instance, position) as _,
+      },
+      VertexInputAttributeDescription {
+        location: 2,
         binding: 1,
         format: Format::R32G32B32_SFLOAT,
         offset: mem::offset_of!(Instance, color) as _,

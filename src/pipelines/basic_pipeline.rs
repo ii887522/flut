@@ -9,15 +9,21 @@ use ash::{
     PipelineCreateFlags, PipelineInputAssemblyStateCreateInfo, PipelineLayout,
     PipelineLayoutCreateInfo, PipelineMultisampleStateCreateInfo,
     PipelineRasterizationStateCreateInfo, PipelineStageFlags, PipelineViewportStateCreateInfo,
-    PolygonMode, PrimitiveTopology, Rect2D, RenderPass, RenderPassCreateInfo2, SampleCountFlags,
-    SubpassDependency2, SubpassDescription2, Viewport,
+    PolygonMode, PrimitiveTopology, PushConstantRange, Rect2D, RenderPass, RenderPassCreateInfo2,
+    SampleCountFlags, ShaderStageFlags, SubpassDependency2, SubpassDescription2, Viewport,
   },
 };
-use std::rc::Rc;
+use std::{mem, rc::Rc};
+
+#[repr(C, align(8))]
+#[derive(Clone, Copy)]
+pub(crate) struct PushConstant {
+  pub(crate) camera_size: (f32, f32),
+}
 
 pub(crate) struct BasicPipeline {
   device: Rc<Device>,
-  layout: PipelineLayout,
+  pub(crate) layout: PipelineLayout,
   pub(crate) render_pass: RenderPass,
   pub(crate) pipeline: Pipeline,
 }
@@ -82,7 +88,17 @@ impl BasicPipeline {
       ..Default::default()
     };
 
-    let layout_create_info = PipelineLayoutCreateInfo::default();
+    let push_const_range = PushConstantRange {
+      stage_flags: ShaderStageFlags::VERTEX,
+      size: mem::size_of::<PushConstant>() as _,
+      ..Default::default()
+    };
+
+    let layout_create_info = PipelineLayoutCreateInfo {
+      push_constant_range_count: 1,
+      p_push_constant_ranges: &push_const_range,
+      ..Default::default()
+    };
 
     let layout = unsafe {
       device

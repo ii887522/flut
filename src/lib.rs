@@ -1,15 +1,20 @@
 #![deny(clippy::all, elided_lifetimes_in_paths)]
 #![allow(clippy::needless_lifetimes, clippy::too_many_arguments)]
 
+mod buffers;
 mod pipelines;
 mod shaders;
 mod string_slice;
 mod vk_engine;
-mod vk_buffer;
 
 use optarg2chain::optarg_fn;
 use sdl2::{event::Event, image::LoadSurface, surface::Surface};
+use std::{mem, ptr};
 use vk_engine::VkEngine;
+
+const fn as_bytes<T>(from: &T) -> &[u8] {
+  unsafe { &*ptr::slice_from_raw_parts(from as *const _ as *const _, mem::size_of::<T>()) }
+}
 
 #[optarg_fn(RunAppBuilder, call)]
 pub fn run_app<'a>(

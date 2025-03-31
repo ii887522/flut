@@ -3,5 +3,9 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 fn main() {
-  flut::run_app().title("Worm").call();
+  flut::run_app()
+    .title("Worm")
+    .width(768u32)
+    .height(768u32)
+    .call();
 }

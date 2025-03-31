@@ -11,21 +11,21 @@ use gpu_allocator::{
 };
 use std::{cell::RefCell, mem, rc::Rc};
 
-pub(super) struct VkBuffer<'a> {
+pub(crate) struct StaticBuffer<'a> {
   device: Rc<Device>,
   memory_allocator: Rc<RefCell<Allocator>>,
   staging_buffer: Buffer,
   staging_alloc: Allocation,
-  pub(super) buffer: Buffer,
+  pub(crate) buffer: Buffer,
   _alloc: Allocation,
-  pub(super) bind_staging_buffer_mem_info: BindBufferMemoryInfo<'a>,
-  pub(super) bind_buffer_mem_info: BindBufferMemoryInfo<'a>,
+  pub(crate) bind_staging_buffer_mem_info: BindBufferMemoryInfo<'a>,
+  pub(crate) bind_buffer_mem_info: BindBufferMemoryInfo<'a>,
   _buffer_copy: Box<BufferCopy2<'a>>,
-  pub(super) copy_buffer_info: CopyBufferInfo2<'a>,
+  pub(crate) copy_buffer_info: CopyBufferInfo2<'a>,
 }
 
-impl<'a> VkBuffer<'a> {
-  pub(super) fn new<T: Copy>(
+impl StaticBuffer<'_> {
+  pub(crate) fn new<T: Copy>(
     device: Rc<Device>,
     memory_allocator: Rc<RefCell<Allocator>>,
     name: &str,
@@ -75,8 +75,8 @@ impl<'a> VkBuffer<'a> {
       ..Default::default()
     };
 
-    let mut mapped_staging_buffer_alloc = staging_alloc.try_as_mapped_slab().unwrap();
-    presser::copy_from_slice_to_offset(data, &mut mapped_staging_buffer_alloc, 0).unwrap();
+    let mut mapped_staging_alloc = staging_alloc.try_as_mapped_slab().unwrap();
+    presser::copy_from_slice_to_offset(data, &mut mapped_staging_alloc, 0).unwrap();
 
     let buffer_create_info = BufferCreateInfo {
       size: mem::size_of_val(data) as _,
@@ -143,7 +143,7 @@ impl<'a> VkBuffer<'a> {
     }
   }
 
-  pub(super) fn drop_staging(&mut self) {
+  pub(crate) fn drop_staging(&mut self) {
     unsafe {
       self.device.destroy_buffer(self.staging_buffer, None);
     }
@@ -156,7 +156,7 @@ impl<'a> VkBuffer<'a> {
   }
 }
 
-impl Drop for VkBuffer<'_> {
+impl Drop for StaticBuffer<'_> {
   fn drop(&mut self) {
     unsafe { self.device.destroy_buffer(self.buffer, None) };
   }
