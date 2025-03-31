@@ -34,7 +34,7 @@ pub(crate) struct Vertex {
   pub(crate) position: (f32, f32),
 }
 
-pub(crate) struct BasicVertShader<'a> {
+pub(crate) struct RectVertShader<'a> {
   device: Rc<Device>,
   shader: ShaderModule,
   _entry_point_name: CString,
@@ -44,9 +44,9 @@ pub(crate) struct BasicVertShader<'a> {
   pub(crate) vert_input_stage_create_info: PipelineVertexInputStateCreateInfo<'a>,
 }
 
-impl<'a> BasicVertShader<'a> {
+impl RectVertShader<'_> {
   pub(crate) fn new(device: Rc<Device>) -> Self {
-    const SHADER_CODE: &[u8] = include_bytes!("../../target/shaders/basic.vert.spv");
+    const SHADER_CODE: &[u8] = include_bytes!("../../target/shaders/rect.vert.spv");
 
     let shader_create_info = ShaderModuleCreateInfo {
       code_size: SHADER_CODE.len(),
@@ -121,8 +121,10 @@ impl<'a> BasicVertShader<'a> {
       vert_input_stage_create_info,
     }
   }
+}
 
-  pub(crate) fn drop(&self) {
+impl Drop for RectVertShader<'_> {
+  fn drop(&mut self) {
     unsafe {
       self.device.destroy_shader_module(self.shader, None);
     }

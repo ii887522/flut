@@ -1,16 +1,14 @@
-use crate::shaders::{BasicFragShader, BasicVertShader};
+use crate::shaders::{RectFragShader, RectVertShader};
 use ash::{
   Device,
   vk::{
-    self, AccessFlags, AttachmentDescription2, AttachmentLoadOp, AttachmentReference2,
-    AttachmentStoreOp, ColorComponentFlags, CullModeFlags, DependencyFlags, Extent2D, Format,
-    FrontFace, GraphicsPipelineCreateInfo, ImageLayout, Offset2D, Pipeline, PipelineBindPoint,
-    PipelineCache, PipelineColorBlendAttachmentState, PipelineColorBlendStateCreateInfo,
+    ColorComponentFlags, CullModeFlags, Extent2D, FrontFace, GraphicsPipelineCreateInfo, Offset2D,
+    Pipeline, PipelineCache, PipelineColorBlendAttachmentState, PipelineColorBlendStateCreateInfo,
     PipelineCreateFlags, PipelineInputAssemblyStateCreateInfo, PipelineLayout,
     PipelineLayoutCreateInfo, PipelineMultisampleStateCreateInfo,
-    PipelineRasterizationStateCreateInfo, PipelineStageFlags, PipelineViewportStateCreateInfo,
-    PolygonMode, PrimitiveTopology, PushConstantRange, Rect2D, RenderPass, RenderPassCreateInfo2,
-    SampleCountFlags, ShaderStageFlags, SubpassDependency2, SubpassDescription2, Viewport,
+    PipelineRasterizationStateCreateInfo, PipelineViewportStateCreateInfo, PolygonMode,
+    PrimitiveTopology, PushConstantRange, Rect2D, RenderPass, SampleCountFlags, ShaderStageFlags,
+    Viewport,
   },
 };
 use std::{mem, rc::Rc};
@@ -21,21 +19,20 @@ pub(crate) struct PushConstant {
   pub(crate) camera_size: (f32, f32),
 }
 
-pub(crate) struct BasicPipeline {
+pub(crate) struct RectPipeline {
   device: Rc<Device>,
   pub(crate) layout: PipelineLayout,
-  pub(crate) render_pass: RenderPass,
   pub(crate) pipeline: Pipeline,
 }
 
-impl BasicPipeline {
+impl RectPipeline {
   pub(crate) fn new(
     device: Rc<Device>,
     surface_extent: Extent2D,
-    surface_format: Format,
-    vert_shader: &BasicVertShader<'_>,
-    frag_shader: &BasicFragShader<'_>,
-    base_pipeline: Option<&BasicPipeline>,
+    vert_shader: &RectVertShader<'_>,
+    frag_shader: &RectFragShader<'_>,
+    render_pass: RenderPass,
+    base_pipeline: Option<&RectPipeline>,
   ) -> Self {
     let input_assembly_state_create_info = PipelineInputAssemblyStateCreateInfo {
       topology: PrimitiveTopology::TRIANGLE_LIST,
@@ -106,58 +103,6 @@ impl BasicPipeline {
         .unwrap()
     };
 
-    let color_attachment_desc = AttachmentDescription2 {
-      format: surface_format,
-      samples: SampleCountFlags::TYPE_1,
-      load_op: AttachmentLoadOp::CLEAR,
-      store_op: AttachmentStoreOp::STORE,
-      stencil_load_op: AttachmentLoadOp::DONT_CARE,
-      stencil_store_op: AttachmentStoreOp::DONT_CARE,
-      initial_layout: ImageLayout::UNDEFINED,
-      final_layout: ImageLayout::PRESENT_SRC_KHR,
-      ..Default::default()
-    };
-
-    let color_attachment_ref = AttachmentReference2 {
-      attachment: 0,
-      layout: ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
-      ..Default::default()
-    };
-
-    let subpass_desc = SubpassDescription2 {
-      pipeline_bind_point: PipelineBindPoint::GRAPHICS,
-      color_attachment_count: 1,
-      p_color_attachments: &color_attachment_ref,
-      ..Default::default()
-    };
-
-    let subpass_dep = SubpassDependency2 {
-      src_subpass: vk::SUBPASS_EXTERNAL,
-      dst_subpass: 0,
-      src_stage_mask: PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
-      src_access_mask: AccessFlags::empty(),
-      dst_stage_mask: PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
-      dst_access_mask: AccessFlags::COLOR_ATTACHMENT_WRITE,
-      dependency_flags: DependencyFlags::BY_REGION,
-      ..Default::default()
-    };
-
-    let render_pass_create_info = RenderPassCreateInfo2 {
-      attachment_count: 1,
-      p_attachments: &color_attachment_desc,
-      subpass_count: 1,
-      p_subpasses: &subpass_desc,
-      dependency_count: 1,
-      p_dependencies: &subpass_dep,
-      ..Default::default()
-    };
-
-    let render_pass = unsafe {
-      device
-        .create_render_pass2(&render_pass_create_info, None)
-        .unwrap()
-    };
-
     let shader_stage_create_infos = [
       vert_shader.shader_stage_create_info,
       frag_shader.shader_stage_create_info,
@@ -198,17 +143,15 @@ impl BasicPipeline {
     Self {
       device,
       layout,
-      render_pass,
       pipeline: pipelines[0],
     }
   }
 }
 
-impl Drop for BasicPipeline {
+impl Drop for RectPipeline {
   fn drop(&mut self) {
     unsafe {
       self.device.destroy_pipeline(self.pipeline, None);
-      self.device.destroy_render_pass(self.render_pass, None);
       self.device.destroy_pipeline_layout(self.layout, None);
     }
   }

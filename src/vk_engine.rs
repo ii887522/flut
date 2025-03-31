@@ -1,24 +1,21 @@
-use crate::{
-  buffers::{StaticBuffer, StreamBuffer},
-  pipelines::{BasicPipeline, basic_pipeline::PushConstant},
-  shaders::{BasicFragShader, BasicInstance, BasicVertShader, BasicVertex},
-  string_slice::StringSlice,
-};
+use crate::{renderers::RectRenderer, string_slice::StringSlice};
 use ash::{
   Device, Entry, Instance,
   khr::{surface, swapchain},
   vk::{
-    self, ApplicationInfo, BufferUsageFlags, ClearColorValue, ClearValue, CommandBuffer,
+    self, AccessFlags, ApplicationInfo, AttachmentDescription2, AttachmentLoadOp,
+    AttachmentReference2, AttachmentStoreOp, ClearColorValue, ClearValue, CommandBuffer,
     CommandBufferAllocateInfo, CommandBufferBeginInfo, CommandBufferLevel, CommandBufferUsageFlags,
     CommandPool, CommandPoolCreateFlags, CommandPoolCreateInfo, CompositeAlphaFlagsKHR,
-    DeviceCreateInfo, DeviceQueueCreateInfo, DeviceQueueInfo2, Extent2D, Fence, FenceCreateFlags,
-    FenceCreateInfo, Framebuffer, FramebufferCreateInfo, Handle, Image, ImageAspectFlags,
-    ImageSubresourceRange, ImageUsageFlags, ImageView, ImageViewCreateInfo, ImageViewType,
-    IndexType, InstanceCreateFlags, InstanceCreateInfo, Offset2D, PhysicalDevice,
-    PhysicalDeviceProperties2, PhysicalDeviceType, PipelineBindPoint, PipelineStageFlags,
-    PresentInfoKHR, PresentModeKHR, Queue, QueueFamilyProperties2, QueueFlags, Rect2D,
-    RenderPassBeginInfo, Semaphore, SemaphoreCreateInfo, ShaderStageFlags, SharingMode, SubmitInfo,
-    SubpassBeginInfo, SubpassContents, SubpassEndInfo, SurfaceKHR, SwapchainCreateInfoKHR,
+    DependencyFlags, DeviceCreateInfo, DeviceQueueCreateInfo, DeviceQueueInfo2, Extent2D, Fence,
+    FenceCreateFlags, FenceCreateInfo, Framebuffer, FramebufferCreateInfo, Handle, Image,
+    ImageAspectFlags, ImageLayout, ImageSubresourceRange, ImageUsageFlags, ImageView,
+    ImageViewCreateInfo, ImageViewType, InstanceCreateFlags, InstanceCreateInfo, Offset2D,
+    PhysicalDevice, PhysicalDeviceProperties2, PhysicalDeviceType, PipelineBindPoint,
+    PipelineStageFlags, PresentInfoKHR, PresentModeKHR, Queue, QueueFamilyProperties2, QueueFlags,
+    Rect2D, RenderPass, RenderPassBeginInfo, RenderPassCreateInfo2, SampleCountFlags, Semaphore,
+    SemaphoreCreateInfo, SharingMode, SubmitInfo, SubpassBeginInfo, SubpassContents,
+    SubpassDependency2, SubpassDescription2, SubpassEndInfo, SurfaceKHR, SwapchainCreateInfoKHR,
     SwapchainKHR, ValidationFeatureEnableEXT, ValidationFeaturesEXT,
   },
 };
@@ -31,24 +28,6 @@ use std::{cell::RefCell, ffi::c_void, mem, rc::Rc};
 
 const MAX_IN_FLIGHT_FRAME_COUNT: usize = 3;
 const MIN_ALLOC_SIZE: u64 = 4 * 1024 * 1024;
-const INSTANCES: &[BasicInstance] = &[BasicInstance::new((384.0, 384.0), (243, 125, 121))];
-
-const VERTICES: &[BasicVertex] = &[
-  BasicVertex {
-    position: (0.0, 0.0),
-  },
-  BasicVertex {
-    position: (0.05, 0.0),
-  },
-  BasicVertex {
-    position: (0.05, 0.05),
-  },
-  BasicVertex {
-    position: (0.0, 0.05),
-  },
-];
-
-const INDICES: &[u16] = &[0, 1, 2, 2, 3, 0];
 
 pub(super) struct VkEngine<'a> {
   window: Window,
@@ -63,12 +42,8 @@ pub(super) struct VkEngine<'a> {
   graphics_queue: Queue,
   present_queue: Queue,
   swapchain_device: swapchain::Device,
-  basic_vert_shader: BasicVertShader<'a>,
-  basic_frag_shader: BasicFragShader<'a>,
   memory_allocator: Option<Rc<RefCell<Allocator>>>,
-  inst_buffer: Option<StreamBuffer<'a>>,
-  vert_buffer: Option<StaticBuffer<'a>>,
-  index_buffer: Option<StaticBuffer<'a>>,
+  rect_renderer: Option<RectRenderer<'a>>,
   command_pool: CommandPool,
   image_avail_semaphores: Vec<Semaphore>,
   render_done_semaphores: Vec<Semaphore>,
@@ -76,7 +51,7 @@ pub(super) struct VkEngine<'a> {
   swapchain: SwapchainKHR,
   swapchain_images: Vec<Image>,
   swapchain_image_views: Vec<ImageView>,
-  basic_pipeline: Option<BasicPipeline>,
+  render_pass: RenderPass,
   swapchain_framebuffers: Vec<Framebuffer>,
   swapchain_command_buffers: Vec<CommandBuffer>,
   frame_index: usize,
@@ -313,9 +288,6 @@ impl<'a> VkEngine<'a> {
 
     let swapchain_device = swapchain::Device::new(&instance, &device);
 
-    let basic_vert_shader = BasicVertShader::new(device.clone());
-    let basic_frag_shader = BasicFragShader::new(device.clone());
-
     let memory_allocator = Rc::new(RefCell::new(
       Allocator::new(&AllocatorCreateDesc {
         instance: instance.clone(),
@@ -328,41 +300,16 @@ impl<'a> VkEngine<'a> {
       .unwrap(),
     ));
 
-    let mut inst_buffer = StreamBuffer::new(
-      device.clone(),
-      memory_allocator.clone(),
-      "inst_buffer",
-      mem::size_of_val(INSTANCES) as _,
-      BufferUsageFlags::VERTEX_BUFFER,
-    );
-
-    let mut mapped_inst_alloc = inst_buffer.alloc.try_as_mapped_slab().unwrap();
-    presser::copy_from_slice_to_offset(INSTANCES, &mut mapped_inst_alloc, 0).unwrap();
-
-    let vert_buffer = StaticBuffer::new(
-      device.clone(),
-      memory_allocator.clone(),
-      "vert_buffer",
-      BufferUsageFlags::VERTEX_BUFFER,
-      VERTICES,
-    );
-
-    let index_buffer = StaticBuffer::new(
-      device.clone(),
-      memory_allocator.clone(),
-      "index_buffer",
-      BufferUsageFlags::INDEX_BUFFER,
-      INDICES,
-    );
+    let rect_renderer = RectRenderer::new(device.clone(), memory_allocator.clone());
 
     unsafe {
       device
         .bind_buffer_memory2(&[
-          inst_buffer.bind_buffer_mem_info,
-          vert_buffer.bind_staging_buffer_mem_info,
-          vert_buffer.bind_buffer_mem_info,
-          index_buffer.bind_staging_buffer_mem_info,
-          index_buffer.bind_buffer_mem_info,
+          rect_renderer.inst_buffer.bind_buffer_mem_info,
+          rect_renderer.vert_buffer.bind_staging_buffer_mem_info,
+          rect_renderer.vert_buffer.bind_buffer_mem_info,
+          rect_renderer.index_buffer.bind_staging_buffer_mem_info,
+          rect_renderer.index_buffer.bind_buffer_mem_info,
         ])
         .unwrap();
     }
@@ -408,8 +355,16 @@ impl<'a> VkEngine<'a> {
         .begin_command_buffer(staging_command_buffer, &staging_command_buffer_begin_info)
         .unwrap();
 
-      device.cmd_copy_buffer2(staging_command_buffer, &vert_buffer.copy_buffer_info);
-      device.cmd_copy_buffer2(staging_command_buffer, &index_buffer.copy_buffer_info);
+      device.cmd_copy_buffer2(
+        staging_command_buffer,
+        &rect_renderer.vert_buffer.copy_buffer_info,
+      );
+
+      device.cmd_copy_buffer2(
+        staging_command_buffer,
+        &rect_renderer.index_buffer.copy_buffer_info,
+      );
+
       device.end_command_buffer(staging_command_buffer).unwrap();
 
       device
@@ -472,12 +427,8 @@ impl<'a> VkEngine<'a> {
       graphics_queue,
       present_queue,
       swapchain_device,
-      basic_vert_shader,
-      basic_frag_shader,
+      rect_renderer: Some(rect_renderer),
       memory_allocator: Some(memory_allocator),
-      inst_buffer: Some(inst_buffer),
-      vert_buffer: Some(vert_buffer),
-      index_buffer: Some(index_buffer),
       command_pool,
       image_avail_semaphores,
       render_done_semaphores,
@@ -485,7 +436,7 @@ impl<'a> VkEngine<'a> {
       swapchain: SwapchainKHR::null(),
       swapchain_images: vec![],
       swapchain_image_views: vec![],
-      basic_pipeline: None,
+      render_pass: RenderPass::null(),
       swapchain_framebuffers: vec![],
       swapchain_command_buffers: vec![],
       frame_index: 0,
@@ -497,8 +448,9 @@ impl<'a> VkEngine<'a> {
     unsafe {
       this.device.queue_wait_idle(graphics_queue).unwrap();
       this.device.destroy_command_pool(staging_command_pool, None);
-      this.index_buffer.as_mut().unwrap().drop_staging();
-      this.vert_buffer.as_mut().unwrap().drop_staging();
+      let rect_renderer = this.rect_renderer.as_mut().unwrap();
+      rect_renderer.index_buffer.drop_staging();
+      rect_renderer.vert_buffer.drop_staging();
     }
 
     this
@@ -645,6 +597,8 @@ impl<'a> VkEngine<'a> {
         self.device.destroy_framebuffer(framebuffer, None);
       });
 
+      self.device.destroy_render_pass(self.render_pass, None);
+
       self.swapchain_image_views.iter().for_each(|&image_view| {
         self.device.destroy_image_view(image_view, None);
       });
@@ -712,23 +666,68 @@ impl<'a> VkEngine<'a> {
     }
     .collect::<Vec<_>>();
 
-    let basic_pipeline = BasicPipeline::new(
-      self.device.clone(),
-      surface_extent,
-      surface_format.format,
-      &self.basic_vert_shader,
-      &self.basic_frag_shader,
-      self.basic_pipeline.as_ref(),
-    );
+    let color_attachment_desc = AttachmentDescription2 {
+      format: surface_format.format,
+      samples: SampleCountFlags::TYPE_1,
+      load_op: AttachmentLoadOp::CLEAR,
+      store_op: AttachmentStoreOp::STORE,
+      stencil_load_op: AttachmentLoadOp::DONT_CARE,
+      stencil_store_op: AttachmentStoreOp::DONT_CARE,
+      initial_layout: ImageLayout::UNDEFINED,
+      final_layout: ImageLayout::PRESENT_SRC_KHR,
+      ..Default::default()
+    };
 
-    drop(mem::take(&mut self.basic_pipeline));
+    let color_attachment_ref = AttachmentReference2 {
+      attachment: 0,
+      layout: ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
+      ..Default::default()
+    };
+
+    let subpass_desc = SubpassDescription2 {
+      pipeline_bind_point: PipelineBindPoint::GRAPHICS,
+      color_attachment_count: 1,
+      p_color_attachments: &color_attachment_ref,
+      ..Default::default()
+    };
+
+    let subpass_dep = SubpassDependency2 {
+      src_subpass: vk::SUBPASS_EXTERNAL,
+      dst_subpass: 0,
+      src_stage_mask: PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
+      src_access_mask: AccessFlags::empty(),
+      dst_stage_mask: PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
+      dst_access_mask: AccessFlags::COLOR_ATTACHMENT_WRITE,
+      dependency_flags: DependencyFlags::BY_REGION,
+      ..Default::default()
+    };
+
+    let render_pass_create_info = RenderPassCreateInfo2 {
+      attachment_count: 1,
+      p_attachments: &color_attachment_desc,
+      subpass_count: 1,
+      p_subpasses: &subpass_desc,
+      dependency_count: 1,
+      p_dependencies: &subpass_dep,
+      ..Default::default()
+    };
+
+    let render_pass = unsafe {
+      self
+        .device
+        .create_render_pass2(&render_pass_create_info, None)
+        .unwrap()
+    };
+
+    let rect_renderer = self.rect_renderer.as_mut().unwrap();
+    rect_renderer.on_swapchain_suboptimal(surface_extent, render_pass);
 
     let swapchain_framebuffers = unsafe {
       swapchain_image_views
         .iter()
         .map(|&image_view| {
           let framebuffer_create_info = FramebufferCreateInfo {
-            render_pass: basic_pipeline.render_pass,
+            render_pass,
             attachment_count: 1,
             p_attachments: &image_view,
             width: surface_extent.width,
@@ -775,7 +774,7 @@ impl<'a> VkEngine<'a> {
         };
 
         let render_pass_begin_info = RenderPassBeginInfo {
-          render_pass: basic_pipeline.render_pass,
+          render_pass,
           framebuffer,
           render_area: Rect2D {
             offset: Offset2D { x: 0, y: 0 },
@@ -793,10 +792,6 @@ impl<'a> VkEngine<'a> {
 
         let subpass_end_info = SubpassEndInfo::default();
 
-        let push_const = PushConstant {
-          camera_size: (surface_extent.width as _, surface_extent.height as _),
-        };
-
         unsafe {
           self
             .device
@@ -809,47 +804,7 @@ impl<'a> VkEngine<'a> {
             &subpass_begin_info,
           );
 
-          self.device.cmd_bind_pipeline(
-            command_buffer,
-            PipelineBindPoint::GRAPHICS,
-            basic_pipeline.pipeline,
-          );
-
-          self.device.cmd_bind_vertex_buffers2(
-            command_buffer,
-            0,
-            &[
-              self.vert_buffer.as_ref().unwrap().buffer,
-              self.inst_buffer.as_ref().unwrap().buffer,
-            ],
-            &[0, 0],
-            None,
-            None,
-          );
-
-          self.device.cmd_bind_index_buffer(
-            command_buffer,
-            self.index_buffer.as_ref().unwrap().buffer,
-            0,
-            IndexType::UINT16,
-          );
-
-          self.device.cmd_push_constants(
-            command_buffer,
-            basic_pipeline.layout,
-            ShaderStageFlags::VERTEX,
-            0,
-            crate::as_bytes(&push_const),
-          );
-
-          self.device.cmd_draw_indexed(
-            command_buffer,
-            INDICES.len() as _,
-            INSTANCES.len() as _,
-            0,
-            0,
-            0,
-          );
+          rect_renderer.record_commands(command_buffer, surface_extent);
 
           self
             .device
@@ -862,7 +817,7 @@ impl<'a> VkEngine<'a> {
     self.swapchain = swapchain;
     self.swapchain_images = swapchain_images;
     self.swapchain_image_views = swapchain_image_views;
-    self.basic_pipeline = Some(basic_pipeline);
+    self.render_pass = render_pass;
     self.swapchain_framebuffers = swapchain_framebuffers;
     self.swapchain_command_buffers = swapchain_command_buffers;
   }
@@ -886,18 +841,13 @@ impl Drop for VkEngine<'_> {
       });
 
       self.device.destroy_command_pool(self.command_pool, None);
-      drop(mem::take(&mut self.index_buffer));
-      drop(mem::take(&mut self.vert_buffer));
-      drop(mem::take(&mut self.inst_buffer));
+      drop(mem::take(&mut self.rect_renderer));
       drop(mem::take(&mut self.memory_allocator));
-      self.basic_frag_shader.drop();
-      self.basic_vert_shader.drop();
+      self.device.destroy_render_pass(self.render_pass, None);
 
       self.swapchain_framebuffers.iter().for_each(|&framebuffer| {
         self.device.destroy_framebuffer(framebuffer, None);
       });
-
-      drop(mem::take(&mut self.basic_pipeline));
 
       self.swapchain_image_views.iter().for_each(|&image_view| {
         self.device.destroy_image_view(image_view, None);

@@ -4,16 +4,16 @@ use ash::{
 };
 use std::{ffi::CString, rc::Rc};
 
-pub(crate) struct BasicFragShader<'a> {
+pub(crate) struct RectFragShader<'a> {
   device: Rc<Device>,
   shader: ShaderModule,
   _entry_point_name: CString,
   pub(crate) shader_stage_create_info: PipelineShaderStageCreateInfo<'a>,
 }
 
-impl<'a> BasicFragShader<'a> {
+impl RectFragShader<'_> {
   pub(crate) fn new(device: Rc<Device>) -> Self {
-    const SHADER_CODE: &[u8] = include_bytes!("../../target/shaders/basic.frag.spv");
+    const SHADER_CODE: &[u8] = include_bytes!("../../target/shaders/rect.frag.spv");
 
     let shader_create_info = ShaderModuleCreateInfo {
       code_size: SHADER_CODE.len(),
@@ -43,8 +43,10 @@ impl<'a> BasicFragShader<'a> {
       shader_stage_create_info,
     }
   }
+}
 
-  pub(crate) fn drop(&self) {
+impl Drop for RectFragShader<'_> {
+  fn drop(&mut self) {
     unsafe {
       self.device.destroy_shader_module(self.shader, None);
     }

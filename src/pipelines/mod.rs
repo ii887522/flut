@@ -1,3 +1,4 @@
-pub(super) mod basic_pipeline;
+pub(super) mod rect_pipeline;
 
-pub(super) use basic_pipeline::BasicPipeline;
+pub(super) use rect_pipeline::PushConstant as RectPushConstant;
+pub(super) use rect_pipeline::RectPipeline;
