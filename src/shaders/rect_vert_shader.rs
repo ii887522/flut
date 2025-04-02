@@ -8,25 +8,7 @@ use ash::{
 };
 use std::{ffi::CString, mem, rc::Rc};
 
-#[repr(C, align(4))]
-#[derive(Clone, Copy)]
-pub(crate) struct Instance {
-  position: (f32, f32),
-  color: (f32, f32, f32),
-}
-
-impl Instance {
-  pub(crate) const fn new(position: (f32, f32), color: (u8, u8, u8)) -> Self {
-    Self {
-      position,
-      color: (
-        color.0 as f32 / 255.0,
-        color.1 as f32 / 255.0,
-        color.2 as f32 / 255.0,
-      ),
-    }
-  }
-}
+use crate::models::Rect;
 
 #[repr(C, align(8))]
 #[derive(Clone, Copy)]
@@ -77,7 +59,7 @@ impl RectVertShader<'_> {
       },
       VertexInputBindingDescription {
         binding: 1,
-        stride: size_of::<Instance>() as _,
+        stride: size_of::<Rect>() as _,
         input_rate: VertexInputRate::INSTANCE,
       },
     ];
@@ -93,13 +75,13 @@ impl RectVertShader<'_> {
         location: 1,
         binding: 1,
         format: Format::R32G32_SFLOAT,
-        offset: mem::offset_of!(Instance, position) as _,
+        offset: mem::offset_of!(Rect, position) as _,
       },
       VertexInputAttributeDescription {
         location: 2,
         binding: 1,
         format: Format::R32G32B32_SFLOAT,
-        offset: mem::offset_of!(Instance, color) as _,
+        offset: mem::offset_of!(Rect, color) as _,
       },
     ];
 

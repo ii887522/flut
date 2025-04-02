@@ -1,7 +1,8 @@
 use crate::{
   buffers::{StaticBuffer, StreamBuffer},
+  models::Rect,
   pipelines::{RectPipeline, RectPushConstant},
-  shaders::{RectFragShader, RectInstance, RectVertShader, RectVertex},
+  shaders::{RectFragShader, RectVertShader, RectVertex},
 };
 use ash::{
   Device,
@@ -30,7 +31,7 @@ const VERTICES: &[RectVertex] = &[
 
 const INDICES: &[u16] = &[0, 1, 2, 2, 3, 0];
 
-pub(crate) struct RectRenderer<'a> {
+pub(crate) struct RectBatch<'a> {
   device: Rc<Device>,
   vert_shader: RectVertShader<'a>,
   frag_shader: RectFragShader<'a>,
@@ -38,25 +39,21 @@ pub(crate) struct RectRenderer<'a> {
   pub(crate) vert_buffer: StaticBuffer<'a>,
   pub(crate) index_buffer: StaticBuffer<'a>,
   pub(crate) pipeline: Option<RectPipeline>,
-  instance_count: u32,
+  rect_count: u32,
 }
 
-impl RectRenderer<'_> {
+impl RectBatch<'_> {
   pub(crate) fn new(device: Rc<Device>, memory_allocator: Rc<RefCell<Allocator>>) -> Self {
     let vert_shader = RectVertShader::new(device.clone());
     let frag_shader = RectFragShader::new(device.clone());
-    let instances = vec![RectInstance::new((384.0, 384.0), (243, 125, 121))];
 
-    let mut inst_buffer = StreamBuffer::new(
+    let inst_buffer = StreamBuffer::new(
       device.clone(),
       memory_allocator.clone(),
       "rect_inst_buffer",
-      mem::size_of_val(&instances) as _,
+      mem::size_of::<Rect>() as _,
       BufferUsageFlags::VERTEX_BUFFER,
     );
-
-    let mut mapped_inst_alloc = inst_buffer.alloc.try_as_mapped_slab().unwrap();
-    presser::copy_from_slice_to_offset(&instances, &mut mapped_inst_alloc, 0).unwrap();
 
     let vert_buffer = StaticBuffer::new(
       device.clone(),
@@ -82,7 +79,7 @@ impl RectRenderer<'_> {
       vert_buffer,
       index_buffer,
       pipeline: None,
-      instance_count: instances.len() as _,
+      rect_count: 0,
     }
   }
 
@@ -104,7 +101,29 @@ impl RectRenderer<'_> {
     self.pipeline = Some(rect_pipeline);
   }
 
-  pub(crate) fn record_commands(&self, command_buffer: CommandBuffer, surface_extent: Extent2D) {
+  pub(crate) fn record_init_commands(&self, command_buffer: CommandBuffer) {
+    unsafe {
+      self.device.cmd_copy_buffer(
+        command_buffer,
+        self.vert_buffer.staging_buffer,
+        self.vert_buffer.buffer,
+        &[self.vert_buffer.buffer_copy],
+      );
+
+      self.device.cmd_copy_buffer(
+        command_buffer,
+        self.index_buffer.staging_buffer,
+        self.index_buffer.buffer,
+        &[self.index_buffer.buffer_copy],
+      );
+    }
+  }
+
+  pub(crate) fn record_draw_commands(
+    &self,
+    command_buffer: CommandBuffer,
+    surface_extent: Extent2D,
+  ) {
     let rect_push_const = RectPushConstant {
       camera_size: (surface_extent.width as _, surface_extent.height as _),
     };
@@ -140,14 +159,15 @@ impl RectRenderer<'_> {
         crate::as_bytes(&rect_push_const),
       );
 
-      self.device.cmd_draw_indexed(
-        command_buffer,
-        INDICES.len() as _,
-        self.instance_count,
-        0,
-        0,
-        0,
-      );
+      self
+        .device
+        .cmd_draw_indexed(command_buffer, INDICES.len() as _, self.rect_count, 0, 0, 0);
     }
+  }
+
+  pub(crate) fn add(&mut self, rect: Rect) {
+    let mut mapped_inst_alloc = self.inst_buffer.alloc.try_as_mapped_slab().unwrap();
+    presser::copy_to_offset(&rect, &mut mapped_inst_alloc, 0).unwrap();
+    self.rect_count += 1;
   }
 }

@@ -1,3 +1,4 @@
+use crate::Engine;
 use sdl2::event::Event;
 
 pub struct AppConfig {
@@ -20,7 +21,7 @@ impl Default for AppConfig {
 
 pub trait App {
   fn get_config(&self) -> AppConfig;
+  fn init(&mut self, _engine: &mut Engine<'_>) {}
   fn process_event(&mut self, _event: Event) {}
-  fn update(&mut self, _dt: f32) {}
-  fn draw(&self) {}
+  fn update(&mut self, _dt: f32, _engine: &mut Engine<'_>) {}
 }

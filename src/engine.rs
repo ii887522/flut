@@ -1,4 +1,4 @@
-use crate::{renderers::RectRenderer, string_slice::StringSlice};
+use crate::{batches::RectBatch, models::Rect, string_slice::StringSlice};
 use ash::{
   Device, Entry, Instance,
   khr::{surface, swapchain},
@@ -26,10 +26,10 @@ use gpu_allocator::{
 use sdl2::video::Window;
 use std::{cell::RefCell, ffi::c_void, mem, rc::Rc};
 
-const MAX_IN_FLIGHT_FRAME_COUNT: usize = 3;
+const MAX_IN_FLIGHT_FRAME_COUNT: u32 = 3;
 const MIN_ALLOC_SIZE: u64 = 4 * 1024 * 1024;
 
-pub(super) struct VkEngine<'a> {
+pub struct Engine<'a> {
   window: Window,
   _entry: Entry,
   instance: Instance,
@@ -43,8 +43,9 @@ pub(super) struct VkEngine<'a> {
   present_queue: Queue,
   swapchain_device: swapchain::Device,
   memory_allocator: Option<Rc<RefCell<Allocator>>>,
-  rect_renderer: Option<RectRenderer<'a>>,
+  rect_batch: Option<RectBatch<'a>>,
   command_pool: CommandPool,
+  command_buffers: Vec<CommandBuffer>,
   image_avail_semaphores: Vec<Semaphore>,
   render_done_semaphores: Vec<Semaphore>,
   in_flight_fences: Vec<Fence>,
@@ -53,11 +54,11 @@ pub(super) struct VkEngine<'a> {
   swapchain_image_views: Vec<ImageView>,
   render_pass: RenderPass,
   swapchain_framebuffers: Vec<Framebuffer>,
-  swapchain_command_buffers: Vec<CommandBuffer>,
+  surface_extent: Extent2D,
   frame_index: usize,
 }
 
-impl<'a> VkEngine<'a> {
+impl<'a> Engine<'a> {
   pub(super) fn new(window: Window, prefer_dgpu: bool) -> Self {
     #[cfg(all(not(debug_assertions), target_os = "macos"))]
     let entry = ash_molten::load();
@@ -78,9 +79,8 @@ impl<'a> VkEngine<'a> {
     enabled_instance_exts.extend([
       vk::EXT_DEBUG_UTILS_NAME.to_str().unwrap(),
       vk::EXT_VALIDATION_FEATURES_NAME.to_str().unwrap(),
+      vk::KHR_PORTABILITY_ENUMERATION_NAME.to_str().unwrap(),
     ]);
-
-    enabled_instance_exts.push(vk::KHR_PORTABILITY_ENUMERATION_NAME.to_str().unwrap());
 
     let enabled_instance_exts = StringSlice::from(enabled_instance_exts.as_slice());
 
@@ -309,84 +309,23 @@ impl<'a> VkEngine<'a> {
       .unwrap(),
     ));
 
-    let rect_renderer = RectRenderer::new(device.clone(), memory_allocator.clone());
+    let rect_batch = RectBatch::new(device.clone(), memory_allocator.clone());
 
     unsafe {
       device
         .bind_buffer_memory2(&[
-          rect_renderer.inst_buffer.bind_buffer_mem_info,
-          rect_renderer.vert_buffer.bind_staging_buffer_mem_info,
-          rect_renderer.vert_buffer.bind_buffer_mem_info,
-          rect_renderer.index_buffer.bind_staging_buffer_mem_info,
-          rect_renderer.index_buffer.bind_buffer_mem_info,
+          rect_batch.inst_buffer.bind_buffer_mem_info,
+          rect_batch.vert_buffer.bind_staging_buffer_mem_info,
+          rect_batch.vert_buffer.bind_buffer_mem_info,
+          rect_batch.index_buffer.bind_staging_buffer_mem_info,
+          rect_batch.index_buffer.bind_buffer_mem_info,
         ])
         .unwrap();
     }
 
-    let staging_command_pool_create_info = CommandPoolCreateInfo {
-      flags: CommandPoolCreateFlags::TRANSIENT,
-      queue_family_index: graphics_queue_family_index as _, // Graphics queue family implicitly supports transfer operations
-      ..Default::default()
-    };
-
-    let staging_command_pool = unsafe {
-      device
-        .create_command_pool(&staging_command_pool_create_info, None)
-        .unwrap()
-    };
-
-    let staging_command_buffer_alloc_info = CommandBufferAllocateInfo {
-      command_pool: staging_command_pool,
-      level: CommandBufferLevel::PRIMARY,
-      command_buffer_count: 1,
-      ..Default::default()
-    };
-
-    let staging_command_buffer = unsafe {
-      device
-        .allocate_command_buffers(&staging_command_buffer_alloc_info)
-        .unwrap()[0]
-    };
-
-    let staging_command_buffer_begin_info = CommandBufferBeginInfo {
-      flags: CommandBufferUsageFlags::ONE_TIME_SUBMIT,
-      ..Default::default()
-    };
-
-    let queue_submit_info = SubmitInfo {
-      command_buffer_count: 1,
-      p_command_buffers: &staging_command_buffer,
-      ..Default::default()
-    };
-
-    unsafe {
-      device
-        .begin_command_buffer(staging_command_buffer, &staging_command_buffer_begin_info)
-        .unwrap();
-
-      device.cmd_copy_buffer(
-        staging_command_buffer,
-        rect_renderer.vert_buffer.staging_buffer,
-        rect_renderer.vert_buffer.buffer,
-        &[rect_renderer.vert_buffer.buffer_copy],
-      );
-
-      device.cmd_copy_buffer(
-        staging_command_buffer,
-        rect_renderer.index_buffer.staging_buffer,
-        rect_renderer.index_buffer.buffer,
-        &[rect_renderer.index_buffer.buffer_copy],
-      );
-
-      device.end_command_buffer(staging_command_buffer).unwrap();
-
-      device
-        .queue_submit(graphics_queue, &[queue_submit_info], Fence::null())
-        .unwrap();
-    }
-
     let command_pool_create_info = CommandPoolCreateInfo {
-      queue_family_index: graphics_queue_family_index as _,
+      flags: CommandPoolCreateFlags::TRANSIENT | CommandPoolCreateFlags::RESET_COMMAND_BUFFER,
+      queue_family_index: graphics_queue_family_index as _, // Graphics queue family implicitly supports transfer operations
       ..Default::default()
     };
 
@@ -395,6 +334,45 @@ impl<'a> VkEngine<'a> {
         .create_command_pool(&command_pool_create_info, None)
         .unwrap()
     };
+
+    let command_buffer_alloc_info = CommandBufferAllocateInfo {
+      command_pool,
+      level: CommandBufferLevel::PRIMARY,
+      command_buffer_count: MAX_IN_FLIGHT_FRAME_COUNT,
+      ..Default::default()
+    };
+
+    let command_buffers = unsafe {
+      device
+        .allocate_command_buffers(&command_buffer_alloc_info)
+        .unwrap()
+    };
+
+    let command_buffer_begin_info = CommandBufferBeginInfo {
+      flags: CommandBufferUsageFlags::ONE_TIME_SUBMIT,
+      ..Default::default()
+    };
+
+    let queue_submit_info = SubmitInfo {
+      command_buffer_count: 1,
+      p_command_buffers: command_buffers.as_ptr(),
+      ..Default::default()
+    };
+
+    let command_buffer = command_buffers[0];
+
+    unsafe {
+      device
+        .begin_command_buffer(command_buffer, &command_buffer_begin_info)
+        .unwrap();
+
+      rect_batch.record_init_commands(command_buffer);
+      device.end_command_buffer(command_buffer).unwrap();
+
+      device
+        .queue_submit(graphics_queue, &[queue_submit_info], Fence::null())
+        .unwrap();
+    }
 
     let (image_avail_semaphores, (render_done_semaphores, in_flight_fences)): (
       Vec<Semaphore>,
@@ -440,9 +418,10 @@ impl<'a> VkEngine<'a> {
       graphics_queue,
       present_queue,
       swapchain_device,
-      rect_renderer: Some(rect_renderer),
+      rect_batch: Some(rect_batch),
       memory_allocator: Some(memory_allocator),
       command_pool,
+      command_buffers,
       image_avail_semaphores,
       render_done_semaphores,
       in_flight_fences,
@@ -451,7 +430,7 @@ impl<'a> VkEngine<'a> {
       swapchain_image_views: vec![],
       render_pass: RenderPass::null(),
       swapchain_framebuffers: vec![],
-      swapchain_command_buffers: vec![],
+      surface_extent: Extent2D::default(),
       frame_index: 0,
     };
 
@@ -460,10 +439,9 @@ impl<'a> VkEngine<'a> {
 
     unsafe {
       this.device.queue_wait_idle(graphics_queue).unwrap();
-      this.device.destroy_command_pool(staging_command_pool, None);
-      let rect_renderer = this.rect_renderer.as_mut().unwrap();
-      rect_renderer.index_buffer.drop_staging();
-      rect_renderer.vert_buffer.drop_staging();
+      let rect_batch = this.rect_batch.as_mut().unwrap();
+      rect_batch.index_buffer.drop_staging();
+      rect_batch.vert_buffer.drop_staging();
     }
 
     this
@@ -471,9 +449,10 @@ impl<'a> VkEngine<'a> {
 
   pub(super) fn draw(&mut self) {
     unsafe {
-      let in_flight_fence = self.in_flight_fences[self.frame_index];
+      let command_buffer = self.command_buffers[self.frame_index];
       let image_avail_semaphore = self.image_avail_semaphores[self.frame_index];
       let render_done_semaphore = self.render_done_semaphores[self.frame_index];
+      let in_flight_fence = self.in_flight_fences[self.frame_index];
 
       self
         .device
@@ -495,16 +474,69 @@ impl<'a> VkEngine<'a> {
           Err(err) => panic!("{err}"),
         };
 
+      let command_buffer_begin_info = CommandBufferBeginInfo {
+        flags: CommandBufferUsageFlags::ONE_TIME_SUBMIT,
+        ..Default::default()
+      };
+
+      let swapchain_framebuffer = self.swapchain_framebuffers[swapchain_image_index as usize];
+
+      let clear_value = ClearValue {
+        color: ClearColorValue {
+          float32: [0.0, 0.0, 0.0, 1.0],
+        },
+      };
+
+      let render_pass_begin_info = RenderPassBeginInfo {
+        render_pass: self.render_pass,
+        framebuffer: swapchain_framebuffer,
+        render_area: Rect2D {
+          offset: Offset2D { x: 0, y: 0 },
+          extent: self.surface_extent,
+        },
+        clear_value_count: 1,
+        p_clear_values: &clear_value,
+        ..Default::default()
+      };
+
+      let subpass_begin_info = SubpassBeginInfo {
+        contents: SubpassContents::INLINE,
+        ..Default::default()
+      };
+
+      let subpass_end_info = SubpassEndInfo::default();
+
+      self
+        .device
+        .begin_command_buffer(command_buffer, &command_buffer_begin_info)
+        .unwrap();
+
+      self.device.cmd_begin_render_pass2(
+        command_buffer,
+        &render_pass_begin_info,
+        &subpass_begin_info,
+      );
+
+      self
+        .rect_batch
+        .as_ref()
+        .unwrap()
+        .record_draw_commands(command_buffer, self.surface_extent);
+
+      self
+        .device
+        .cmd_end_render_pass2(command_buffer, &subpass_end_info);
+
+      self.device.end_command_buffer(command_buffer).unwrap();
       self.device.reset_fences(&[in_flight_fence]).unwrap();
       let wait_dst_stage_mask = PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT;
-      let swapchain_command_buffer = self.swapchain_command_buffers[swapchain_image_index as usize];
 
       let queue_submit_info = SubmitInfo {
         wait_semaphore_count: 1,
         p_wait_semaphores: &image_avail_semaphore,
         p_wait_dst_stage_mask: &wait_dst_stage_mask,
         command_buffer_count: 1,
-        p_command_buffers: &swapchain_command_buffer,
+        p_command_buffers: &command_buffer,
         signal_semaphore_count: 1,
         p_signal_semaphores: &render_done_semaphore,
         ..Default::default()
@@ -599,12 +631,6 @@ impl<'a> VkEngine<'a> {
 
     unsafe {
       self.device.device_wait_idle().unwrap();
-
-      if !self.swapchain_command_buffers.is_empty() {
-        self
-          .device
-          .free_command_buffers(self.command_pool, &self.swapchain_command_buffers);
-      }
 
       self.swapchain_framebuffers.iter().for_each(|&framebuffer| {
         self.device.destroy_framebuffer(framebuffer, None);
@@ -732,8 +758,8 @@ impl<'a> VkEngine<'a> {
         .unwrap()
     };
 
-    let rect_renderer = self.rect_renderer.as_mut().unwrap();
-    rect_renderer.on_swapchain_suboptimal(surface_extent, render_pass);
+    let rect_batch = self.rect_batch.as_mut().unwrap();
+    rect_batch.on_swapchain_suboptimal(surface_extent, render_pass);
 
     let swapchain_framebuffers = unsafe {
       swapchain_image_views
@@ -757,86 +783,20 @@ impl<'a> VkEngine<'a> {
         .collect::<Vec<_>>()
     };
 
-    let swapchain_command_buffer_alloc_info = CommandBufferAllocateInfo {
-      command_pool: self.command_pool,
-      level: CommandBufferLevel::PRIMARY,
-      command_buffer_count: swapchain_framebuffers.len() as _,
-      ..Default::default()
-    };
-
-    let swapchain_command_buffers = unsafe {
-      self
-        .device
-        .allocate_command_buffers(&swapchain_command_buffer_alloc_info)
-        .unwrap()
-    };
-
-    let clear_value = ClearValue {
-      color: ClearColorValue {
-        float32: [0.0, 0.0, 0.0, 1.0],
-      },
-    };
-
-    swapchain_command_buffers
-      .iter()
-      .zip(swapchain_framebuffers.iter())
-      .for_each(|(&command_buffer, &framebuffer)| {
-        let command_buffer_begin_info = CommandBufferBeginInfo {
-          flags: CommandBufferUsageFlags::SIMULTANEOUS_USE,
-          ..Default::default()
-        };
-
-        let render_pass_begin_info = RenderPassBeginInfo {
-          render_pass,
-          framebuffer,
-          render_area: Rect2D {
-            offset: Offset2D { x: 0, y: 0 },
-            extent: surface_extent,
-          },
-          clear_value_count: 1,
-          p_clear_values: &clear_value,
-          ..Default::default()
-        };
-
-        let subpass_begin_info = SubpassBeginInfo {
-          contents: SubpassContents::INLINE,
-          ..Default::default()
-        };
-
-        let subpass_end_info = SubpassEndInfo::default();
-
-        unsafe {
-          self
-            .device
-            .begin_command_buffer(command_buffer, &command_buffer_begin_info)
-            .unwrap();
-
-          self.device.cmd_begin_render_pass2(
-            command_buffer,
-            &render_pass_begin_info,
-            &subpass_begin_info,
-          );
-
-          rect_renderer.record_commands(command_buffer, surface_extent);
-
-          self
-            .device
-            .cmd_end_render_pass2(command_buffer, &subpass_end_info);
-
-          self.device.end_command_buffer(command_buffer).unwrap();
-        }
-      });
-
     self.swapchain = swapchain;
     self.swapchain_images = swapchain_images;
     self.swapchain_image_views = swapchain_image_views;
     self.render_pass = render_pass;
     self.swapchain_framebuffers = swapchain_framebuffers;
-    self.swapchain_command_buffers = swapchain_command_buffers;
+    self.surface_extent = surface_extent;
+  }
+
+  pub fn add_rect(&mut self, rect: Rect) {
+    self.rect_batch.as_mut().unwrap().add(rect);
   }
 }
 
-impl Drop for VkEngine<'_> {
+impl Drop for Engine<'_> {
   fn drop(&mut self) {
     unsafe {
       self.device.device_wait_idle().unwrap();
@@ -854,7 +814,7 @@ impl Drop for VkEngine<'_> {
       });
 
       self.device.destroy_command_pool(self.command_pool, None);
-      drop(mem::take(&mut self.rect_renderer));
+      drop(mem::take(&mut self.rect_batch));
       drop(mem::take(&mut self.memory_allocator));
       self.device.destroy_render_pass(self.render_pass, None);
 
