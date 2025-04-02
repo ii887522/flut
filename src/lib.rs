@@ -1,6 +1,7 @@
 #![deny(clippy::all, elided_lifetimes_in_paths)]
 #![allow(clippy::needless_lifetimes, clippy::too_many_arguments)]
 
+pub mod app;
 mod buffers;
 mod pipelines;
 mod renderers;
@@ -8,18 +9,14 @@ mod shaders;
 mod string_slice;
 mod vk_engine;
 
-use optarg2chain::optarg_fn;
+pub use app::App;
+pub use app::AppConfig;
 use sdl2::{event::Event, image::LoadSurface, surface::Surface};
-use std::{mem, ptr};
+use std::{mem, ptr, time::Instant};
 use vk_engine::VkEngine;
 
-#[optarg_fn(RunAppBuilder, call)]
-pub fn run_app<'a>(
-  #[optarg_default] title: &'a str,
-  #[optarg(1024)] width: u32,
-  #[optarg(768)] height: u32,
-  #[optarg_default] prefer_dgpu: bool,
-) {
+pub fn run_app(mut app: impl App) {
+  let app_config = app.get_config();
   let sdl = sdl2::init().unwrap();
 
   // Prevent SDL from creating an OpenGL context by itself
@@ -32,9 +29,8 @@ pub fn run_app<'a>(
   let vid_subsys = sdl.video().unwrap();
 
   let mut window = vid_subsys
-    .window(title, width, height)
+    .window(app_config.title, app_config.width, app_config.height)
     .allow_highdpi()
-    .metal_view()
     .position_centered()
     .vulkan()
     .build()
@@ -47,19 +43,28 @@ pub fn run_app<'a>(
   // Call window.show() as early as possible to minimize the perceived startup time
   window.show();
 
-  let mut vk_engine = VkEngine::new(window, prefer_dgpu);
+  let mut vk_engine = VkEngine::new(window, app_config.prefer_dgpu);
 
   // Register `()` event for triggering acquire swapchain image at the next iteration in case the swapchain is recreated
   event_subsys.register_custom_event::<()>().unwrap();
 
   let event_sender = event_subsys.event_sender();
   let mut event_pump = sdl.event_pump().unwrap();
+  let mut prev = Instant::now();
 
-  for event in event_pump.wait_iter() {
-    if let Event::Quit { .. } = event {
-      break;
+  'running: loop {
+    for event in event_pump.poll_iter() {
+      if let Event::Quit { .. } = event {
+        break 'running;
+      }
+
+      app.process_event(event);
     }
 
+    let dt = prev.elapsed().as_secs_f32();
+    prev = Instant::now();
+    app.update(dt);
+    app.draw();
     vk_engine.draw();
   }
 }

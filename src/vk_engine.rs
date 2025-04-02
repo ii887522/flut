@@ -59,6 +59,10 @@ pub(super) struct VkEngine<'a> {
 
 impl<'a> VkEngine<'a> {
   pub(super) fn new(window: Window, prefer_dgpu: bool) -> Self {
+    #[cfg(all(not(debug_assertions), target_os = "macos"))]
+    let entry = ash_molten::load();
+
+    #[cfg(any(debug_assertions, not(target_os = "macos")))]
     let entry = unsafe { Entry::load().unwrap() };
 
     let enabled_layers = StringSlice::from(
@@ -68,17 +72,17 @@ impl<'a> VkEngine<'a> {
       [].as_slice(),
     );
 
-    let mut enabled_extensions = window.vulkan_instance_extensions().unwrap();
+    let mut enabled_instance_exts = window.vulkan_instance_extensions().unwrap();
 
     #[cfg(debug_assertions)]
-    enabled_extensions.extend([
+    enabled_instance_exts.extend([
       vk::EXT_DEBUG_UTILS_NAME.to_str().unwrap(),
       vk::EXT_VALIDATION_FEATURES_NAME.to_str().unwrap(),
     ]);
 
-    enabled_extensions.push(vk::KHR_PORTABILITY_ENUMERATION_NAME.to_str().unwrap());
+    enabled_instance_exts.push(vk::KHR_PORTABILITY_ENUMERATION_NAME.to_str().unwrap());
 
-    let enabled_extensions = StringSlice::from(enabled_extensions.as_slice());
+    let enabled_instance_exts = StringSlice::from(enabled_instance_exts.as_slice());
 
     #[cfg(debug_assertions)]
     let enabled_validation_features = [
@@ -87,7 +91,7 @@ impl<'a> VkEngine<'a> {
     ];
 
     let app_info = ApplicationInfo {
-      api_version: vk::make_api_version(0, 1, 4, 0),
+      api_version: vk::make_api_version(0, 1, 2, 0),
       ..Default::default()
     };
 
@@ -103,8 +107,8 @@ impl<'a> VkEngine<'a> {
       p_application_info: &app_info,
       enabled_layer_count: enabled_layers.len() as _,
       pp_enabled_layer_names: enabled_layers.as_ptr(),
-      enabled_extension_count: enabled_extensions.len() as _,
-      pp_enabled_extension_names: enabled_extensions.as_ptr(),
+      enabled_extension_count: enabled_instance_exts.len() as _,
+      pp_enabled_extension_names: enabled_instance_exts.as_ptr(),
 
       #[cfg(debug_assertions)]
       p_next: &validation_features as *const _ as *const c_void,
@@ -121,7 +125,12 @@ impl<'a> VkEngine<'a> {
     );
 
     let surface_instance = surface::Instance::new(&entry, &instance);
-    let enabled_exts = [vk::KHR_SWAPCHAIN_NAME];
+
+    let enabled_device_exts = [
+      vk::KHR_SWAPCHAIN_NAME,
+      #[cfg(target_os = "macos")]
+      vk::KHR_PORTABILITY_SUBSET_NAME,
+    ];
 
     let (physical_device, graphics_queue_family_index, present_queue_family_index) = unsafe {
       instance
@@ -133,7 +142,7 @@ impl<'a> VkEngine<'a> {
             .enumerate_device_extension_properties(physical_device)
             .unwrap();
 
-          if !enabled_exts.iter().all(|&enabled_ext| {
+          if !enabled_device_exts.iter().all(|&enabled_ext| {
             ext_props
               .iter()
               .map(|ext_prop| ext_prop.extension_name_as_c_str().unwrap())
@@ -249,8 +258,8 @@ impl<'a> VkEngine<'a> {
       });
     }
 
-    let enabled_exts = StringSlice::from(
-      enabled_exts
+    let enabled_device_exts = StringSlice::from(
+      enabled_device_exts
         .map(|enabled_ext| enabled_ext.to_str().unwrap())
         .as_slice(),
     );
@@ -258,8 +267,8 @@ impl<'a> VkEngine<'a> {
     let device_create_info = DeviceCreateInfo {
       queue_create_info_count: queue_create_infos.len() as _,
       p_queue_create_infos: queue_create_infos.as_ptr(),
-      enabled_extension_count: enabled_exts.len() as _,
-      pp_enabled_extension_names: enabled_exts.as_ptr(),
+      enabled_extension_count: enabled_device_exts.len() as _,
+      pp_enabled_extension_names: enabled_device_exts.as_ptr(),
       ..Default::default()
     };
 
@@ -355,14 +364,18 @@ impl<'a> VkEngine<'a> {
         .begin_command_buffer(staging_command_buffer, &staging_command_buffer_begin_info)
         .unwrap();
 
-      device.cmd_copy_buffer2(
+      device.cmd_copy_buffer(
         staging_command_buffer,
-        &rect_renderer.vert_buffer.copy_buffer_info,
+        rect_renderer.vert_buffer.staging_buffer,
+        rect_renderer.vert_buffer.buffer,
+        &[rect_renderer.vert_buffer.buffer_copy],
       );
 
-      device.cmd_copy_buffer2(
+      device.cmd_copy_buffer(
         staging_command_buffer,
-        &rect_renderer.index_buffer.copy_buffer_info,
+        rect_renderer.index_buffer.staging_buffer,
+        rect_renderer.index_buffer.buffer,
+        &[rect_renderer.index_buffer.buffer_copy],
       );
 
       device.end_command_buffer(staging_command_buffer).unwrap();

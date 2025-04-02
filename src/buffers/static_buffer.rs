@@ -1,8 +1,8 @@
 use ash::{
   Device,
   vk::{
-    BindBufferMemoryInfo, Buffer, BufferCopy2, BufferCreateInfo, BufferMemoryRequirementsInfo2,
-    BufferUsageFlags, CopyBufferInfo2, MemoryRequirements2, SharingMode,
+    BindBufferMemoryInfo, Buffer, BufferCopy, BufferCreateInfo, BufferMemoryRequirementsInfo2,
+    BufferUsageFlags, MemoryRequirements2, SharingMode,
   },
 };
 use gpu_allocator::{
@@ -14,14 +14,13 @@ use std::{cell::RefCell, mem, rc::Rc};
 pub(crate) struct StaticBuffer<'a> {
   device: Rc<Device>,
   memory_allocator: Rc<RefCell<Allocator>>,
-  staging_buffer: Buffer,
+  pub(crate) staging_buffer: Buffer,
   staging_alloc: Allocation,
   pub(crate) buffer: Buffer,
   _alloc: Allocation,
   pub(crate) bind_staging_buffer_mem_info: BindBufferMemoryInfo<'a>,
   pub(crate) bind_buffer_mem_info: BindBufferMemoryInfo<'a>,
-  _buffer_copy: Box<BufferCopy2<'a>>,
-  pub(crate) copy_buffer_info: CopyBufferInfo2<'a>,
+  pub(crate) buffer_copy: BufferCopy,
 }
 
 impl StaticBuffer<'_> {
@@ -116,16 +115,8 @@ impl StaticBuffer<'_> {
       ..Default::default()
     };
 
-    let buffer_copy = Box::new(BufferCopy2 {
+    let buffer_copy = BufferCopy {
       size: mem::size_of_val(data) as _,
-      ..Default::default()
-    });
-
-    let copy_buffer_info = CopyBufferInfo2 {
-      src_buffer: staging_buffer,
-      dst_buffer: buffer,
-      region_count: 1,
-      p_regions: &*buffer_copy,
       ..Default::default()
     };
 
@@ -138,8 +129,7 @@ impl StaticBuffer<'_> {
       _alloc: alloc,
       bind_staging_buffer_mem_info,
       bind_buffer_mem_info,
-      _buffer_copy: buffer_copy,
-      copy_buffer_info,
+      buffer_copy,
     }
   }
 

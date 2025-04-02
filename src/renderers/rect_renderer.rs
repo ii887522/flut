@@ -38,7 +38,7 @@ pub(crate) struct RectRenderer<'a> {
   pub(crate) vert_buffer: StaticBuffer<'a>,
   pub(crate) index_buffer: StaticBuffer<'a>,
   pub(crate) pipeline: Option<RectPipeline>,
-  instances: Vec<RectInstance>,
+  instance_count: u32,
 }
 
 impl RectRenderer<'_> {
@@ -82,7 +82,7 @@ impl RectRenderer<'_> {
       vert_buffer,
       index_buffer,
       pipeline: None,
-      instances,
+      instance_count: instances.len() as _,
     }
   }
 
@@ -118,13 +118,11 @@ impl RectRenderer<'_> {
         pipeline.pipeline,
       );
 
-      self.device.cmd_bind_vertex_buffers2(
+      self.device.cmd_bind_vertex_buffers(
         command_buffer,
         0,
         &[self.vert_buffer.buffer, self.inst_buffer.buffer],
         &[0, 0],
-        None,
-        None,
       );
 
       self.device.cmd_bind_index_buffer(
@@ -145,7 +143,7 @@ impl RectRenderer<'_> {
       self.device.cmd_draw_indexed(
         command_buffer,
         INDICES.len() as _,
-        self.instances.len() as _,
+        self.instance_count,
         0,
         0,
         0,

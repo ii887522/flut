@@ -51,5 +51,10 @@ features = [
   "use-vcpkg",
 ]
 
+[target.'cfg(target_os = "macos")'.dependencies.ash-molten]
+version = "0.20"
+default-features = false
+features = ["pre-built"]
+
 [build-dependencies]
 shaderc = { version = "0.9", default-features = false }
