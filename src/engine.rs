@@ -1,4 +1,4 @@
-use crate::{batches::RectBatch, models::Rect, string_slice::StringSlice};
+use crate::{batches::RectBatch, collections::StringSlice, models::Rect};
 use ash::{
   Device, Entry, Instance,
   khr::{surface, swapchain},
@@ -58,8 +58,18 @@ pub struct Engine<'a> {
   frame_index: usize,
 }
 
+pub struct DrawableCaps {
+  pub rect_cap: usize,
+}
+
+impl Default for DrawableCaps {
+  fn default() -> Self {
+    Self { rect_cap: 3000 }
+  }
+}
+
 impl<'a> Engine<'a> {
-  pub(super) fn new(window: Window, prefer_dgpu: bool) -> Self {
+  pub(super) fn new(window: Window, prefer_dgpu: bool, drawable_caps: DrawableCaps) -> Self {
     #[cfg(all(not(debug_assertions), target_os = "macos"))]
     let entry = ash_molten::load();
 
@@ -309,7 +319,11 @@ impl<'a> Engine<'a> {
       .unwrap(),
     ));
 
-    let rect_batch = RectBatch::new(device.clone(), memory_allocator.clone());
+    let rect_batch = RectBatch::new(
+      device.clone(),
+      memory_allocator.clone(),
+      drawable_caps.rect_cap,
+    );
 
     unsafe {
       device
@@ -791,8 +805,32 @@ impl<'a> Engine<'a> {
     self.surface_extent = surface_extent;
   }
 
-  pub fn add_rect(&mut self, rect: Rect) {
-    self.rect_batch.as_mut().unwrap().add(rect);
+  pub fn add_rect(&mut self, rect: Rect) -> u16 {
+    self.rect_batch.as_mut().unwrap().add(rect)
+  }
+
+  pub fn batch_add_rects(&mut self, rects: Vec<Rect>) -> Vec<u16> {
+    self.rect_batch.as_mut().unwrap().batch_add(rects)
+  }
+
+  pub fn update_rect(&mut self, index: u16, rect: Rect) {
+    self.rect_batch.as_mut().unwrap().update(index, rect);
+  }
+
+  pub fn batch_update_rects(&mut self, ids: &[u16], rects: Vec<Rect>) {
+    self.rect_batch.as_mut().unwrap().batch_update(ids, rects);
+  }
+
+  pub fn remove_rect(&mut self, id: u16) -> Rect {
+    self.rect_batch.as_mut().unwrap().remove(id)
+  }
+
+  pub fn batch_remove_rects(&mut self, ids: &[u16]) {
+    self.rect_batch.as_mut().unwrap().batch_remove(ids);
+  }
+
+  pub fn clear_rects(&mut self) {
+    self.rect_batch.as_mut().unwrap().clear();
   }
 }
 

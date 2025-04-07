@@ -9,7 +9,7 @@ use gpu_allocator::{
   MemoryLocation,
   vulkan::{Allocation, AllocationCreateDesc, AllocationScheme, Allocator},
 };
-use std::{cell::RefCell, mem, rc::Rc};
+use std::{cell::RefCell, mem, ptr, rc::Rc};
 
 pub(crate) struct StaticBuffer<'a> {
   device: Rc<Device>,
@@ -56,7 +56,7 @@ impl StaticBuffer<'_> {
         .get_buffer_memory_requirements2(&staging_buffer_mem_req_info, &mut staging_buffer_mem_req);
     }
 
-    let mut staging_alloc = memory_allocator
+    let staging_alloc = memory_allocator
       .borrow_mut()
       .allocate(&AllocationCreateDesc {
         name: &format!("staging_{name}"),
@@ -74,8 +74,15 @@ impl StaticBuffer<'_> {
       ..Default::default()
     };
 
-    let mut mapped_staging_alloc = staging_alloc.try_as_mapped_slab().unwrap();
-    presser::copy_from_slice_to_offset(data, &mut mapped_staging_alloc, 0).unwrap();
+    let mapped_staging_alloc = staging_alloc.mapped_ptr().unwrap();
+
+    unsafe {
+      ptr::copy_nonoverlapping(
+        data.as_ptr(),
+        mapped_staging_alloc.as_ptr() as *mut T,
+        data.len(),
+      );
+    }
 
     let buffer_create_info = BufferCreateInfo {
       size: mem::size_of_val(data) as _,

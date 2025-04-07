@@ -1,3 +1,4 @@
+use crate::models::Rect;
 use ash::{
   Device,
   vk::{
@@ -7,8 +8,6 @@ use ash::{
   },
 };
 use std::{ffi::CString, mem, rc::Rc};
-
-use crate::models::Rect;
 
 #[repr(C, align(8))]
 #[derive(Clone, Copy)]
@@ -79,6 +78,12 @@ impl RectVertShader<'_> {
       },
       VertexInputAttributeDescription {
         location: 2,
+        binding: 1,
+        format: Format::R32G32_SFLOAT,
+        offset: mem::offset_of!(Rect, size) as _,
+      },
+      VertexInputAttributeDescription {
+        location: 3,
         binding: 1,
         format: Format::R32G32B32_SFLOAT,
         offset: mem::offset_of!(Rect, color) as _,

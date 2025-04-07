@@ -4,66 +4,58 @@
 pub mod app;
 mod batches;
 mod buffers;
+pub mod clock;
+pub mod collections;
 mod engine;
 pub mod models;
 mod pipelines;
 mod shaders;
-mod string_slice;
 
 pub use app::App;
 pub use app::AppConfig;
+pub use clock::Clock;
 pub use engine::Engine;
-use sdl2::{event::Event, image::LoadSurface, surface::Surface};
-use std::{mem, ptr, time::Instant};
+use rayon::prelude::*;
+use std::ops::Bound;
+use std::ops::RangeBounds;
+use std::{mem, ptr};
 
-pub fn run_app(mut app: impl App) {
-  let app_config = app.get_config();
-  let sdl = sdl2::init().unwrap();
-
-  // Prevent SDL from creating an OpenGL context by itself
-  sdl2::hint::set("SDL_VIDEO_EXTERNAL_CONTEXT", "1");
-
-  // Fix blurry UI on high DPI displays
-  sdl2::hint::set("SDL_WINDOWS_DPI_AWARENESS", "permonitorv2");
-
-  let vid_subsys = sdl.video().unwrap();
-
-  let mut window = vid_subsys
-    .window(app_config.title, app_config.width, app_config.height)
-    .allow_highdpi()
-    .position_centered()
-    .vulkan()
-    .build()
-    .unwrap();
-
-  if let Ok(favicon) = Surface::from_file("assets/favicon.png") {
-    window.set_icon(favicon);
-  }
-
-  // Call window.show() as early as possible to minimize the perceived startup time
-  window.show();
-
-  let mut engine = Engine::new(window, app_config.prefer_dgpu);
-  app.init(&mut engine);
-  let mut event_pump = sdl.event_pump().unwrap();
-  let mut prev = Instant::now();
-
-  'running: loop {
-    for event in event_pump.poll_iter() {
-      if let Event::Quit { .. } = event {
-        break 'running;
-      }
-
-      app.process_event(event);
-    }
-
-    let dt = prev.elapsed().as_secs_f32();
-    prev = Instant::now();
-    app.update(dt, &mut engine);
-    engine.draw();
-  }
+const unsafe fn as_bytes<T>(from: &T) -> &[u8] {
+  unsafe { &*ptr::slice_from_raw_parts(from as *const _ as *const _, mem::size_of::<T>()) }
 }
 
-const fn as_bytes<T>(from: &T) -> &[u8] {
-  unsafe { &*ptr::slice_from_raw_parts(from as *const _ as *const _, mem::size_of::<T>()) }
+pub fn par_swap_remove<T: Send>(vec: &mut Vec<T>, indices: impl RangeBounds<usize>) {
+  let start_index = match indices.start_bound() {
+    Bound::Included(&start_index) => start_index,
+    Bound::Excluded(&start_index) => start_index + 1,
+    Bound::Unbounded => 0,
+  };
+
+  let end_index = match indices.end_bound() {
+    Bound::Included(&end_index) => end_index,
+    Bound::Excluded(&end_index) => end_index - 1,
+    Bound::Unbounded => vec.len() - 1,
+  };
+
+  let index_count = end_index - start_index + 1;
+  let vec_start_index = start_index.max(vec.len() - index_count);
+
+  if start_index == vec_start_index {
+    // If remove last elements from vec, can simply remove
+    vec.truncate(start_index);
+  } else if end_index + 1 >= vec_start_index {
+    // If remove elements from vec leaving few elements behind, Vec::drain() is sufficiently fast
+    vec.par_drain(indices);
+  } else {
+    // Perform operation similar to Vec::swap_remove() but for a range of elements removal
+    unsafe {
+      ptr::copy_nonoverlapping(
+        vec[vec_start_index..].as_ptr(),
+        vec[start_index..=end_index].as_mut_ptr(),
+        index_count,
+      );
+    }
+
+    vec.truncate(vec_start_index);
+  }
 }

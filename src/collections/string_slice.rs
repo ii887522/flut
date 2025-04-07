@@ -1,6 +1,6 @@
 use std::ffi::CString;
 
-pub(super) struct StringSlice {
+pub(crate) struct StringSlice {
   c_strings: Vec<CString>,
   raw_strings: Vec<*const i8>,
 }
@@ -22,11 +22,11 @@ impl From<&[&str]> for StringSlice {
 }
 
 impl StringSlice {
-  pub(super) fn len(&self) -> usize {
+  pub(crate) fn len(&self) -> usize {
     self.c_strings.len()
   }
 
-  pub(super) fn as_ptr(&self) -> *const *const i8 {
+  pub(crate) fn as_ptr(&self) -> *const *const i8 {
     self.raw_strings.as_ptr()
   }
 }
