@@ -1,7 +1,7 @@
 use atomic_refcell::AtomicRefCell;
 use rayon::prelude::*;
 use std::{
-  collections::HashSet,
+  collections::{BTreeSet, HashSet},
   ops::{Index, IndexMut},
   sync::atomic::{AtomicU16, Ordering},
 };
@@ -9,7 +9,7 @@ use std::{
 pub struct SparseVec<T> {
   dense: Vec<(AtomicU16, AtomicRefCell<T>)>, // Mappings from index to (id, element)
   sparse: Vec<AtomicU16>,                    // Mappings from id to index
-  free_ids: Vec<u16>,                        // Elements removed by their ids
+  free_ids: BTreeSet<u16>,                   // Elements removed by their ids
 }
 
 impl<T> Default for SparseVec<T> {
@@ -23,7 +23,7 @@ impl<T> SparseVec<T> {
     Self {
       dense: vec![],
       sparse: vec![],
-      free_ids: vec![],
+      free_ids: BTreeSet::new(),
     }
   }
 
@@ -31,7 +31,7 @@ impl<T> SparseVec<T> {
     Self {
       dense: Vec::with_capacity(capacity),
       sparse: Vec::with_capacity(capacity),
-      free_ids: Vec::with_capacity(capacity),
+      free_ids: BTreeSet::new(),
     }
   }
 
@@ -58,7 +58,7 @@ impl<T> SparseVec<T> {
   pub fn push(&mut self, value: T) -> u16 {
     let dense_index = self.dense.len();
 
-    let id = if let Some(id) = self.free_ids.pop() {
+    let id = if let Some(id) = self.free_ids.pop_first() {
       self.sparse[id as usize] = AtomicU16::new(dense_index as _);
       id
     } else {
@@ -74,6 +74,19 @@ impl<T> SparseVec<T> {
     id
   }
 
+  pub fn push_by_id(&mut self, id: u16, value: T) {
+    if !self.free_ids.remove(&id) {
+      panic!("id {id} is not freed before");
+    }
+
+    let dense_index = self.dense.len();
+    self.sparse[id as usize] = AtomicU16::new(dense_index as _);
+
+    self
+      .dense
+      .push((AtomicU16::new(id), AtomicRefCell::new(value)));
+  }
+
   pub fn remove(&mut self, id: u16) -> T {
     let dense_index = self.sparse[id as usize].swap(u16::MAX, Ordering::Relaxed);
     let (_, result) = self.dense.swap_remove(dense_index as _);
@@ -82,7 +95,7 @@ impl<T> SparseVec<T> {
       self.sparse[*moved_id.get_mut() as usize] = AtomicU16::new(dense_index);
     }
 
-    self.free_ids.push(id);
+    self.free_ids.insert(id);
     result.into_inner()
   }
 
@@ -105,11 +118,15 @@ impl<T: Send + Sync> SparseVec<T> {
     let value_count = values.len();
     let remaining_count = value_count.saturating_sub(free_id_count);
     let dense_start_index = self.dense.len();
+    let mut ids = Vec::with_capacity(value_count - remaining_count);
 
-    let mut ids = self
-      .free_ids
-      .par_drain(free_id_count.saturating_sub(value_count)..)
-      .collect::<Vec<_>>();
+    for _ in 0..value_count {
+      let Some(id) = self.free_ids.pop_first() else {
+        break;
+      };
+
+      ids.push(id);
+    }
 
     ids.par_iter().enumerate().for_each(|(index, &id)| {
       self.sparse[id as usize].store((dense_start_index + index) as _, Ordering::Relaxed);

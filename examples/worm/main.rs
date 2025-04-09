@@ -197,9 +197,9 @@ impl App for WormApp {
       Direction::Left => self.worm.position - 1,
     };
 
-    let mut air_to_move = self.air.remove(self.worm.position);
+    let mut air_to_move = self.air.remove(new_worm_position);
     air_to_move.position = self.worm.position;
-    self.air.push(air_to_move);
+    self.air.push_by_id(self.worm.position, air_to_move);
     self.worm.position = new_worm_position;
 
     engine.update_rect(*self.worm.drawable_id.get_mut(), self.worm.clone().into());
