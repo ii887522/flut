@@ -1,57 +1,61 @@
 #![deny(clippy::all, elided_lifetimes_in_paths)]
 #![allow(clippy::needless_lifetimes, clippy::too_many_arguments)]
 
-use sdl2::{event::Event, image::LoadSurface};
-use vulkano::{
-  VulkanLibrary,
-  instance::{Instance, InstanceCreateFlags, InstanceCreateInfo, InstanceExtensions},
-};
+pub mod app;
+mod batches;
+mod buffers;
+pub mod clock;
+pub mod collections;
+mod engine;
+pub mod models;
+mod pipelines;
+mod shaders;
 
-pub fn run_app(title: &str, width: u32, height: u32) {
-  let sdl = sdl2::init().unwrap();
+pub use app::App;
+pub use app::AppConfig;
+pub use clock::Clock;
+pub use engine::Engine;
+use rayon::prelude::*;
+use std::ops::Bound;
+use std::ops::RangeBounds;
+use std::{mem, ptr};
 
-  // Prevent SDL from creating an OpenGL context by itself
-  sdl2::hint::set("SDL_VIDEO_EXTERNAL_CONTEXT", "1");
+const unsafe fn as_bytes<T>(from: &T) -> &[u8] {
+  unsafe { &*ptr::slice_from_raw_parts(from as *const _ as *const _, mem::size_of::<T>()) }
+}
 
-  // Fix blurry UI on high DPI displays
-  sdl2::hint::set("SDL_WINDOWS_DPI_AWARENESS", "permonitorv2");
+pub fn par_swap_remove<T: Send>(vec: &mut Vec<T>, indices: impl RangeBounds<usize>) {
+  let start_index = match indices.start_bound() {
+    Bound::Included(&start_index) => start_index,
+    Bound::Excluded(&start_index) => start_index + 1,
+    Bound::Unbounded => 0,
+  };
 
-  let vid_subsys = sdl.video().unwrap();
+  let end_index = match indices.end_bound() {
+    Bound::Included(&end_index) => end_index,
+    Bound::Excluded(&end_index) => end_index - 1,
+    Bound::Unbounded => vec.len() - 1,
+  };
 
-  let mut window = vid_subsys
-    .window(title, width, height)
-    .allow_highdpi()
-    .metal_view()
-    .position_centered()
-    .vulkan()
-    .build()
-    .unwrap();
+  let index_count = end_index - start_index + 1;
+  let vec_start_index = start_index.max(vec.len() - index_count);
 
-  if let Ok(favicon) = sdl2::surface::Surface::from_file("assets/favicon.png") {
-    window.set_icon(favicon);
-  }
-
-  // Call window.show() as early as possible to minimize the perceived startup time
-  window.show();
-
-  let vk_instance_exts =
-    InstanceExtensions::from_iter(window.vulkan_instance_extensions().unwrap());
-
-  let _vk_instance = Instance::new(
-    VulkanLibrary::new().unwrap(),
-    InstanceCreateInfo {
-      enabled_extensions: vk_instance_exts,
-      flags: InstanceCreateFlags::ENUMERATE_PORTABILITY,
-      ..Default::default()
-    },
-  )
-  .unwrap();
-
-  let mut event_pump = sdl.event_pump().unwrap();
-
-  for event in event_pump.wait_iter() {
-    if let Event::Quit { .. } = event {
-      break;
+  if start_index == vec_start_index {
+    // If remove last elements from vec, can simply remove
+    vec.truncate(start_index);
+  } else if end_index + 1 >= vec_start_index {
+    // If remove elements from vec leaving few elements behind, Vec::drain() is sufficiently fast
+    vec.par_drain(indices);
+  } else {
+    // Perform operation similar to Vec::swap_remove() but for a range of elements removal
+    unsafe {
+      ptr::copy_nonoverlapping(
+        vec[vec_start_index..].as_ptr(),
+        vec[start_index..=end_index].as_mut_ptr(),
+        index_count,
+      );
     }
+
+    vec.truncate(vec_start_index);
   }
 }

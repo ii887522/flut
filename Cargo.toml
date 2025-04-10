@@ -20,13 +20,30 @@ strip = true
 [package.metadata.vcpkg]
 dependencies = ["sdl2[vulkan]", "sdl2-image", "sdl2-ttf", "sdl2-mixer"]
 git = "https://github.com/microsoft/vcpkg"
-rev = "2025.02.14"
+rev = "2025.03.19"
 
 [package.metadata.vcpkg.target]
 x86_64-pc-windows-msvc = { triplet = "x64-windows-static-md" }
 
 [dependencies]
-vulkano = { version = "0.35", default-features = false }
+atomic_refcell = { version = "0.1", default-features = false }
+optarg2chain = { version = "0.1", default-features = false }
+rayon = { version = "1.10", default-features = false }
+
+[dependencies.ash]
+version = "0.38"
+default-features = false
+features = ["loaded", "std"]
+
+[dependencies.fastrand]
+version = "2.3"
+default-features = false
+features = ["std"]
+
+[dependencies.gpu-allocator]
+version = "0.27"
+default-features = false
+features = ["vulkan"]
 
 [dependencies.sdl2]
 version = "0.37"
@@ -39,3 +56,11 @@ features = [
   "static-link",
   "use-vcpkg",
 ]
+
+[target.'cfg(target_os = "macos")'.dependencies.ash-molten]
+version = "0.20"
+default-features = false
+features = ["pre-built"]
+
+[build-dependencies]
+shaderc = { version = "0.9", default-features = false }
