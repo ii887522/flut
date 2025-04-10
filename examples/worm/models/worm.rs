@@ -5,7 +5,7 @@ use std::sync::atomic::{AtomicU16, Ordering};
 
 pub(crate) struct Worm {
   pub(crate) position: u16,
-  pub(crate) direction: Direction,
+  pub(crate) direction: Option<Direction>,
   pub(crate) drawable_id: AtomicU16,
 }
 

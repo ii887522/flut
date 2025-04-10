@@ -9,7 +9,10 @@ use flut::{App, AppConfig, Clock, Engine, app, collections::SparseVec};
 use models::{Air, Direction, Food, Wall, Worm};
 use rayon::prelude::*;
 use sdl2::{event::Event, keyboard::Keycode};
-use std::sync::atomic::{AtomicU16, Ordering};
+use std::{
+  collections::VecDeque,
+  sync::atomic::{AtomicU16, Ordering},
+};
 
 fn main() {
   app::run(WormApp::new());
@@ -18,7 +21,7 @@ fn main() {
 struct WormApp {
   clock: Clock,
   air: SparseVec<Air>,
-  worm: Worm,
+  worm: VecDeque<Worm>, // First element represents head, last element represents tail
   food: Food,
   input_worm_direction: Option<Direction>,
 }
@@ -57,26 +60,107 @@ impl WormApp {
         .collect::<Vec<_>>(),
     );
 
-    let worm = Worm {
+    let mut worm =
+      VecDeque::with_capacity(((consts::GRID_SIZE.0 - 2) * (consts::GRID_SIZE.1 - 2)) as _);
+
+    worm.push_front(Worm {
       position: consts::INITIAL_WORM_POSITION_1D,
-      direction: Direction::rand(),
+      direction: Some(Direction::rand()),
       drawable_id: AtomicU16::new(u16::MAX), // Will be initialized in WormApp::init() method
-    };
-
-    let rand_air = air.remove_by_dense_index(fastrand::u16(0..air.len() as _));
-
-    let food = Food {
-      position: rand_air.position,
-      drawable_id: AtomicU16::new(u16::MAX), // Will be initialized in WormApp::init() method
-    };
+    });
 
     Self {
       clock,
       air,
       worm,
-      food,
+      food: Food::default(), // Will be initialized in WormApp::init() method
       input_worm_direction: None,
     }
+  }
+
+  fn spawn_food(&mut self, engine: &mut Engine<'_>) {
+    let rand_air = self
+      .air
+      .remove_by_dense_index(fastrand::u16(0..self.air.len() as _));
+
+    engine.remove_rect(rand_air.drawable_id);
+
+    // Has spawn food before
+    if self.food.position < u16::MAX {
+      self.food.position = rand_air.position;
+      engine.update_rect(*self.food.drawable_id.get_mut(), self.food.clone().into());
+    } else {
+      self.food.position = rand_air.position;
+      self.food.drawable_id = AtomicU16::new(engine.add_rect(self.food.clone().into()));
+    }
+  }
+
+  fn calc_new_worm_position(&self) -> u16 {
+    let worm_head = self.worm.front().unwrap();
+
+    match worm_head.direction {
+      Some(Direction::Up) => worm_head.position - consts::GRID_SIZE.0,
+      Some(Direction::Right) => worm_head.position + 1,
+      Some(Direction::Down) => worm_head.position + consts::GRID_SIZE.0,
+      Some(Direction::Left) => worm_head.position - 1,
+      None => worm_head.position,
+    }
+  }
+
+  fn will_eat_food(&self) -> bool {
+    self.calc_new_worm_position() == self.food.position
+  }
+
+  fn will_hit_obstacle(&self) -> bool {
+    !self.air.contains(self.calc_new_worm_position())
+  }
+
+  fn move_air(&mut self, engine: &mut Engine<'_>) {
+    let worm_tail = self.worm.back().unwrap();
+    let mut air_to_move = self.air.remove(self.calc_new_worm_position());
+    air_to_move.position = worm_tail.position;
+    self.air.push_by_id(worm_tail.position, air_to_move);
+    engine.update_rect(air_to_move.drawable_id, air_to_move.into());
+  }
+
+  fn move_worm(&mut self, engine: &mut Engine<'_>) {
+    let new_position = self.calc_new_worm_position();
+    let mut worm_cell_to_move = self.worm.pop_back().unwrap();
+
+    let worm_head = if let Some(worm_head) = self.worm.front() {
+      worm_head
+    } else {
+      &worm_cell_to_move
+    };
+
+    worm_cell_to_move.direction = worm_head.direction;
+    worm_cell_to_move.position = new_position;
+
+    engine.update_rect(
+      *worm_cell_to_move.drawable_id.get_mut(),
+      worm_cell_to_move.clone().into(),
+    );
+
+    self.worm.push_front(worm_cell_to_move);
+  }
+
+  fn kill_worm(&mut self) {
+    let worm_head = self.worm.front_mut().unwrap();
+    worm_head.direction = None;
+  }
+
+  fn grow_worm(&mut self, engine: &mut Engine<'_>) {
+    let new_position = self.calc_new_worm_position();
+    let worm_head = self.worm.front().unwrap();
+
+    let mut new_worm_head = Worm {
+      position: new_position,
+      direction: worm_head.direction,
+      drawable_id: AtomicU16::new(u16::MAX),
+    };
+
+    new_worm_head.drawable_id = AtomicU16::new(engine.add_rect(new_worm_head.clone().into()));
+    self.worm.push_front(new_worm_head);
   }
 }
 
@@ -122,8 +206,10 @@ impl App for WormApp {
       .into()
     });
 
-    let rects = rayon::iter::once(self.worm.clone().into())
-      .chain(rayon::iter::once(self.food.clone().into()))
+    let worm_head = self.worm.front().unwrap();
+    let worm_head_rect = worm_head.clone().into();
+
+    let rects = rayon::iter::once(worm_head_rect)
       .chain(air_rects)
       .chain(top_wall_rects)
       .chain(bottom_wall_rects)
@@ -137,14 +223,14 @@ impl App for WormApp {
       .enumerate()
       .for_each(|(index, id)| {
         if index == 0 {
-          self.worm.drawable_id.store(id, Ordering::Relaxed);
-        } else if index == 1 {
-          self.food.drawable_id.store(id, Ordering::Relaxed);
-        } else if index >= 2 && index < 2 + self.air.len() {
-          let (_, air) = &self.air.get_dense()[index - 2];
+          worm_head.drawable_id.store(id, Ordering::Relaxed);
+        } else if index >= 1 && index < 1 + self.air.len() {
+          let (_, air) = &self.air.get_dense()[index - 1];
           air.borrow_mut().drawable_id = id;
         }
       });
+
+    self.spawn_food(engine);
   }
 
   fn process_event(&mut self, event: Event) {
@@ -156,24 +242,30 @@ impl App for WormApp {
       return;
     };
 
+    let worm_head = self.worm.front().unwrap();
+
+    let Some(worm_head_direction) = worm_head.direction else {
+      return;
+    };
+
     match keycode {
       Keycode::Up | Keycode::W => {
-        if !matches!(self.worm.direction, Direction::Down) {
+        if !matches!(worm_head_direction, Direction::Down) {
           self.input_worm_direction = Some(Direction::Up);
         }
       }
       Keycode::Right | Keycode::D => {
-        if !matches!(self.worm.direction, Direction::Left) {
+        if !matches!(worm_head_direction, Direction::Left) {
           self.input_worm_direction = Some(Direction::Right);
         }
       }
       Keycode::Down | Keycode::S => {
-        if !matches!(self.worm.direction, Direction::Up) {
+        if !matches!(worm_head_direction, Direction::Up) {
           self.input_worm_direction = Some(Direction::Down);
         }
       }
       Keycode::Left | Keycode::A => {
-        if !matches!(self.worm.direction, Direction::Right) {
+        if !matches!(worm_head_direction, Direction::Right) {
           self.input_worm_direction = Some(Direction::Left);
         }
       }
@@ -186,23 +278,28 @@ impl App for WormApp {
       return;
     }
 
-    if let Some(input_worm_direction) = self.input_worm_direction.take() {
-      self.worm.direction = input_worm_direction;
+    let worm_head = self.worm.front_mut().unwrap();
+
+    if worm_head.direction.is_none() {
+      return;
     }
 
-    let new_worm_position = match self.worm.direction {
-      Direction::Up => self.worm.position - consts::GRID_SIZE.0,
-      Direction::Right => self.worm.position + 1,
-      Direction::Down => self.worm.position + consts::GRID_SIZE.0,
-      Direction::Left => self.worm.position - 1,
-    };
+    if let Some(input_worm_direction) = self.input_worm_direction.take() {
+      worm_head.direction = Some(input_worm_direction);
+    }
 
-    let mut air_to_move = self.air.remove(new_worm_position);
-    air_to_move.position = self.worm.position;
-    self.air.push_by_id(self.worm.position, air_to_move);
-    self.worm.position = new_worm_position;
+    if self.will_eat_food() {
+      self.spawn_food(engine);
+      self.grow_worm(engine);
+      return;
+    }
 
-    engine.update_rect(*self.worm.drawable_id.get_mut(), self.worm.clone().into());
-    engine.update_rect(air_to_move.drawable_id, air_to_move.into());
+    if self.will_hit_obstacle() {
+      self.kill_worm();
+      return;
+    }
+
+    self.move_air(engine);
+    self.move_worm(engine);
   }
 }

@@ -813,8 +813,8 @@ impl<'a> Engine<'a> {
     self.rect_batch.as_mut().unwrap().batch_add(rects)
   }
 
-  pub fn update_rect(&mut self, index: u16, rect: Rect) {
-    self.rect_batch.as_mut().unwrap().update(index, rect);
+  pub fn update_rect(&mut self, id: u16, rect: Rect) {
+    self.rect_batch.as_mut().unwrap().update(id, rect);
   }
 
   pub fn batch_update_rects(&mut self, ids: &[u16], rects: Vec<Rect>) {

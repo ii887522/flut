@@ -7,6 +7,15 @@ pub(crate) struct Food {
   pub(crate) drawable_id: AtomicU16,
 }
 
+impl Default for Food {
+  fn default() -> Self {
+    Self {
+      position: u16::MAX,
+      drawable_id: AtomicU16::new(u16::MAX),
+    }
+  }
+}
+
 impl Clone for Food {
   fn clone(&self) -> Self {
     Self {

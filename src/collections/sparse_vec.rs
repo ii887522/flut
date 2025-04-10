@@ -43,6 +43,13 @@ impl<T> SparseVec<T> {
     self.dense.len()
   }
 
+  pub fn contains(&self, id: u16) -> bool {
+    self
+      .sparse
+      .get(id as usize)
+      .is_some_and(|index| index.load(Ordering::Relaxed) < u16::MAX)
+  }
+
   pub fn get_dense_index(&self, id: u16) -> u16 {
     self.sparse[id as usize].load(Ordering::Relaxed)
   }
