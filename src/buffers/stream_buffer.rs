@@ -11,14 +11,13 @@ use gpu_allocator::{
 };
 use std::{cell::RefCell, rc::Rc};
 
-pub(crate) struct StreamBuffer<'a> {
+pub(crate) struct StreamBuffer {
   device: Rc<Device>,
   pub(crate) buffer: Buffer,
   pub(crate) alloc: Allocation,
-  pub(crate) bind_buffer_mem_info: BindBufferMemoryInfo<'a>,
 }
 
-impl StreamBuffer<'_> {
+impl StreamBuffer {
   pub(crate) fn new(
     device: Rc<Device>,
     memory_allocator: Rc<RefCell<Allocator>>,
@@ -64,16 +63,19 @@ impl StreamBuffer<'_> {
       ..Default::default()
     };
 
+    unsafe {
+      device.bind_buffer_memory2(&[bind_buffer_mem_info]).unwrap();
+    }
+
     Self {
       device,
       buffer,
       alloc,
-      bind_buffer_mem_info,
     }
   }
 }
 
-impl Drop for StreamBuffer<'_> {
+impl Drop for StreamBuffer {
   fn drop(&mut self) {
     unsafe {
       self.device.destroy_buffer(self.buffer, None);

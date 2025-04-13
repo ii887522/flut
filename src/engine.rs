@@ -7,16 +7,18 @@ use ash::{
     AttachmentReference2, AttachmentStoreOp, ClearColorValue, ClearValue, CommandBuffer,
     CommandBufferAllocateInfo, CommandBufferBeginInfo, CommandBufferLevel, CommandBufferUsageFlags,
     CommandPool, CommandPoolCreateFlags, CommandPoolCreateInfo, CompositeAlphaFlagsKHR,
-    DependencyFlags, DeviceCreateInfo, DeviceQueueCreateInfo, DeviceQueueInfo2, Extent2D, Fence,
-    FenceCreateFlags, FenceCreateInfo, Framebuffer, FramebufferCreateInfo, Handle, Image,
-    ImageAspectFlags, ImageLayout, ImageSubresourceRange, ImageUsageFlags, ImageView,
-    ImageViewCreateInfo, ImageViewType, InstanceCreateFlags, InstanceCreateInfo, Offset2D,
-    PhysicalDevice, PhysicalDeviceProperties2, PhysicalDeviceType, PipelineBindPoint,
-    PipelineStageFlags, PresentInfoKHR, PresentModeKHR, Queue, QueueFamilyProperties2, QueueFlags,
-    Rect2D, RenderPass, RenderPassBeginInfo, RenderPassCreateInfo2, SampleCountFlags, Semaphore,
-    SemaphoreCreateInfo, SharingMode, SubmitInfo, SubpassBeginInfo, SubpassContents,
-    SubpassDependency2, SubpassDescription2, SubpassEndInfo, SurfaceKHR, SwapchainCreateInfoKHR,
-    SwapchainKHR, ValidationFeatureEnableEXT, ValidationFeaturesEXT,
+    DependencyFlags, DescriptorPool, DescriptorPoolCreateInfo, DescriptorPoolSize, DescriptorSet,
+    DescriptorSetAllocateInfo, DescriptorType, DeviceCreateInfo, DeviceQueueCreateInfo,
+    DeviceQueueInfo2, Extent2D, Fence, FenceCreateFlags, FenceCreateInfo, Framebuffer,
+    FramebufferCreateInfo, Handle, Image, ImageAspectFlags, ImageLayout, ImageSubresourceRange,
+    ImageUsageFlags, ImageView, ImageViewCreateInfo, ImageViewType, InstanceCreateFlags,
+    InstanceCreateInfo, Offset2D, PhysicalDevice, PhysicalDeviceProperties2, PhysicalDeviceType,
+    PhysicalDeviceVulkan12Features, PipelineBindPoint, PipelineStageFlags, PresentInfoKHR,
+    PresentModeKHR, Queue, QueueFamilyProperties2, QueueFlags, Rect2D, RenderPass,
+    RenderPassBeginInfo, RenderPassCreateInfo2, SampleCountFlags, Semaphore, SemaphoreCreateInfo,
+    SharingMode, SubmitInfo, SubpassBeginInfo, SubpassContents, SubpassDependency2,
+    SubpassDescription2, SubpassEndInfo, SurfaceKHR, SwapchainCreateInfoKHR, SwapchainKHR,
+    ValidationFeatureEnableEXT, ValidationFeaturesEXT,
   },
 };
 use gpu_allocator::{
@@ -24,7 +26,7 @@ use gpu_allocator::{
   vulkan::{Allocator, AllocatorCreateDesc},
 };
 use sdl2::video::Window;
-use std::{cell::RefCell, ffi::c_void, mem, rc::Rc};
+use std::{cell::RefCell, mem, rc::Rc};
 
 const MAX_IN_FLIGHT_FRAME_COUNT: u32 = 3;
 const MIN_ALLOC_SIZE: u64 = 4 * 1024 * 1024;
@@ -46,6 +48,8 @@ pub struct Engine<'a> {
   rect_batch: Option<RectBatch<'a>>,
   command_pool: CommandPool,
   command_buffers: Vec<CommandBuffer>,
+  descriptor_pool: DescriptorPool,
+  descriptor_set: DescriptorSet,
   image_avail_semaphores: Vec<Semaphore>,
   render_done_semaphores: Vec<Semaphore>,
   in_flight_fences: Vec<Fence>,
@@ -121,7 +125,7 @@ impl<'a> Engine<'a> {
       pp_enabled_extension_names: enabled_instance_exts.as_ptr(),
 
       #[cfg(debug_assertions)]
-      p_next: &validation_features as *const _ as *const c_void,
+      p_next: &validation_features as *const _ as *const _,
 
       ..Default::default()
     };
@@ -274,11 +278,17 @@ impl<'a> Engine<'a> {
         .as_slice(),
     );
 
+    let device_vk_12_features = PhysicalDeviceVulkan12Features {
+      buffer_device_address: vk::TRUE,
+      ..Default::default()
+    };
+
     let device_create_info = DeviceCreateInfo {
       queue_create_info_count: queue_create_infos.len() as _,
       p_queue_create_infos: queue_create_infos.as_ptr(),
       enabled_extension_count: enabled_device_exts.len() as _,
       pp_enabled_extension_names: enabled_device_exts.as_ptr(),
+      p_next: &device_vk_12_features as *const _ as *const _,
       ..Default::default()
     };
 
@@ -313,7 +323,7 @@ impl<'a> Engine<'a> {
         device: (*device).clone(),
         physical_device,
         debug_settings: AllocatorDebugSettings::default(),
-        buffer_device_address: false,
+        buffer_device_address: true,
         allocation_sizes: AllocationSizes::new(MIN_ALLOC_SIZE, MIN_ALLOC_SIZE),
       })
       .unwrap(),
@@ -324,18 +334,6 @@ impl<'a> Engine<'a> {
       memory_allocator.clone(),
       drawable_caps.rect_cap,
     );
-
-    unsafe {
-      device
-        .bind_buffer_memory2(&[
-          rect_batch.inst_buffer.bind_buffer_mem_info,
-          rect_batch.vert_buffer.bind_staging_buffer_mem_info,
-          rect_batch.vert_buffer.bind_buffer_mem_info,
-          rect_batch.index_buffer.bind_staging_buffer_mem_info,
-          rect_batch.index_buffer.bind_buffer_mem_info,
-        ])
-        .unwrap();
-    }
 
     let command_pool_create_info = CommandPoolCreateInfo {
       flags: CommandPoolCreateFlags::TRANSIENT | CommandPoolCreateFlags::RESET_COMMAND_BUFFER,
@@ -388,6 +386,39 @@ impl<'a> Engine<'a> {
         .unwrap();
     }
 
+    let descriptor_pool_sizes = [DescriptorPoolSize {
+      ty: DescriptorType::COMBINED_IMAGE_SAMPLER,
+      descriptor_count: 1,
+    }];
+
+    let descriptor_pool_create_info = DescriptorPoolCreateInfo {
+      max_sets: 1,
+      pool_size_count: descriptor_pool_sizes.len() as _,
+      p_pool_sizes: descriptor_pool_sizes.as_ptr(),
+      ..Default::default()
+    };
+
+    let descriptor_pool = unsafe {
+      device
+        .create_descriptor_pool(&descriptor_pool_create_info, None)
+        .unwrap()
+    };
+
+    let descriptor_set_alloc_info = DescriptorSetAllocateInfo {
+      descriptor_pool,
+      descriptor_set_count: 1,
+      p_set_layouts: &rect_batch.descriptor_set_layout,
+      ..Default::default()
+    };
+
+    let descriptor_set = unsafe {
+      device
+        .allocate_descriptor_sets(&descriptor_set_alloc_info)
+        .unwrap()[0]
+    };
+
+    rect_batch.init_descriptor_set(descriptor_set);
+
     let (image_avail_semaphores, (render_done_semaphores, in_flight_fences)): (
       Vec<Semaphore>,
       (Vec<Semaphore>, Vec<Fence>),
@@ -436,6 +467,8 @@ impl<'a> Engine<'a> {
       memory_allocator: Some(memory_allocator),
       command_pool,
       command_buffers,
+      descriptor_pool,
+      descriptor_set,
       image_avail_semaphores,
       render_done_semaphores,
       in_flight_fences,
@@ -454,8 +487,7 @@ impl<'a> Engine<'a> {
     unsafe {
       this.device.queue_wait_idle(graphics_queue).unwrap();
       let rect_batch = this.rect_batch.as_mut().unwrap();
-      rect_batch.index_buffer.drop_staging();
-      rect_batch.vert_buffer.drop_staging();
+      rect_batch.font_atlas.image.drop_staging();
     }
 
     this
@@ -531,11 +563,11 @@ impl<'a> Engine<'a> {
         &subpass_begin_info,
       );
 
-      self
-        .rect_batch
-        .as_ref()
-        .unwrap()
-        .record_draw_commands(command_buffer, self.surface_extent);
+      self.rect_batch.as_ref().unwrap().record_draw_commands(
+        command_buffer,
+        self.descriptor_set,
+        self.surface_extent,
+      );
 
       self
         .device
@@ -850,6 +882,10 @@ impl Drop for Engine<'_> {
       self.image_avail_semaphores.iter().for_each(|&semaphore| {
         self.device.destroy_semaphore(semaphore, None);
       });
+
+      self
+        .device
+        .destroy_descriptor_pool(self.descriptor_pool, None);
 
       self.device.destroy_command_pool(self.command_pool, None);
       drop(mem::take(&mut self.rect_batch));

@@ -1,15 +1,20 @@
 use crate::{
-  buffers::{StaticBuffer, StreamBuffer},
+  buffers::StreamBuffer,
   collections::SparseVec,
+  font_atlas::FontAtlas,
   models::Rect,
   pipelines::{RectPipeline, RectPushConstant},
-  shaders::{RectFragShader, RectVertShader, RectVertex},
+  shaders::{RectFragShader, RectVertShader},
 };
 use ash::{
   Device,
   vk::{
-    BufferUsageFlags, CommandBuffer, Extent2D, IndexType, PipelineBindPoint, RenderPass,
-    ShaderStageFlags,
+    self, AccessFlags, BufferDeviceAddressInfo, BufferUsageFlags, CommandBuffer, DependencyFlags,
+    DescriptorImageInfo, DescriptorSet, DescriptorSetLayout, DescriptorSetLayoutBinding,
+    DescriptorSetLayoutCreateInfo, DescriptorType, DeviceAddress, Extent2D, ImageAspectFlags,
+    ImageLayout, ImageMemoryBarrier, ImageSubresourceRange, PipelineBindPoint, PipelineLayout,
+    PipelineLayoutCreateInfo, PipelineStageFlags, PushConstantRange, RenderPass, ShaderStageFlags,
+    WriteDescriptorSet,
   },
 };
 use atomic_refcell::AtomicRefCell;
@@ -17,30 +22,15 @@ use gpu_allocator::vulkan::Allocator;
 use rayon::prelude::*;
 use std::{cell::RefCell, mem, ptr, rc::Rc};
 
-const VERTICES: &[RectVertex] = &[
-  RectVertex {
-    position: (0.0, 0.0),
-  },
-  RectVertex {
-    position: (1.0, 0.0),
-  },
-  RectVertex {
-    position: (1.0, 1.0),
-  },
-  RectVertex {
-    position: (0.0, 1.0),
-  },
-];
-
-const INDICES: &[u16] = &[0, 1, 2, 2, 3, 0];
-
 pub(crate) struct RectBatch<'a> {
   device: Rc<Device>,
   vert_shader: RectVertShader<'a>,
   frag_shader: RectFragShader<'a>,
-  pub(crate) inst_buffer: StreamBuffer<'a>,
-  pub(crate) vert_buffer: StaticBuffer<'a>,
-  pub(crate) index_buffer: StaticBuffer<'a>,
+  pub(crate) descriptor_set_layout: DescriptorSetLayout,
+  pipeline_layout: PipelineLayout,
+  pub(crate) mesh_buffer: StreamBuffer,
+  mesh_buffer_addr: DeviceAddress,
+  pub(crate) font_atlas: FontAtlas,
   pub(crate) pipeline: Option<RectPipeline>,
   rects: SparseVec<Rect>,
 }
@@ -54,40 +44,106 @@ impl RectBatch<'_> {
     let vert_shader = RectVertShader::new(device.clone());
     let frag_shader = RectFragShader::new(device.clone());
 
-    let inst_buffer = StreamBuffer::new(
+    let sampler_layout_binding = DescriptorSetLayoutBinding {
+      binding: 0,
+      descriptor_type: DescriptorType::COMBINED_IMAGE_SAMPLER,
+      descriptor_count: 1,
+      stage_flags: ShaderStageFlags::FRAGMENT,
+      ..Default::default()
+    };
+
+    let descriptor_set_layout_create_info = DescriptorSetLayoutCreateInfo {
+      binding_count: 1,
+      p_bindings: &sampler_layout_binding,
+      ..Default::default()
+    };
+
+    let descriptor_set_layout = unsafe {
+      device
+        .create_descriptor_set_layout(&descriptor_set_layout_create_info, None)
+        .unwrap()
+    };
+
+    let push_const_range = PushConstantRange {
+      stage_flags: ShaderStageFlags::VERTEX,
+      size: mem::size_of::<RectPushConstant>() as _,
+      ..Default::default()
+    };
+
+    let pipeline_layout_create_info = PipelineLayoutCreateInfo {
+      set_layout_count: 1,
+      p_set_layouts: &descriptor_set_layout,
+      push_constant_range_count: 1,
+      p_push_constant_ranges: &push_const_range,
+      ..Default::default()
+    };
+
+    let pipeline_layout = unsafe {
+      device
+        .create_pipeline_layout(&pipeline_layout_create_info, None)
+        .unwrap()
+    };
+
+    let mesh_buffer = StreamBuffer::new(
       device.clone(),
       memory_allocator.clone(),
-      "rect_inst_buffer",
+      "rect_mesh_buffer",
       (cap * mem::size_of::<Rect>()) as _,
-      BufferUsageFlags::VERTEX_BUFFER,
+      BufferUsageFlags::STORAGE_BUFFER | BufferUsageFlags::SHADER_DEVICE_ADDRESS,
     );
 
-    let vert_buffer = StaticBuffer::new(
-      device.clone(),
-      memory_allocator.clone(),
-      "rect_vert_buffer",
-      BufferUsageFlags::VERTEX_BUFFER,
-      VERTICES,
-    );
+    let mesh_buffer_addr_info = BufferDeviceAddressInfo {
+      buffer: mesh_buffer.buffer,
+      ..Default::default()
+    };
 
-    let index_buffer = StaticBuffer::new(
+    let mesh_buffer_addr = unsafe { device.get_buffer_device_address(&mesh_buffer_addr_info) };
+
+    let font_atlas = FontAtlas::new(
       device.clone(),
       memory_allocator.clone(),
-      "rect_index_buffer",
-      BufferUsageFlags::INDEX_BUFFER,
-      INDICES,
+      "assets/fonts/arial.ttf",
+      32,
+      '0'..='9',
+      (128, 128),
     );
 
     Self {
       device,
       vert_shader,
       frag_shader,
-      inst_buffer,
-      vert_buffer,
-      index_buffer,
+      descriptor_set_layout,
+      pipeline_layout,
+      mesh_buffer,
+      mesh_buffer_addr,
+      font_atlas,
       pipeline: None,
       rects: SparseVec::with_capacity(cap),
     }
+  }
+
+  pub(crate) fn init_descriptor_set(&self, descriptor_set: DescriptorSet) {
+    let descriptor_image_info = DescriptorImageInfo {
+      sampler: self.frag_shader.sampler,
+      image_view: self.font_atlas.image.view,
+      image_layout: ImageLayout::SHADER_READ_ONLY_OPTIMAL,
+    };
+
+    let write_image_descriptor_set = WriteDescriptorSet {
+      dst_set: descriptor_set,
+      dst_binding: 0,
+      dst_array_element: 0,
+      descriptor_count: 1,
+      descriptor_type: DescriptorType::COMBINED_IMAGE_SAMPLER,
+      p_image_info: &descriptor_image_info,
+      ..Default::default()
+    };
+
+    unsafe {
+      self
+        .device
+        .update_descriptor_sets(&[write_image_descriptor_set], &[])
+    };
   }
 
   pub(crate) fn on_swapchain_suboptimal(
@@ -100,6 +156,7 @@ impl RectBatch<'_> {
       surface_extent,
       &self.vert_shader,
       &self.frag_shader,
+      self.pipeline_layout,
       render_pass,
       self.pipeline.as_ref(),
     );
@@ -109,19 +166,69 @@ impl RectBatch<'_> {
   }
 
   pub(crate) fn record_init_commands(&self, command_buffer: CommandBuffer) {
+    let write_image_memory_barrier = ImageMemoryBarrier {
+      src_access_mask: AccessFlags::NONE,
+      dst_access_mask: AccessFlags::TRANSFER_WRITE,
+      old_layout: ImageLayout::UNDEFINED,
+      new_layout: ImageLayout::TRANSFER_DST_OPTIMAL,
+      src_queue_family_index: vk::QUEUE_FAMILY_IGNORED,
+      dst_queue_family_index: vk::QUEUE_FAMILY_IGNORED,
+      image: self.font_atlas.image.image,
+      subresource_range: ImageSubresourceRange {
+        aspect_mask: ImageAspectFlags::COLOR,
+        base_mip_level: 0,
+        level_count: 1,
+        base_array_layer: 0,
+        layer_count: 1,
+      },
+      ..Default::default()
+    };
+
+    let read_image_memory_barrier = ImageMemoryBarrier {
+      src_access_mask: AccessFlags::TRANSFER_WRITE,
+      dst_access_mask: AccessFlags::SHADER_READ,
+      old_layout: ImageLayout::TRANSFER_DST_OPTIMAL,
+      new_layout: ImageLayout::SHADER_READ_ONLY_OPTIMAL,
+      src_queue_family_index: vk::QUEUE_FAMILY_IGNORED,
+      dst_queue_family_index: vk::QUEUE_FAMILY_IGNORED,
+      image: self.font_atlas.image.image,
+      subresource_range: ImageSubresourceRange {
+        aspect_mask: ImageAspectFlags::COLOR,
+        base_mip_level: 0,
+        level_count: 1,
+        base_array_layer: 0,
+        layer_count: 1,
+      },
+      ..Default::default()
+    };
+
     unsafe {
-      self.device.cmd_copy_buffer(
+      self.device.cmd_pipeline_barrier(
         command_buffer,
-        self.vert_buffer.staging_buffer,
-        self.vert_buffer.buffer,
-        &[self.vert_buffer.buffer_copy],
+        PipelineStageFlags::TOP_OF_PIPE,
+        PipelineStageFlags::TRANSFER,
+        DependencyFlags::empty(),
+        &[],
+        &[],
+        &[write_image_memory_barrier],
       );
 
-      self.device.cmd_copy_buffer(
+      self.device.cmd_copy_buffer_to_image(
         command_buffer,
-        self.index_buffer.staging_buffer,
-        self.index_buffer.buffer,
-        &[self.index_buffer.buffer_copy],
+        self.font_atlas.image.staging_buffer,
+        self.font_atlas.image.image,
+        ImageLayout::TRANSFER_DST_OPTIMAL,
+        &self.font_atlas.buffer_image_copies,
+      );
+
+      self.device.cmd_pipeline_barrier(
+        command_buffer,
+        PipelineStageFlags::TRANSFER,
+        PipelineStageFlags::FRAGMENT_SHADER,
+        DependencyFlags::empty(),
+        &[],
+        &[],
+        &[read_image_memory_barrier],
       );
     }
   }
@@ -129,6 +236,7 @@ impl RectBatch<'_> {
   pub(crate) fn record_draw_commands(
     &self,
     command_buffer: CommandBuffer,
+    descriptor_set: DescriptorSet,
     surface_extent: Extent2D,
   ) {
     if self.rects.is_empty() {
@@ -137,6 +245,7 @@ impl RectBatch<'_> {
 
     let rect_push_const = RectPushConstant {
       camera_size: (surface_extent.width as _, surface_extent.height as _),
+      mesh_buffer_addr: self.mesh_buffer_addr,
     };
 
     let pipeline = self.pipeline.as_ref().unwrap();
@@ -148,46 +257,36 @@ impl RectBatch<'_> {
         pipeline.pipeline,
       );
 
-      self.device.cmd_bind_vertex_buffers(
+      self.device.cmd_bind_descriptor_sets(
         command_buffer,
+        PipelineBindPoint::GRAPHICS,
+        self.pipeline_layout,
         0,
-        &[self.vert_buffer.buffer, self.inst_buffer.buffer],
-        &[0, 0],
-      );
-
-      self.device.cmd_bind_index_buffer(
-        command_buffer,
-        self.index_buffer.buffer,
-        0,
-        IndexType::UINT16,
+        &[descriptor_set],
+        &[],
       );
 
       self.device.cmd_push_constants(
         command_buffer,
-        pipeline.layout,
+        self.pipeline_layout,
         ShaderStageFlags::VERTEX,
         0,
         crate::as_bytes(&rect_push_const),
       );
 
-      self.device.cmd_draw_indexed(
-        command_buffer,
-        INDICES.len() as _,
-        self.rects.len() as _,
-        0,
-        0,
-        0,
-      );
+      self
+        .device
+        .cmd_draw(command_buffer, (6 * self.rects.len()) as _, 1, 0, 0);
     }
   }
 
   pub(crate) fn add(&mut self, rect: Rect) -> u16 {
-    let mapped_inst_alloc = self.inst_buffer.alloc.mapped_ptr().unwrap();
+    let mapped_mesh_alloc = self.mesh_buffer.alloc.mapped_ptr().unwrap();
 
     unsafe {
       ptr::copy_nonoverlapping(
         &rect,
-        (mapped_inst_alloc.as_ptr() as *mut Rect).add(self.rects.len()),
+        (mapped_mesh_alloc.as_ptr() as *mut Rect).add(self.rects.len()),
         1,
       );
     }
@@ -196,12 +295,12 @@ impl RectBatch<'_> {
   }
 
   pub(crate) fn batch_add(&mut self, rects: Vec<Rect>) -> Vec<u16> {
-    let mapped_inst_alloc = self.inst_buffer.alloc.mapped_ptr().unwrap();
+    let mapped_mesh_alloc = self.mesh_buffer.alloc.mapped_ptr().unwrap();
 
     unsafe {
       ptr::copy_nonoverlapping(
         rects.as_ptr(),
-        (mapped_inst_alloc.as_ptr() as *mut Rect).add(self.rects.len()),
+        (mapped_mesh_alloc.as_ptr() as *mut Rect).add(self.rects.len()),
         rects.len(),
       );
     }
@@ -210,12 +309,12 @@ impl RectBatch<'_> {
   }
 
   pub(crate) fn update(&mut self, id: u16, rect: Rect) {
-    let mapped_inst_alloc = self.inst_buffer.alloc.mapped_ptr().unwrap();
+    let mapped_mesh_alloc = self.mesh_buffer.alloc.mapped_ptr().unwrap();
 
     unsafe {
       ptr::copy_nonoverlapping(
         &rect,
-        (mapped_inst_alloc.as_ptr() as *mut Rect).add(self.rects.get_dense_index(id) as _),
+        (mapped_mesh_alloc.as_ptr() as *mut Rect).add(self.rects.get_dense_index(id) as _),
         1,
       );
     }
@@ -228,11 +327,11 @@ impl RectBatch<'_> {
       .par_iter()
       .zip(rects.par_iter())
       .for_each(|(&id, rect)| unsafe {
-        let mapped_inst_alloc = self.inst_buffer.alloc.mapped_ptr().unwrap();
+        let mapped_mesh_alloc = self.mesh_buffer.alloc.mapped_ptr().unwrap();
 
         ptr::copy_nonoverlapping(
           rect,
-          (mapped_inst_alloc.as_ptr() as *mut Rect).add(self.rects.get_dense_index(id) as _),
+          (mapped_mesh_alloc.as_ptr() as *mut Rect).add(self.rects.get_dense_index(id) as _),
           1,
         );
       });
@@ -249,12 +348,12 @@ impl RectBatch<'_> {
     };
 
     let rect = rect.borrow();
-    let mapped_inst_alloc = self.inst_buffer.alloc.mapped_ptr().unwrap();
+    let mapped_mesh_alloc = self.mesh_buffer.alloc.mapped_ptr().unwrap();
 
     unsafe {
       ptr::copy_nonoverlapping(
         &*rect,
-        (mapped_inst_alloc.as_ptr() as *mut Rect).add(index as _),
+        (mapped_mesh_alloc.as_ptr() as *mut Rect).add(index as _),
         1,
       );
     }
@@ -280,12 +379,12 @@ impl RectBatch<'_> {
       })
       .for_each(|(index, rect)| {
         let rect = rect.borrow();
-        let mapped_inst_alloc = self.inst_buffer.alloc.mapped_ptr().unwrap();
+        let mapped_mesh_alloc = self.mesh_buffer.alloc.mapped_ptr().unwrap();
 
         unsafe {
           ptr::copy_nonoverlapping(
             &*rect,
-            (mapped_inst_alloc.as_ptr() as *mut Rect).add(index as _),
+            (mapped_mesh_alloc.as_ptr() as *mut Rect).add(index as _),
             1,
           );
         }
@@ -294,5 +393,19 @@ impl RectBatch<'_> {
 
   pub(crate) fn clear(&mut self) {
     self.rects.clear();
+  }
+}
+
+impl Drop for RectBatch<'_> {
+  fn drop(&mut self) {
+    unsafe {
+      self
+        .device
+        .destroy_pipeline_layout(self.pipeline_layout, None);
+
+      self
+        .device
+        .destroy_descriptor_set_layout(self.descriptor_set_layout, None);
+    }
   }
 }

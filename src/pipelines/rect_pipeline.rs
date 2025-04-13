@@ -2,26 +2,25 @@ use crate::shaders::{RectFragShader, RectVertShader};
 use ash::{
   Device,
   vk::{
-    ColorComponentFlags, CullModeFlags, Extent2D, FrontFace, GraphicsPipelineCreateInfo, Offset2D,
-    Pipeline, PipelineCache, PipelineColorBlendAttachmentState, PipelineColorBlendStateCreateInfo,
-    PipelineCreateFlags, PipelineInputAssemblyStateCreateInfo, PipelineLayout,
-    PipelineLayoutCreateInfo, PipelineMultisampleStateCreateInfo,
+    ColorComponentFlags, CullModeFlags, DeviceAddress, Extent2D, FrontFace,
+    GraphicsPipelineCreateInfo, Offset2D, Pipeline, PipelineCache,
+    PipelineColorBlendAttachmentState, PipelineColorBlendStateCreateInfo, PipelineCreateFlags,
+    PipelineInputAssemblyStateCreateInfo, PipelineLayout, PipelineMultisampleStateCreateInfo,
     PipelineRasterizationStateCreateInfo, PipelineViewportStateCreateInfo, PolygonMode,
-    PrimitiveTopology, PushConstantRange, Rect2D, RenderPass, SampleCountFlags, ShaderStageFlags,
-    Viewport,
+    PrimitiveTopology, Rect2D, RenderPass, SampleCountFlags, Viewport,
   },
 };
-use std::{mem, rc::Rc};
+use std::rc::Rc;
 
 #[repr(C, align(8))]
 #[derive(Clone, Copy)]
 pub(crate) struct PushConstant {
   pub(crate) camera_size: (f32, f32),
+  pub(crate) mesh_buffer_addr: DeviceAddress,
 }
 
 pub(crate) struct RectPipeline {
   device: Rc<Device>,
-  pub(crate) layout: PipelineLayout,
   pub(crate) pipeline: Pipeline,
 }
 
@@ -31,6 +30,7 @@ impl RectPipeline {
     surface_extent: Extent2D,
     vert_shader: &RectVertShader<'_>,
     frag_shader: &RectFragShader<'_>,
+    layout: PipelineLayout,
     render_pass: RenderPass,
     base_pipeline: Option<&RectPipeline>,
   ) -> Self {
@@ -85,24 +85,6 @@ impl RectPipeline {
       ..Default::default()
     };
 
-    let push_const_range = PushConstantRange {
-      stage_flags: ShaderStageFlags::VERTEX,
-      size: mem::size_of::<PushConstant>() as _,
-      ..Default::default()
-    };
-
-    let layout_create_info = PipelineLayoutCreateInfo {
-      push_constant_range_count: 1,
-      p_push_constant_ranges: &push_const_range,
-      ..Default::default()
-    };
-
-    let layout = unsafe {
-      device
-        .create_pipeline_layout(&layout_create_info, None)
-        .unwrap()
-    };
-
     let shader_stage_create_infos = [
       vert_shader.shader_stage_create_info,
       frag_shader.shader_stage_create_info,
@@ -142,7 +124,6 @@ impl RectPipeline {
 
     Self {
       device,
-      layout,
       pipeline: pipelines[0],
     }
   }
@@ -150,9 +131,6 @@ impl RectPipeline {
 
 impl Drop for RectPipeline {
   fn drop(&mut self) {
-    unsafe {
-      self.device.destroy_pipeline(self.pipeline, None);
-      self.device.destroy_pipeline_layout(self.layout, None);
-    }
+    unsafe { self.device.destroy_pipeline(self.pipeline, None) };
   }
 }

@@ -1,6 +1,10 @@
 use ash::{
   Device,
-  vk::{PipelineShaderStageCreateInfo, ShaderModule, ShaderModuleCreateInfo, ShaderStageFlags},
+  vk::{
+    self, BorderColor, CompareOp, Filter, PipelineShaderStageCreateInfo, Sampler,
+    SamplerAddressMode, SamplerCreateInfo, SamplerMipmapMode, ShaderModule, ShaderModuleCreateInfo,
+    ShaderStageFlags,
+  },
 };
 use std::{ffi::CString, rc::Rc};
 
@@ -8,6 +12,7 @@ pub(crate) struct RectFragShader<'a> {
   device: Rc<Device>,
   shader: ShaderModule,
   _entry_point_name: CString,
+  pub(crate) sampler: Sampler,
   pub(crate) shader_stage_create_info: PipelineShaderStageCreateInfo<'a>,
 }
 
@@ -36,10 +41,28 @@ impl RectFragShader<'_> {
       ..Default::default()
     };
 
+    let sampler_create_info = SamplerCreateInfo {
+      mag_filter: Filter::NEAREST,
+      min_filter: Filter::NEAREST,
+      mipmap_mode: SamplerMipmapMode::NEAREST,
+      address_mode_u: SamplerAddressMode::CLAMP_TO_BORDER,
+      address_mode_v: SamplerAddressMode::CLAMP_TO_BORDER,
+      address_mode_w: SamplerAddressMode::CLAMP_TO_BORDER,
+      mip_lod_bias: 0.0,
+      anisotropy_enable: vk::FALSE,
+      compare_enable: vk::FALSE,
+      border_color: BorderColor::INT_OPAQUE_WHITE,
+      unnormalized_coordinates: vk::TRUE,
+      ..Default::default()
+    };
+
+    let sampler = unsafe { device.create_sampler(&sampler_create_info, None).unwrap() };
+
     Self {
       device,
       shader,
       _entry_point_name: shader_entry_point_name,
+      sampler,
       shader_stage_create_info,
     }
   }
@@ -48,6 +71,7 @@ impl RectFragShader<'_> {
 impl Drop for RectFragShader<'_> {
   fn drop(&mut self) {
     unsafe {
+      self.device.destroy_sampler(self.sampler, None);
       self.device.destroy_shader_module(self.shader, None);
     }
   }

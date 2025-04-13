@@ -1,8 +1,11 @@
 use ash::{
   Device,
   vk::{
-    BindBufferMemoryInfo, Buffer, BufferCopy, BufferCreateInfo, BufferMemoryRequirementsInfo2,
-    BufferUsageFlags, MemoryRequirements2, SharingMode,
+    BindBufferMemoryInfo, BindImageMemoryInfo, Buffer, BufferCreateInfo,
+    BufferMemoryRequirementsInfo2, BufferUsageFlags, Extent3D, Format, Image, ImageAspectFlags,
+    ImageCreateInfo, ImageLayout, ImageMemoryRequirementsInfo2, ImageSubresourceRange, ImageTiling,
+    ImageType, ImageUsageFlags, ImageView, ImageViewCreateInfo, ImageViewType, MemoryRequirements2,
+    SampleCountFlags, SharingMode,
   },
 };
 use gpu_allocator::{
@@ -11,23 +14,25 @@ use gpu_allocator::{
 };
 use std::{cell::RefCell, mem, ptr, rc::Rc};
 
-pub(crate) struct StaticBuffer {
+pub(crate) struct StaticImage {
   device: Rc<Device>,
   memory_allocator: Rc<RefCell<Allocator>>,
   pub(crate) staging_buffer: Buffer,
   staging_alloc: Allocation,
-  pub(crate) buffer: Buffer,
+  pub(crate) image: Image,
   _alloc: Allocation,
-  pub(crate) buffer_copy: BufferCopy,
+  pub(crate) view: ImageView,
 }
 
-impl StaticBuffer {
-  pub(crate) fn new<T: Copy>(
+impl StaticImage {
+  pub(crate) fn new(
     device: Rc<Device>,
     memory_allocator: Rc<RefCell<Allocator>>,
     name: &str,
-    usage: BufferUsageFlags,
-    data: &[T],
+    format: Format,
+    size: (u32, u32),
+    usage: ImageUsageFlags,
+    data: &[u8],
   ) -> Self {
     let staging_buffer_create_info = BufferCreateInfo {
       size: mem::size_of_val(data) as _,
@@ -82,39 +87,50 @@ impl StaticBuffer {
       );
     }
 
-    let buffer_create_info = BufferCreateInfo {
-      size: mem::size_of_val(data) as _,
-      usage: BufferUsageFlags::TRANSFER_DST | usage,
+    let image_create_info = ImageCreateInfo {
+      image_type: ImageType::TYPE_2D,
+      format,
+      extent: Extent3D {
+        width: size.0,
+        height: size.1,
+        depth: 1,
+      },
+      mip_levels: 1,
+      array_layers: 1,
+      samples: SampleCountFlags::TYPE_1,
+      tiling: ImageTiling::OPTIMAL,
+      usage: ImageUsageFlags::TRANSFER_DST | usage,
       sharing_mode: SharingMode::EXCLUSIVE,
+      initial_layout: ImageLayout::UNDEFINED,
       ..Default::default()
     };
 
-    let buffer = unsafe { device.create_buffer(&buffer_create_info, None).unwrap() };
+    let image = unsafe { device.create_image(&image_create_info, None).unwrap() };
 
-    let buffer_mem_req_info = BufferMemoryRequirementsInfo2 {
-      buffer,
+    let image_mem_req_info = ImageMemoryRequirementsInfo2 {
+      image,
       ..Default::default()
     };
 
-    let mut buffer_mem_req = MemoryRequirements2::default();
+    let mut image_mem_req = MemoryRequirements2::default();
 
     unsafe {
-      device.get_buffer_memory_requirements2(&buffer_mem_req_info, &mut buffer_mem_req);
+      device.get_image_memory_requirements2(&image_mem_req_info, &mut image_mem_req);
     }
 
     let alloc = memory_allocator
       .borrow_mut()
       .allocate(&AllocationCreateDesc {
         name,
-        requirements: buffer_mem_req.memory_requirements,
+        requirements: image_mem_req.memory_requirements,
         location: MemoryLocation::GpuOnly,
-        linear: true,
-        allocation_scheme: AllocationScheme::DedicatedBuffer(buffer),
+        linear: false,
+        allocation_scheme: AllocationScheme::DedicatedImage(image),
       })
       .unwrap();
 
-    let bind_buffer_mem_info = BindBufferMemoryInfo {
-      buffer,
+    let bind_image_mem_info = BindImageMemoryInfo {
+      image,
       memory: unsafe { alloc.memory() },
       memory_offset: alloc.offset(),
       ..Default::default()
@@ -122,13 +138,30 @@ impl StaticBuffer {
 
     unsafe {
       device
-        .bind_buffer_memory2(&[bind_staging_buffer_mem_info, bind_buffer_mem_info])
+        .bind_buffer_memory2(&[bind_staging_buffer_mem_info])
         .unwrap();
+
+      device.bind_image_memory2(&[bind_image_mem_info]).unwrap();
     }
 
-    let buffer_copy = BufferCopy {
-      size: mem::size_of_val(data) as _,
+    let image_view_create_info = ImageViewCreateInfo {
+      image,
+      view_type: ImageViewType::TYPE_2D,
+      format,
+      subresource_range: ImageSubresourceRange {
+        aspect_mask: ImageAspectFlags::COLOR,
+        base_mip_level: 0,
+        level_count: 1,
+        base_array_layer: 0,
+        layer_count: 1,
+      },
       ..Default::default()
+    };
+
+    let image_view = unsafe {
+      device
+        .create_image_view(&image_view_create_info, None)
+        .unwrap()
     };
 
     Self {
@@ -136,9 +169,9 @@ impl StaticBuffer {
       memory_allocator,
       staging_buffer,
       staging_alloc,
-      buffer,
+      image,
       _alloc: alloc,
-      buffer_copy,
+      view: image_view,
     }
   }
 
@@ -155,8 +188,11 @@ impl StaticBuffer {
   }
 }
 
-impl Drop for StaticBuffer {
+impl Drop for StaticImage {
   fn drop(&mut self) {
-    unsafe { self.device.destroy_buffer(self.buffer, None) };
+    unsafe {
+      self.device.destroy_image_view(self.view, None);
+      self.device.destroy_image(self.image, None);
+    };
   }
 }

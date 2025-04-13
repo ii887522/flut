@@ -7,6 +7,8 @@ mod buffers;
 pub mod clock;
 pub mod collections;
 mod engine;
+mod font_atlas;
+mod images;
 pub mod models;
 mod pipelines;
 mod shaders;
@@ -15,10 +17,13 @@ pub use app::App;
 pub use app::AppConfig;
 pub use clock::Clock;
 pub use engine::Engine;
+
 use rayon::prelude::*;
-use std::ops::Bound;
-use std::ops::RangeBounds;
-use std::{mem, ptr};
+use std::{
+  mem,
+  ops::{Bound, RangeBounds},
+  ptr,
+};
 
 const unsafe fn as_bytes<T>(from: &T) -> &[u8] {
   unsafe { &*ptr::slice_from_raw_parts(from as *const _ as *const _, mem::size_of::<T>()) }
