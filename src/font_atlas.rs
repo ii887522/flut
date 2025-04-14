@@ -44,6 +44,8 @@ impl FontAtlas {
 
         let buffer_image_copy = BufferImageCopy {
           buffer_offset,
+          buffer_row_length: font_surface.pitch(),
+          buffer_image_height: font_surface.height(),
           image_subresource: ImageSubresourceLayers {
             aspect_mask: ImageAspectFlags::COLOR,
             mip_level: 0,
@@ -60,12 +62,11 @@ impl FontAtlas {
             height: font_surface.height(),
             depth: 1,
           },
-          ..Default::default()
         };
 
         glyph_position.0 += font_surface.width();
         max_glyph_height = max_glyph_height.max(font_surface.height());
-        buffer_offset += (font_surface.width() * font_surface.height()) as u64;
+        buffer_offset += (font_surface.pitch() * font_surface.height()) as u64;
 
         let pixels = font_surface.without_lock().unwrap();
         (buffer_image_copy, pixels.to_vec())

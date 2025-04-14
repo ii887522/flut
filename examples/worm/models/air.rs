@@ -1,5 +1,5 @@
 use crate::consts;
-use flut::models::Rect;
+use flut::models::Glyph;
 
 #[derive(Clone, Copy)]
 pub(crate) struct Air {
@@ -7,7 +7,7 @@ pub(crate) struct Air {
   pub(crate) drawable_id: u16,
 }
 
-impl From<Air> for Rect {
+impl From<Air> for Glyph {
   fn from(air: Air) -> Self {
     Self::new(
       (

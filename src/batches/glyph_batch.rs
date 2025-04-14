@@ -2,9 +2,9 @@ use crate::{
   buffers::StreamBuffer,
   collections::SparseVec,
   font_atlas::FontAtlas,
-  models::Rect,
-  pipelines::{RectPipeline, RectPushConstant},
-  shaders::{RectFragShader, RectVertShader},
+  models::Glyph,
+  pipelines::{GlyphPipeline, GlyphPushConstant},
+  shaders::{GlyphFragShader, GlyphVertShader},
 };
 use ash::{
   Device,
@@ -22,27 +22,27 @@ use gpu_allocator::vulkan::Allocator;
 use rayon::prelude::*;
 use std::{cell::RefCell, mem, ptr, rc::Rc};
 
-pub(crate) struct RectBatch<'a> {
+pub(crate) struct GlyphBatch<'a> {
   device: Rc<Device>,
-  vert_shader: RectVertShader<'a>,
-  frag_shader: RectFragShader<'a>,
+  vert_shader: GlyphVertShader<'a>,
+  frag_shader: GlyphFragShader<'a>,
   pub(crate) descriptor_set_layout: DescriptorSetLayout,
   pipeline_layout: PipelineLayout,
   pub(crate) mesh_buffer: StreamBuffer,
   mesh_buffer_addr: DeviceAddress,
   pub(crate) font_atlas: FontAtlas,
-  pub(crate) pipeline: Option<RectPipeline>,
-  rects: SparseVec<Rect>,
+  pub(crate) pipeline: Option<GlyphPipeline>,
+  glyphs: SparseVec<Glyph>,
 }
 
-impl RectBatch<'_> {
+impl GlyphBatch<'_> {
   pub(crate) fn new(
     device: Rc<Device>,
     memory_allocator: Rc<RefCell<Allocator>>,
     cap: usize,
   ) -> Self {
-    let vert_shader = RectVertShader::new(device.clone());
-    let frag_shader = RectFragShader::new(device.clone());
+    let vert_shader = GlyphVertShader::new(device.clone());
+    let frag_shader = GlyphFragShader::new(device.clone());
 
     let sampler_layout_binding = DescriptorSetLayoutBinding {
       binding: 0,
@@ -66,7 +66,7 @@ impl RectBatch<'_> {
 
     let push_const_range = PushConstantRange {
       stage_flags: ShaderStageFlags::VERTEX,
-      size: mem::size_of::<RectPushConstant>() as _,
+      size: mem::size_of::<GlyphPushConstant>() as _,
       ..Default::default()
     };
 
@@ -88,7 +88,7 @@ impl RectBatch<'_> {
       device.clone(),
       memory_allocator.clone(),
       "rect_mesh_buffer",
-      (cap * mem::size_of::<Rect>()) as _,
+      (cap * mem::size_of::<Glyph>()) as _,
       BufferUsageFlags::STORAGE_BUFFER | BufferUsageFlags::SHADER_DEVICE_ADDRESS,
     );
 
@@ -118,7 +118,7 @@ impl RectBatch<'_> {
       mesh_buffer_addr,
       font_atlas,
       pipeline: None,
-      rects: SparseVec::with_capacity(cap),
+      glyphs: SparseVec::with_capacity(cap),
     }
   }
 
@@ -151,7 +151,7 @@ impl RectBatch<'_> {
     surface_extent: Extent2D,
     render_pass: RenderPass,
   ) {
-    let rect_pipeline = RectPipeline::new(
+    let glyph_pipeline = GlyphPipeline::new(
       self.device.clone(),
       surface_extent,
       &self.vert_shader,
@@ -162,7 +162,7 @@ impl RectBatch<'_> {
     );
 
     drop(mem::take(&mut self.pipeline));
-    self.pipeline = Some(rect_pipeline);
+    self.pipeline = Some(glyph_pipeline);
   }
 
   pub(crate) fn record_init_commands(&self, command_buffer: CommandBuffer) {
@@ -239,11 +239,11 @@ impl RectBatch<'_> {
     descriptor_set: DescriptorSet,
     surface_extent: Extent2D,
   ) {
-    if self.rects.is_empty() {
+    if self.glyphs.is_empty() {
       return;
     }
 
-    let rect_push_const = RectPushConstant {
+    let glyph_push_const = GlyphPushConstant {
       camera_size: (surface_extent.width as _, surface_extent.height as _),
       mesh_buffer_addr: self.mesh_buffer_addr,
     };
@@ -271,58 +271,58 @@ impl RectBatch<'_> {
         self.pipeline_layout,
         ShaderStageFlags::VERTEX,
         0,
-        crate::as_bytes(&rect_push_const),
+        crate::as_bytes(&glyph_push_const),
       );
 
       self
         .device
-        .cmd_draw(command_buffer, (6 * self.rects.len()) as _, 1, 0, 0);
+        .cmd_draw(command_buffer, (6 * self.glyphs.len()) as _, 1, 0, 0);
     }
   }
 
-  pub(crate) fn add(&mut self, rect: Rect) -> u16 {
+  pub(crate) fn add(&mut self, rect: Glyph) -> u16 {
     let mapped_mesh_alloc = self.mesh_buffer.alloc.mapped_ptr().unwrap();
 
     unsafe {
       ptr::copy_nonoverlapping(
         &rect,
-        (mapped_mesh_alloc.as_ptr() as *mut Rect).add(self.rects.len()),
+        (mapped_mesh_alloc.as_ptr() as *mut Glyph).add(self.glyphs.len()),
         1,
       );
     }
 
-    self.rects.push(rect)
+    self.glyphs.push(rect)
   }
 
-  pub(crate) fn batch_add(&mut self, rects: Vec<Rect>) -> Vec<u16> {
+  pub(crate) fn batch_add(&mut self, rects: Vec<Glyph>) -> Vec<u16> {
     let mapped_mesh_alloc = self.mesh_buffer.alloc.mapped_ptr().unwrap();
 
     unsafe {
       ptr::copy_nonoverlapping(
         rects.as_ptr(),
-        (mapped_mesh_alloc.as_ptr() as *mut Rect).add(self.rects.len()),
+        (mapped_mesh_alloc.as_ptr() as *mut Glyph).add(self.glyphs.len()),
         rects.len(),
       );
     }
 
-    self.rects.par_extend(rects)
+    self.glyphs.par_extend(rects)
   }
 
-  pub(crate) fn update(&mut self, id: u16, rect: Rect) {
+  pub(crate) fn update(&mut self, id: u16, rect: Glyph) {
     let mapped_mesh_alloc = self.mesh_buffer.alloc.mapped_ptr().unwrap();
 
     unsafe {
       ptr::copy_nonoverlapping(
         &rect,
-        (mapped_mesh_alloc.as_ptr() as *mut Rect).add(self.rects.get_dense_index(id) as _),
+        (mapped_mesh_alloc.as_ptr() as *mut Glyph).add(self.glyphs.get_dense_index(id) as _),
         1,
       );
     }
 
-    self.rects[id] = AtomicRefCell::new(rect);
+    self.glyphs[id] = AtomicRefCell::new(rect);
   }
 
-  pub(crate) fn batch_update(&mut self, ids: &[u16], rects: Vec<Rect>) {
+  pub(crate) fn batch_update(&mut self, ids: &[u16], rects: Vec<Glyph>) {
     ids
       .par_iter()
       .zip(rects.par_iter())
@@ -331,19 +331,19 @@ impl RectBatch<'_> {
 
         ptr::copy_nonoverlapping(
           rect,
-          (mapped_mesh_alloc.as_ptr() as *mut Rect).add(self.rects.get_dense_index(id) as _),
+          (mapped_mesh_alloc.as_ptr() as *mut Glyph).add(self.glyphs.get_dense_index(id) as _),
           1,
         );
       });
 
-    self.rects.par_set(ids, rects);
+    self.glyphs.par_set(ids, rects);
   }
 
-  pub(crate) fn remove(&mut self, id: u16) -> Rect {
-    let index = self.rects.get_dense_index(id);
-    let result = self.rects.remove(id);
+  pub(crate) fn remove(&mut self, id: u16) -> Glyph {
+    let index = self.glyphs.get_dense_index(id);
+    let result = self.glyphs.remove(id);
 
-    let Some(rect) = self.rects.get_by_dense_index(index) else {
+    let Some(rect) = self.glyphs.get_by_dense_index(index) else {
       return result;
     };
 
@@ -353,7 +353,7 @@ impl RectBatch<'_> {
     unsafe {
       ptr::copy_nonoverlapping(
         &*rect,
-        (mapped_mesh_alloc.as_ptr() as *mut Rect).add(index as _),
+        (mapped_mesh_alloc.as_ptr() as *mut Glyph).add(index as _),
         1,
       );
     }
@@ -364,16 +364,16 @@ impl RectBatch<'_> {
   pub(crate) fn batch_remove(&mut self, ids: &[u16]) {
     let indices = ids
       .par_iter()
-      .map(|&id| self.rects.get_dense_index(id))
+      .map(|&id| self.glyphs.get_dense_index(id))
       .collect::<Vec<_>>();
 
-    self.rects.par_remove(ids);
+    self.glyphs.par_remove(ids);
 
     indices
       .into_par_iter()
       .filter_map(|index| {
         self
-          .rects
+          .glyphs
           .get_by_dense_index(index)
           .map(|rect| (index, rect))
       })
@@ -384,7 +384,7 @@ impl RectBatch<'_> {
         unsafe {
           ptr::copy_nonoverlapping(
             &*rect,
-            (mapped_mesh_alloc.as_ptr() as *mut Rect).add(index as _),
+            (mapped_mesh_alloc.as_ptr() as *mut Glyph).add(index as _),
             1,
           );
         }
@@ -392,11 +392,11 @@ impl RectBatch<'_> {
   }
 
   pub(crate) fn clear(&mut self) {
-    self.rects.clear();
+    self.glyphs.clear();
   }
 }
 
-impl Drop for RectBatch<'_> {
+impl Drop for GlyphBatch<'_> {
   fn drop(&mut self) {
     unsafe {
       self

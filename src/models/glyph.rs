@@ -1,6 +1,6 @@
 #[repr(C, align(16))]
 #[derive(Clone, Copy)]
-pub struct Rect {
+pub struct Glyph {
   position: (f32, f32),
   size: (f32, f32),
   color: (f32, f32, f32, f32),
@@ -8,7 +8,7 @@ pub struct Rect {
   pad: (f32, f32),
 }
 
-impl Rect {
+impl Glyph {
   pub const fn new(position: (f32, f32), size: (f32, f32), color: (u8, u8, u8)) -> Self {
     Self {
       position,

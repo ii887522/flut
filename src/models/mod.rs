@@ -1,3 +1,3 @@
-pub mod rect;
+pub mod glyph;
 
-pub use rect::Rect;
+pub use glyph::Glyph;

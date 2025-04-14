@@ -1,14 +1,13 @@
 use ash::{
   Device,
   vk::{
-    self, BorderColor, CompareOp, Filter, PipelineShaderStageCreateInfo, Sampler,
-    SamplerAddressMode, SamplerCreateInfo, SamplerMipmapMode, ShaderModule, ShaderModuleCreateInfo,
-    ShaderStageFlags,
+    self, BorderColor, Filter, PipelineShaderStageCreateInfo, Sampler, SamplerAddressMode,
+    SamplerCreateInfo, SamplerMipmapMode, ShaderModule, ShaderModuleCreateInfo, ShaderStageFlags,
   },
 };
 use std::{ffi::CString, rc::Rc};
 
-pub(crate) struct RectFragShader<'a> {
+pub(crate) struct GlyphFragShader<'a> {
   device: Rc<Device>,
   shader: ShaderModule,
   _entry_point_name: CString,
@@ -16,9 +15,9 @@ pub(crate) struct RectFragShader<'a> {
   pub(crate) shader_stage_create_info: PipelineShaderStageCreateInfo<'a>,
 }
 
-impl RectFragShader<'_> {
+impl GlyphFragShader<'_> {
   pub(crate) fn new(device: Rc<Device>) -> Self {
-    const SHADER_CODE: &[u8] = include_bytes!("../../target/shaders/rect.frag.spv");
+    const SHADER_CODE: &[u8] = include_bytes!("../../target/shaders/glyph.frag.spv");
 
     let shader_create_info = ShaderModuleCreateInfo {
       code_size: SHADER_CODE.len(),
@@ -51,7 +50,7 @@ impl RectFragShader<'_> {
       mip_lod_bias: 0.0,
       anisotropy_enable: vk::FALSE,
       compare_enable: vk::FALSE,
-      border_color: BorderColor::INT_OPAQUE_WHITE,
+      border_color: BorderColor::FLOAT_OPAQUE_WHITE,
       unnormalized_coordinates: vk::TRUE,
       ..Default::default()
     };
@@ -68,7 +67,7 @@ impl RectFragShader<'_> {
   }
 }
 
-impl Drop for RectFragShader<'_> {
+impl Drop for GlyphFragShader<'_> {
   fn drop(&mut self) {
     unsafe {
       self.device.destroy_sampler(self.sampler, None);

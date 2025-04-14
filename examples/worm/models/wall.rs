@@ -1,12 +1,12 @@
 use crate::consts;
-use flut::models::Rect;
+use flut::models::Glyph;
 
 #[derive(Clone, Copy)]
 pub(crate) struct Wall {
   pub(crate) position: u16,
 }
 
-impl From<Wall> for Rect {
+impl From<Wall> for Glyph {
   fn from(wall: Wall) -> Self {
     Self::new(
       (

@@ -1,6 +1,6 @@
 use super::Direction;
 use crate::consts;
-use flut::models::Rect;
+use flut::models::Glyph;
 use std::sync::atomic::{AtomicU16, Ordering};
 
 pub(crate) struct Worm {
@@ -19,7 +19,7 @@ impl Clone for Worm {
   }
 }
 
-impl From<Worm> for Rect {
+impl From<Worm> for Glyph {
   fn from(worm: Worm) -> Self {
     Self::new(
       (

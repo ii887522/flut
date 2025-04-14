@@ -1,4 +1,4 @@
-use crate::{batches::RectBatch, collections::StringSlice, models::Rect};
+use crate::{batches::GlyphBatch, collections::StringSlice, models::Glyph};
 use ash::{
   Device, Entry, Instance,
   khr::{surface, swapchain},
@@ -45,7 +45,7 @@ pub struct Engine<'a> {
   present_queue: Queue,
   swapchain_device: swapchain::Device,
   memory_allocator: Option<Rc<RefCell<Allocator>>>,
-  rect_batch: Option<RectBatch<'a>>,
+  glyph_batch: Option<GlyphBatch<'a>>,
   command_pool: CommandPool,
   command_buffers: Vec<CommandBuffer>,
   descriptor_pool: DescriptorPool,
@@ -329,7 +329,7 @@ impl<'a> Engine<'a> {
       .unwrap(),
     ));
 
-    let rect_batch = RectBatch::new(
+    let glyph_batch = GlyphBatch::new(
       device.clone(),
       memory_allocator.clone(),
       drawable_caps.rect_cap,
@@ -378,7 +378,7 @@ impl<'a> Engine<'a> {
         .begin_command_buffer(command_buffer, &command_buffer_begin_info)
         .unwrap();
 
-      rect_batch.record_init_commands(command_buffer);
+      glyph_batch.record_init_commands(command_buffer);
       device.end_command_buffer(command_buffer).unwrap();
 
       device
@@ -407,7 +407,7 @@ impl<'a> Engine<'a> {
     let descriptor_set_alloc_info = DescriptorSetAllocateInfo {
       descriptor_pool,
       descriptor_set_count: 1,
-      p_set_layouts: &rect_batch.descriptor_set_layout,
+      p_set_layouts: &glyph_batch.descriptor_set_layout,
       ..Default::default()
     };
 
@@ -417,7 +417,7 @@ impl<'a> Engine<'a> {
         .unwrap()[0]
     };
 
-    rect_batch.init_descriptor_set(descriptor_set);
+    glyph_batch.init_descriptor_set(descriptor_set);
 
     let (image_avail_semaphores, (render_done_semaphores, in_flight_fences)): (
       Vec<Semaphore>,
@@ -463,7 +463,7 @@ impl<'a> Engine<'a> {
       graphics_queue,
       present_queue,
       swapchain_device,
-      rect_batch: Some(rect_batch),
+      glyph_batch: Some(glyph_batch),
       memory_allocator: Some(memory_allocator),
       command_pool,
       command_buffers,
@@ -486,8 +486,8 @@ impl<'a> Engine<'a> {
 
     unsafe {
       this.device.queue_wait_idle(graphics_queue).unwrap();
-      let rect_batch = this.rect_batch.as_mut().unwrap();
-      rect_batch.font_atlas.image.drop_staging();
+      let glyph_batch = this.glyph_batch.as_mut().unwrap();
+      glyph_batch.font_atlas.image.drop_staging();
     }
 
     this
@@ -563,7 +563,7 @@ impl<'a> Engine<'a> {
         &subpass_begin_info,
       );
 
-      self.rect_batch.as_ref().unwrap().record_draw_commands(
+      self.glyph_batch.as_ref().unwrap().record_draw_commands(
         command_buffer,
         self.descriptor_set,
         self.surface_extent,
@@ -804,8 +804,8 @@ impl<'a> Engine<'a> {
         .unwrap()
     };
 
-    let rect_batch = self.rect_batch.as_mut().unwrap();
-    rect_batch.on_swapchain_suboptimal(surface_extent, render_pass);
+    let glyph_batch = self.glyph_batch.as_mut().unwrap();
+    glyph_batch.on_swapchain_suboptimal(surface_extent, render_pass);
 
     let swapchain_framebuffers = unsafe {
       swapchain_image_views
@@ -837,32 +837,32 @@ impl<'a> Engine<'a> {
     self.surface_extent = surface_extent;
   }
 
-  pub fn add_rect(&mut self, rect: Rect) -> u16 {
-    self.rect_batch.as_mut().unwrap().add(rect)
+  pub fn add_glyph(&mut self, glyph: Glyph) -> u16 {
+    self.glyph_batch.as_mut().unwrap().add(glyph)
   }
 
-  pub fn batch_add_rects(&mut self, rects: Vec<Rect>) -> Vec<u16> {
-    self.rect_batch.as_mut().unwrap().batch_add(rects)
+  pub fn batch_add_glyphs(&mut self, glyphs: Vec<Glyph>) -> Vec<u16> {
+    self.glyph_batch.as_mut().unwrap().batch_add(glyphs)
   }
 
-  pub fn update_rect(&mut self, id: u16, rect: Rect) {
-    self.rect_batch.as_mut().unwrap().update(id, rect);
+  pub fn update_glyph(&mut self, id: u16, glyph: Glyph) {
+    self.glyph_batch.as_mut().unwrap().update(id, glyph);
   }
 
-  pub fn batch_update_rects(&mut self, ids: &[u16], rects: Vec<Rect>) {
-    self.rect_batch.as_mut().unwrap().batch_update(ids, rects);
+  pub fn batch_update_glyphs(&mut self, ids: &[u16], glyphs: Vec<Glyph>) {
+    self.glyph_batch.as_mut().unwrap().batch_update(ids, glyphs);
   }
 
-  pub fn remove_rect(&mut self, id: u16) -> Rect {
-    self.rect_batch.as_mut().unwrap().remove(id)
+  pub fn remove_glyph(&mut self, id: u16) -> Glyph {
+    self.glyph_batch.as_mut().unwrap().remove(id)
   }
 
-  pub fn batch_remove_rects(&mut self, ids: &[u16]) {
-    self.rect_batch.as_mut().unwrap().batch_remove(ids);
+  pub fn batch_remove_glyphs(&mut self, ids: &[u16]) {
+    self.glyph_batch.as_mut().unwrap().batch_remove(ids);
   }
 
-  pub fn clear_rects(&mut self) {
-    self.rect_batch.as_mut().unwrap().clear();
+  pub fn clear_glyphs(&mut self) {
+    self.glyph_batch.as_mut().unwrap().clear();
   }
 }
 
@@ -888,7 +888,7 @@ impl Drop for Engine<'_> {
         .destroy_descriptor_pool(self.descriptor_pool, None);
 
       self.device.destroy_command_pool(self.command_pool, None);
-      drop(mem::take(&mut self.rect_batch));
+      drop(mem::take(&mut self.glyph_batch));
       drop(mem::take(&mut self.memory_allocator));
       self.device.destroy_render_pass(self.render_pass, None);
 

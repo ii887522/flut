@@ -41,5 +41,5 @@ void main() {
   const vec2 position = VERTICES[gl_VertexIndex % VERTICES.length()];
   gl_Position = vec4(position * scale + translation, 0.0, 1.0);
   fragColor = mesh.color.rgb;
-  fragTexCoord = position * scale + mesh.texPosition;
+  fragTexCoord = position * mesh.size + mesh.texPosition;
 }

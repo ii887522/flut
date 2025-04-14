@@ -7,7 +7,7 @@ use ash::{
 };
 use std::{ffi::CString, rc::Rc};
 
-pub(crate) struct RectVertShader<'a> {
+pub(crate) struct GlyphVertShader<'a> {
   device: Rc<Device>,
   shader: ShaderModule,
   _entry_point_name: CString,
@@ -15,9 +15,9 @@ pub(crate) struct RectVertShader<'a> {
   pub(crate) vert_input_stage_create_info: PipelineVertexInputStateCreateInfo<'a>,
 }
 
-impl RectVertShader<'_> {
+impl GlyphVertShader<'_> {
   pub(crate) fn new(device: Rc<Device>) -> Self {
-    const SHADER_CODE: &[u8] = include_bytes!("../../target/shaders/rect.vert.spv");
+    const SHADER_CODE: &[u8] = include_bytes!("../../target/shaders/text.vert.spv");
 
     let shader_create_info = ShaderModuleCreateInfo {
       code_size: SHADER_CODE.len(),
@@ -52,7 +52,7 @@ impl RectVertShader<'_> {
   }
 }
 
-impl Drop for RectVertShader<'_> {
+impl Drop for GlyphVertShader<'_> {
   fn drop(&mut self) {
     unsafe {
       self.device.destroy_shader_module(self.shader, None);

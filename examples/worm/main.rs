@@ -83,15 +83,15 @@ impl WormApp {
       .air
       .remove_by_dense_index(fastrand::u16(0..self.air.len() as _));
 
-    engine.remove_rect(rand_air.drawable_id);
+    engine.remove_glyph(rand_air.drawable_id);
 
     // Has spawn food before
     if self.food.position < u16::MAX {
       self.food.position = rand_air.position;
-      engine.update_rect(*self.food.drawable_id.get_mut(), self.food.clone().into());
+      engine.update_glyph(*self.food.drawable_id.get_mut(), self.food.clone().into());
     } else {
       self.food.position = rand_air.position;
-      self.food.drawable_id = AtomicU16::new(engine.add_rect(self.food.clone().into()));
+      self.food.drawable_id = AtomicU16::new(engine.add_glyph(self.food.clone().into()));
     }
   }
 
@@ -120,7 +120,7 @@ impl WormApp {
     let mut air_to_move = self.air.remove(self.calc_new_worm_position());
     air_to_move.position = worm_tail.position;
     self.air.push_by_id(worm_tail.position, air_to_move);
-    engine.update_rect(air_to_move.drawable_id, air_to_move.into());
+    engine.update_glyph(air_to_move.drawable_id, air_to_move.into());
   }
 
   fn move_worm(&mut self, engine: &mut Engine<'_>) {
@@ -136,7 +136,7 @@ impl WormApp {
     worm_cell_to_move.direction = worm_head.direction;
     worm_cell_to_move.position = new_position;
 
-    engine.update_rect(
+    engine.update_glyph(
       *worm_cell_to_move.drawable_id.get_mut(),
       worm_cell_to_move.clone().into(),
     );
@@ -159,7 +159,7 @@ impl WormApp {
       drawable_id: AtomicU16::new(u16::MAX),
     };
 
-    new_worm_head.drawable_id = AtomicU16::new(engine.add_rect(new_worm_head.clone().into()));
+    new_worm_head.drawable_id = AtomicU16::new(engine.add_glyph(new_worm_head.clone().into()));
     self.worm.push_front(new_worm_head);
   }
 }
@@ -218,7 +218,7 @@ impl App for WormApp {
       .collect();
 
     engine
-      .batch_add_rects(rects)
+      .batch_add_glyphs(rects)
       .into_par_iter()
       .enumerate()
       .for_each(|(index, id)| {

@@ -1,9 +1,9 @@
-use crate::shaders::{RectFragShader, RectVertShader};
+use crate::shaders::{GlyphFragShader, GlyphVertShader};
 use ash::{
   Device,
   vk::{
-    ColorComponentFlags, CullModeFlags, DeviceAddress, Extent2D, FrontFace,
-    GraphicsPipelineCreateInfo, Offset2D, Pipeline, PipelineCache,
+    self, BlendFactor, BlendOp, ColorComponentFlags, CullModeFlags, DeviceAddress, Extent2D,
+    FrontFace, GraphicsPipelineCreateInfo, Offset2D, Pipeline, PipelineCache,
     PipelineColorBlendAttachmentState, PipelineColorBlendStateCreateInfo, PipelineCreateFlags,
     PipelineInputAssemblyStateCreateInfo, PipelineLayout, PipelineMultisampleStateCreateInfo,
     PipelineRasterizationStateCreateInfo, PipelineViewportStateCreateInfo, PolygonMode,
@@ -19,20 +19,20 @@ pub(crate) struct PushConstant {
   pub(crate) mesh_buffer_addr: DeviceAddress,
 }
 
-pub(crate) struct RectPipeline {
+pub(crate) struct GlyphPipeline {
   device: Rc<Device>,
   pub(crate) pipeline: Pipeline,
 }
 
-impl RectPipeline {
+impl GlyphPipeline {
   pub(crate) fn new(
     device: Rc<Device>,
     surface_extent: Extent2D,
-    vert_shader: &RectVertShader<'_>,
-    frag_shader: &RectFragShader<'_>,
+    vert_shader: &GlyphVertShader<'_>,
+    frag_shader: &GlyphFragShader<'_>,
     layout: PipelineLayout,
     render_pass: RenderPass,
-    base_pipeline: Option<&RectPipeline>,
+    base_pipeline: Option<&GlyphPipeline>,
   ) -> Self {
     let input_assembly_state_create_info = PipelineInputAssemblyStateCreateInfo {
       topology: PrimitiveTopology::TRIANGLE_LIST,
@@ -75,8 +75,14 @@ impl RectPipeline {
     };
 
     let color_blend_attachment_state_create_info = PipelineColorBlendAttachmentState {
+      blend_enable: vk::TRUE,
+      src_color_blend_factor: BlendFactor::SRC_ALPHA,
+      dst_color_blend_factor: BlendFactor::ONE_MINUS_SRC_ALPHA,
+      color_blend_op: BlendOp::ADD,
+      src_alpha_blend_factor: BlendFactor::ONE,
+      dst_alpha_blend_factor: BlendFactor::ZERO,
+      alpha_blend_op: BlendOp::ADD,
       color_write_mask: ColorComponentFlags::RGBA,
-      ..Default::default()
     };
 
     let color_blend_state_create_info = PipelineColorBlendStateCreateInfo {
@@ -129,7 +135,7 @@ impl RectPipeline {
   }
 }
 
-impl Drop for RectPipeline {
+impl Drop for GlyphPipeline {
   fn drop(&mut self) {
     unsafe { self.device.destroy_pipeline(self.pipeline, None) };
   }
