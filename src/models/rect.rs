@@ -1,9 +1,10 @@
-#[repr(C, align(4))]
+use super::Glyph;
+
 #[derive(Clone, Copy)]
 pub struct Rect {
-  pub(crate) position: (f32, f32),
-  pub(crate) size: (f32, f32),
-  pub(crate) color: (f32, f32, f32),
+  pub(super) position: (f32, f32),
+  pub(super) size: (f32, f32),
+  pub(super) color: u32,
 }
 
 impl Rect {
@@ -11,11 +12,17 @@ impl Rect {
     Self {
       position,
       size,
-      color: (
-        color.0 as f32 / 255.0,
-        color.1 as f32 / 255.0,
-        color.2 as f32 / 255.0,
-      ),
+      color: crate::pack_color(color),
+    }
+  }
+}
+
+impl From<Glyph> for Rect {
+  fn from(glyph: Glyph) -> Self {
+    Self {
+      position: glyph.position,
+      size: glyph.size,
+      color: glyph.color,
     }
   }
 }

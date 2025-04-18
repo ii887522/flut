@@ -49,7 +49,7 @@ pub fn run(mut app: impl App) {
     .build()
     .unwrap();
 
-  if let Ok(favicon) = Surface::from_file("assets/favicon.png") {
+  if let Ok(favicon) = Surface::from_file("assets/images/favicon.png") {
     window.set_icon(favicon);
   }
 

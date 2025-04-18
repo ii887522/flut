@@ -1,3 +1,3 @@
-pub(super) mod rect_batch;
+pub(super) mod glyph_batch;
 
-pub(super) use rect_batch::RectBatch;
+pub(super) use glyph_batch::GlyphBatch;

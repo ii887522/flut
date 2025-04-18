@@ -23,8 +23,12 @@ impl From<Worm> for Rect {
   fn from(worm: Worm) -> Self {
     Self::new(
       (
-        ((worm.position % consts::GRID_SIZE.0) * (consts::CELL_SIZE.0 + consts::GAP_SIZE.0)) as _,
-        ((worm.position / consts::GRID_SIZE.0) * (consts::CELL_SIZE.1 + consts::GAP_SIZE.1)) as _,
+        (consts::WORLD_POSITION.0
+          + (worm.position % consts::GRID_SIZE.0) * (consts::CELL_SIZE.0 + consts::GAP_SIZE.0))
+          as _,
+        (consts::WORLD_POSITION.1
+          + (worm.position / consts::GRID_SIZE.0) * (consts::CELL_SIZE.1 + consts::GAP_SIZE.1))
+          as _,
       ),
       (consts::CELL_SIZE.0 as _, consts::CELL_SIZE.1 as _),
       (243, 125, 121),

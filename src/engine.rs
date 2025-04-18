@@ -1,4 +1,8 @@
-use crate::{batches::RectBatch, collections::StringSlice, models::Rect};
+use crate::{
+  batches::GlyphBatch,
+  collections::{SparseVec, StringSlice},
+  models::{Glyph, Rect, Text},
+};
 use ash::{
   Device, Entry, Instance,
   khr::{surface, swapchain},
@@ -7,24 +11,27 @@ use ash::{
     AttachmentReference2, AttachmentStoreOp, ClearColorValue, ClearValue, CommandBuffer,
     CommandBufferAllocateInfo, CommandBufferBeginInfo, CommandBufferLevel, CommandBufferUsageFlags,
     CommandPool, CommandPoolCreateFlags, CommandPoolCreateInfo, CompositeAlphaFlagsKHR,
-    DependencyFlags, DeviceCreateInfo, DeviceQueueCreateInfo, DeviceQueueInfo2, Extent2D, Fence,
-    FenceCreateFlags, FenceCreateInfo, Framebuffer, FramebufferCreateInfo, Handle, Image,
-    ImageAspectFlags, ImageLayout, ImageSubresourceRange, ImageUsageFlags, ImageView,
-    ImageViewCreateInfo, ImageViewType, InstanceCreateFlags, InstanceCreateInfo, Offset2D,
-    PhysicalDevice, PhysicalDeviceProperties2, PhysicalDeviceType, PipelineBindPoint,
-    PipelineStageFlags, PresentInfoKHR, PresentModeKHR, Queue, QueueFamilyProperties2, QueueFlags,
-    Rect2D, RenderPass, RenderPassBeginInfo, RenderPassCreateInfo2, SampleCountFlags, Semaphore,
-    SemaphoreCreateInfo, SharingMode, SubmitInfo, SubpassBeginInfo, SubpassContents,
-    SubpassDependency2, SubpassDescription2, SubpassEndInfo, SurfaceKHR, SwapchainCreateInfoKHR,
-    SwapchainKHR, ValidationFeatureEnableEXT, ValidationFeaturesEXT,
+    DependencyFlags, DescriptorPool, DescriptorPoolCreateInfo, DescriptorPoolSize, DescriptorSet,
+    DescriptorSetAllocateInfo, DescriptorType, DeviceCreateInfo, DeviceQueueCreateInfo,
+    DeviceQueueInfo2, Extent2D, Fence, FenceCreateFlags, FenceCreateInfo, Framebuffer,
+    FramebufferCreateInfo, Handle, Image, ImageAspectFlags, ImageLayout, ImageSubresourceRange,
+    ImageUsageFlags, ImageView, ImageViewCreateInfo, ImageViewType, InstanceCreateFlags,
+    InstanceCreateInfo, Offset2D, PhysicalDevice, PhysicalDeviceProperties2, PhysicalDeviceType,
+    PhysicalDeviceVulkan12Features, PipelineBindPoint, PipelineStageFlags, PresentInfoKHR,
+    PresentModeKHR, Queue, QueueFamilyProperties2, QueueFlags, Rect2D, RenderPass,
+    RenderPassBeginInfo, RenderPassCreateInfo2, SampleCountFlags, Semaphore, SemaphoreCreateInfo,
+    SharingMode, SubmitInfo, SubpassBeginInfo, SubpassContents, SubpassDependency2,
+    SubpassDescription2, SubpassEndInfo, SurfaceKHR, SwapchainCreateInfoKHR, SwapchainKHR,
+    ValidationFeatureEnableEXT, ValidationFeaturesEXT,
   },
 };
 use gpu_allocator::{
   AllocationSizes, AllocatorDebugSettings,
   vulkan::{Allocator, AllocatorCreateDesc},
 };
+use rayon::prelude::*;
 use sdl2::video::Window;
-use std::{cell::RefCell, ffi::c_void, mem, rc::Rc};
+use std::{cell::RefCell, mem, rc::Rc};
 
 const MAX_IN_FLIGHT_FRAME_COUNT: u32 = 3;
 const MIN_ALLOC_SIZE: u64 = 4 * 1024 * 1024;
@@ -43,9 +50,11 @@ pub struct Engine<'a> {
   present_queue: Queue,
   swapchain_device: swapchain::Device,
   memory_allocator: Option<Rc<RefCell<Allocator>>>,
-  rect_batch: Option<RectBatch<'a>>,
+  glyph_batch: Option<GlyphBatch<'a>>,
   command_pool: CommandPool,
   command_buffers: Vec<CommandBuffer>,
+  descriptor_pool: DescriptorPool,
+  descriptor_set: DescriptorSet,
   image_avail_semaphores: Vec<Semaphore>,
   render_done_semaphores: Vec<Semaphore>,
   in_flight_fences: Vec<Fence>,
@@ -56,15 +65,16 @@ pub struct Engine<'a> {
   swapchain_framebuffers: Vec<Framebuffer>,
   surface_extent: Extent2D,
   frame_index: usize,
+  text_ids: SparseVec<Vec<u16>>,
 }
 
 pub struct DrawableCaps {
-  pub rect_cap: usize,
+  pub glyph_cap: usize,
 }
 
 impl Default for DrawableCaps {
   fn default() -> Self {
-    Self { rect_cap: 3000 }
+    Self { glyph_cap: 3000 }
   }
 }
 
@@ -121,7 +131,7 @@ impl<'a> Engine<'a> {
       pp_enabled_extension_names: enabled_instance_exts.as_ptr(),
 
       #[cfg(debug_assertions)]
-      p_next: &validation_features as *const _ as *const c_void,
+      p_next: &validation_features as *const _ as *const _,
 
       ..Default::default()
     };
@@ -274,11 +284,17 @@ impl<'a> Engine<'a> {
         .as_slice(),
     );
 
+    let device_vk_12_features = PhysicalDeviceVulkan12Features {
+      buffer_device_address: vk::TRUE,
+      ..Default::default()
+    };
+
     let device_create_info = DeviceCreateInfo {
       queue_create_info_count: queue_create_infos.len() as _,
       p_queue_create_infos: queue_create_infos.as_ptr(),
       enabled_extension_count: enabled_device_exts.len() as _,
       pp_enabled_extension_names: enabled_device_exts.as_ptr(),
+      p_next: &device_vk_12_features as *const _ as *const _,
       ..Default::default()
     };
 
@@ -313,29 +329,17 @@ impl<'a> Engine<'a> {
         device: (*device).clone(),
         physical_device,
         debug_settings: AllocatorDebugSettings::default(),
-        buffer_device_address: false,
+        buffer_device_address: true,
         allocation_sizes: AllocationSizes::new(MIN_ALLOC_SIZE, MIN_ALLOC_SIZE),
       })
       .unwrap(),
     ));
 
-    let rect_batch = RectBatch::new(
+    let glyph_batch = GlyphBatch::new(
       device.clone(),
       memory_allocator.clone(),
-      drawable_caps.rect_cap,
+      drawable_caps.glyph_cap,
     );
-
-    unsafe {
-      device
-        .bind_buffer_memory2(&[
-          rect_batch.inst_buffer.bind_buffer_mem_info,
-          rect_batch.vert_buffer.bind_staging_buffer_mem_info,
-          rect_batch.vert_buffer.bind_buffer_mem_info,
-          rect_batch.index_buffer.bind_staging_buffer_mem_info,
-          rect_batch.index_buffer.bind_buffer_mem_info,
-        ])
-        .unwrap();
-    }
 
     let command_pool_create_info = CommandPoolCreateInfo {
       flags: CommandPoolCreateFlags::TRANSIENT | CommandPoolCreateFlags::RESET_COMMAND_BUFFER,
@@ -380,13 +384,46 @@ impl<'a> Engine<'a> {
         .begin_command_buffer(command_buffer, &command_buffer_begin_info)
         .unwrap();
 
-      rect_batch.record_init_commands(command_buffer);
+      glyph_batch.record_init_commands(command_buffer);
       device.end_command_buffer(command_buffer).unwrap();
 
       device
         .queue_submit(graphics_queue, &[queue_submit_info], Fence::null())
         .unwrap();
     }
+
+    let descriptor_pool_sizes = [DescriptorPoolSize {
+      ty: DescriptorType::COMBINED_IMAGE_SAMPLER,
+      descriptor_count: 1,
+    }];
+
+    let descriptor_pool_create_info = DescriptorPoolCreateInfo {
+      max_sets: 1,
+      pool_size_count: descriptor_pool_sizes.len() as _,
+      p_pool_sizes: descriptor_pool_sizes.as_ptr(),
+      ..Default::default()
+    };
+
+    let descriptor_pool = unsafe {
+      device
+        .create_descriptor_pool(&descriptor_pool_create_info, None)
+        .unwrap()
+    };
+
+    let descriptor_set_alloc_info = DescriptorSetAllocateInfo {
+      descriptor_pool,
+      descriptor_set_count: 1,
+      p_set_layouts: &glyph_batch.descriptor_set_layout,
+      ..Default::default()
+    };
+
+    let descriptor_set = unsafe {
+      device
+        .allocate_descriptor_sets(&descriptor_set_alloc_info)
+        .unwrap()[0]
+    };
+
+    glyph_batch.init_descriptor_set(descriptor_set);
 
     let (image_avail_semaphores, (render_done_semaphores, in_flight_fences)): (
       Vec<Semaphore>,
@@ -432,10 +469,12 @@ impl<'a> Engine<'a> {
       graphics_queue,
       present_queue,
       swapchain_device,
-      rect_batch: Some(rect_batch),
+      glyph_batch: Some(glyph_batch),
       memory_allocator: Some(memory_allocator),
       command_pool,
       command_buffers,
+      descriptor_pool,
+      descriptor_set,
       image_avail_semaphores,
       render_done_semaphores,
       in_flight_fences,
@@ -446,6 +485,7 @@ impl<'a> Engine<'a> {
       swapchain_framebuffers: vec![],
       surface_extent: Extent2D::default(),
       frame_index: 0,
+      text_ids: SparseVec::new(),
     };
 
     // Create a new swapchain and its dependents during initialization
@@ -453,9 +493,8 @@ impl<'a> Engine<'a> {
 
     unsafe {
       this.device.queue_wait_idle(graphics_queue).unwrap();
-      let rect_batch = this.rect_batch.as_mut().unwrap();
-      rect_batch.index_buffer.drop_staging();
-      rect_batch.vert_buffer.drop_staging();
+      let glyph_batch = this.glyph_batch.as_mut().unwrap();
+      glyph_batch.font_atlas.image.drop_staging();
     }
 
     this
@@ -531,11 +570,11 @@ impl<'a> Engine<'a> {
         &subpass_begin_info,
       );
 
-      self
-        .rect_batch
-        .as_ref()
-        .unwrap()
-        .record_draw_commands(command_buffer, self.surface_extent);
+      self.glyph_batch.as_ref().unwrap().record_draw_commands(
+        command_buffer,
+        self.descriptor_set,
+        self.surface_extent,
+      );
 
       self
         .device
@@ -772,8 +811,8 @@ impl<'a> Engine<'a> {
         .unwrap()
     };
 
-    let rect_batch = self.rect_batch.as_mut().unwrap();
-    rect_batch.on_swapchain_suboptimal(surface_extent, render_pass);
+    let glyph_batch = self.glyph_batch.as_mut().unwrap();
+    glyph_batch.on_swapchain_suboptimal(surface_extent, render_pass);
 
     let swapchain_framebuffers = unsafe {
       swapchain_image_views
@@ -805,32 +844,67 @@ impl<'a> Engine<'a> {
     self.surface_extent = surface_extent;
   }
 
+  pub fn add_glyph(&mut self, glyph: Glyph) -> u16 {
+    self.glyph_batch.as_mut().unwrap().add(glyph)
+  }
+
+  pub fn batch_add_glyphs(&mut self, glyphs: Vec<Glyph>) -> Vec<u16> {
+    self.glyph_batch.as_mut().unwrap().batch_add(glyphs)
+  }
+
+  pub fn update_glyph(&mut self, id: u16, glyph: Glyph) {
+    self.glyph_batch.as_mut().unwrap().update(id, glyph);
+  }
+
+  pub fn batch_update_glyphs(&mut self, ids: &[u16], glyphs: Vec<Glyph>) {
+    self.glyph_batch.as_mut().unwrap().batch_update(ids, glyphs);
+  }
+
+  pub fn remove_glyph(&mut self, id: u16) -> Glyph {
+    self.glyph_batch.as_mut().unwrap().remove(id)
+  }
+
+  pub fn batch_remove_glyphs(&mut self, ids: &[u16]) {
+    self.glyph_batch.as_mut().unwrap().batch_remove(ids);
+  }
+
+  pub fn clear_glyphs(&mut self) {
+    self.glyph_batch.as_mut().unwrap().clear();
+  }
+
   pub fn add_rect(&mut self, rect: Rect) -> u16 {
-    self.rect_batch.as_mut().unwrap().add(rect)
+    self.add_glyph(rect.into())
   }
 
   pub fn batch_add_rects(&mut self, rects: Vec<Rect>) -> Vec<u16> {
-    self.rect_batch.as_mut().unwrap().batch_add(rects)
+    self.batch_add_glyphs(rects.into_par_iter().map(Into::into).collect())
   }
 
   pub fn update_rect(&mut self, id: u16, rect: Rect) {
-    self.rect_batch.as_mut().unwrap().update(id, rect);
+    self.update_glyph(id, rect.into());
   }
 
   pub fn batch_update_rects(&mut self, ids: &[u16], rects: Vec<Rect>) {
-    self.rect_batch.as_mut().unwrap().batch_update(ids, rects);
+    self.batch_update_glyphs(ids, rects.into_par_iter().map(Into::into).collect());
   }
 
   pub fn remove_rect(&mut self, id: u16) -> Rect {
-    self.rect_batch.as_mut().unwrap().remove(id)
+    self.remove_glyph(id).into()
   }
 
   pub fn batch_remove_rects(&mut self, ids: &[u16]) {
-    self.rect_batch.as_mut().unwrap().batch_remove(ids);
+    self.batch_remove_glyphs(ids);
   }
 
-  pub fn clear_rects(&mut self) {
-    self.rect_batch.as_mut().unwrap().clear();
+  pub fn add_text(&mut self, text: Text) -> u16 {
+    let glyph_batch = self.glyph_batch.as_ref().unwrap();
+    let ids = self.batch_add_glyphs(text.into_glyphs(&glyph_batch.font_atlas));
+    self.text_ids.push(ids)
+  }
+
+  pub fn remove_text(&mut self, id: u16) {
+    let glyph_ids = self.text_ids.remove(id);
+    self.batch_remove_glyphs(&glyph_ids);
   }
 }
 
@@ -851,8 +925,12 @@ impl Drop for Engine<'_> {
         self.device.destroy_semaphore(semaphore, None);
       });
 
+      self
+        .device
+        .destroy_descriptor_pool(self.descriptor_pool, None);
+
       self.device.destroy_command_pool(self.command_pool, None);
-      drop(mem::take(&mut self.rect_batch));
+      drop(mem::take(&mut self.glyph_batch));
       drop(mem::take(&mut self.memory_allocator));
       self.device.destroy_render_pass(self.render_pass, None);
 

@@ -7,6 +7,8 @@ mod buffers;
 pub mod clock;
 pub mod collections;
 mod engine;
+mod font_atlas;
+mod images;
 pub mod models;
 mod pipelines;
 mod shaders;
@@ -15,10 +17,13 @@ pub use app::App;
 pub use app::AppConfig;
 pub use clock::Clock;
 pub use engine::Engine;
+
 use rayon::prelude::*;
-use std::ops::Bound;
-use std::ops::RangeBounds;
-use std::{mem, ptr};
+use std::{
+  mem,
+  ops::{Bound, RangeBounds},
+  ptr,
+};
 
 const unsafe fn as_bytes<T>(from: &T) -> &[u8] {
   unsafe { &*ptr::slice_from_raw_parts(from as *const _ as *const _, mem::size_of::<T>()) }
@@ -58,4 +63,12 @@ pub fn par_swap_remove<T: Send>(vec: &mut Vec<T>, indices: impl RangeBounds<usiz
 
     vec.truncate(vec_start_index);
   }
+}
+
+const fn pack_color(color: (u8, u8, u8)) -> u32 {
+  ((color.0 as u32) << 24) | ((color.1 as u32) << 16) | ((color.2 as u32) << 8) | 0xFF
+}
+
+const fn unpack_color(color: u32) -> (u8, u8, u8) {
+  ((color >> 24) as u8, (color >> 16) as u8, (color >> 8) as u8)
 }

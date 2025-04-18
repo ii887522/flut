@@ -1,8 +1,8 @@
 {
   "recommendations": [
+    "amazonwebservices.amazon-q-vscode",
     "aaron-bond.better-comments",
     "christian-kohler.path-intellisense",
-    "Codeium.codeium",
     "eamodio.gitlens",
     "EditorConfig.EditorConfig",
     "esbenp.prettier-vscode",
