@@ -1,4 +1,4 @@
-use crate::images::StaticImage;
+use crate::{images::StaticImage, models::GlyphMetrics};
 use ash::{
   Device,
   vk::{
@@ -9,11 +9,12 @@ use ash::{
 use gpu_allocator::vulkan::Allocator;
 use rayon::prelude::*;
 use sdl2::{pixels::Color, ttf};
-use std::{cell::RefCell, ops::RangeInclusive, rc::Rc};
+use std::{cell::RefCell, collections::HashMap, ops::RangeInclusive, rc::Rc};
 
 pub(super) struct FontAtlas {
   pub(super) image: StaticImage,
   pub(super) buffer_image_copies: Vec<BufferImageCopy>,
+  char_to_glyph_metrics: HashMap<char, GlyphMetrics>,
 }
 
 impl FontAtlas {
@@ -31,7 +32,7 @@ impl FontAtlas {
     let mut max_glyph_height = 0;
     let mut buffer_offset = 0;
 
-    let (buffer_image_copies, pixels): (Vec<_>, Vec<_>) = chars
+    let (buffer_image_copies, (char_to_glyph_metrics, pixels)): (Vec<_>, (Vec<_>, Vec<_>)) = chars
       .map(|char| {
         let font_surface = font
           .render_char(char)
@@ -64,12 +65,20 @@ impl FontAtlas {
           },
         };
 
+        let glyph_metrics = font.find_glyph_metrics(char).unwrap();
+
+        let glyph_metrics = GlyphMetrics {
+          position: (glyph_position.0 as _, glyph_position.1 as _),
+          size: (font_surface.width() as _, font_surface.height() as _),
+          advance: glyph_metrics.advance,
+        };
+
         glyph_position.0 += font_surface.width();
         max_glyph_height = max_glyph_height.max(font_surface.height());
         buffer_offset += (font_surface.pitch() * font_surface.height()) as u64;
 
         let pixels = font_surface.without_lock().unwrap();
-        (buffer_image_copy, pixels.to_vec())
+        (buffer_image_copy, ((char, glyph_metrics), pixels.to_vec()))
       })
       .unzip();
 
@@ -85,9 +94,16 @@ impl FontAtlas {
       &pixels,
     );
 
+    let char_to_glyph_metrics = HashMap::from_par_iter(char_to_glyph_metrics);
+
     Self {
       image,
       buffer_image_copies,
+      char_to_glyph_metrics,
     }
+  }
+
+  pub(super) fn get_glyph_metrics(&self, char: char) -> Option<&GlyphMetrics> {
+    self.char_to_glyph_metrics.get(&char)
   }
 }

@@ -5,8 +5,12 @@
 mod consts;
 mod models;
 
-use flut::{App, AppConfig, Clock, Engine, app, collections::SparseVec};
-use models::{Air, Direction, Food, Wall, Worm};
+use flut::{
+  App, AppConfig, Clock, Engine, app,
+  collections::SparseVec,
+  models::{Rect, Text},
+};
+use models::{Air, Direction, Food, Score, Wall, Worm};
 use rayon::prelude::*;
 use sdl2::{event::Event, keyboard::Keycode};
 use std::{
@@ -23,6 +27,7 @@ struct WormApp {
   air: SparseVec<Air>,
   worm: VecDeque<Worm>, // First element represents head, last element represents tail
   food: Food,
+  score: Score,
   input_worm_direction: Option<Direction>,
 }
 
@@ -69,11 +74,17 @@ impl WormApp {
       drawable_id: AtomicU16::new(u16::MAX), // Will be initialized in WormApp::init() method
     });
 
+    let score = Score {
+      score: 0,
+      drawable_id: u16::MAX, // Will be initialized in WormApp::init() method
+    };
+
     Self {
       clock,
       air,
       worm,
       food: Food::default(), // Will be initialized in WormApp::init() method
+      score,
       input_worm_direction: None,
     }
   }
@@ -83,15 +94,19 @@ impl WormApp {
       .air
       .remove_by_dense_index(fastrand::u16(0..self.air.len() as _));
 
-    engine.remove_glyph(rand_air.drawable_id);
+    engine.remove_rect(rand_air.drawable_id);
 
     // Has spawn food before
     if self.food.position < u16::MAX {
       self.food.position = rand_air.position;
-      engine.update_glyph(*self.food.drawable_id.get_mut(), self.food.clone().into());
+
+      engine.update_rect(
+        *self.food.drawable_id.get_mut(),
+        Rect::from(self.food.clone()),
+      );
     } else {
       self.food.position = rand_air.position;
-      self.food.drawable_id = AtomicU16::new(engine.add_glyph(self.food.clone().into()));
+      self.food.drawable_id = AtomicU16::new(engine.add_rect(Rect::from(self.food.clone())));
     }
   }
 
@@ -120,7 +135,7 @@ impl WormApp {
     let mut air_to_move = self.air.remove(self.calc_new_worm_position());
     air_to_move.position = worm_tail.position;
     self.air.push_by_id(worm_tail.position, air_to_move);
-    engine.update_glyph(air_to_move.drawable_id, air_to_move.into());
+    engine.update_rect(air_to_move.drawable_id, Rect::from(air_to_move));
   }
 
   fn move_worm(&mut self, engine: &mut Engine<'_>) {
@@ -136,9 +151,9 @@ impl WormApp {
     worm_cell_to_move.direction = worm_head.direction;
     worm_cell_to_move.position = new_position;
 
-    engine.update_glyph(
+    engine.update_rect(
       *worm_cell_to_move.drawable_id.get_mut(),
-      worm_cell_to_move.clone().into(),
+      Rect::from(worm_cell_to_move.clone()),
     );
 
     self.worm.push_front(worm_cell_to_move);
@@ -159,8 +174,14 @@ impl WormApp {
       drawable_id: AtomicU16::new(u16::MAX),
     };
 
-    new_worm_head.drawable_id = AtomicU16::new(engine.add_glyph(new_worm_head.clone().into()));
+    new_worm_head.drawable_id = AtomicU16::new(engine.add_rect(Rect::from(new_worm_head.clone())));
     self.worm.push_front(new_worm_head);
+  }
+
+  fn add_score(&mut self, engine: &mut Engine<'_>) {
+    self.score.score += 1;
+    engine.remove_text(self.score.drawable_id);
+    self.score.drawable_id = engine.add_text(Text::from(self.score));
   }
 }
 
@@ -179,35 +200,32 @@ impl App for WormApp {
       .air
       .get_dense()
       .par_iter()
-      .map(|(_, air)| (*air.borrow()).into());
+      .map(|(_, air)| Rect::from(*air.borrow()));
 
     let top_wall_rects = (0..consts::GRID_SIZE.0)
       .into_par_iter()
-      .map(|index| Wall { position: index }.into());
+      .map(|index| Rect::from(Wall { position: index }));
 
     let bottom_wall_rects = (0..consts::GRID_SIZE.0).into_par_iter().map(|index| {
-      Wall {
+      Rect::from(Wall {
         position: (consts::GRID_SIZE.1 - 1) * consts::GRID_SIZE.0 + index,
-      }
-      .into()
+      })
     });
 
     let left_wall_rects = (0..consts::GRID_SIZE.1).into_par_iter().map(|index| {
-      Wall {
+      Rect::from(Wall {
         position: index * consts::GRID_SIZE.0,
-      }
-      .into()
+      })
     });
 
     let right_wall_rects = (0..consts::GRID_SIZE.1).into_par_iter().map(|index| {
-      Wall {
+      Rect::from(Wall {
         position: (index + 1) * consts::GRID_SIZE.0 - 1,
-      }
-      .into()
+      })
     });
 
     let worm_head = self.worm.front().unwrap();
-    let worm_head_rect = worm_head.clone().into();
+    let worm_head_rect = Rect::from(worm_head.clone());
 
     let rects = rayon::iter::once(worm_head_rect)
       .chain(air_rects)
@@ -218,7 +236,7 @@ impl App for WormApp {
       .collect();
 
     engine
-      .batch_add_glyphs(rects)
+      .batch_add_rects(rects)
       .into_par_iter()
       .enumerate()
       .for_each(|(index, id)| {
@@ -231,6 +249,8 @@ impl App for WormApp {
       });
 
     self.spawn_food(engine);
+
+    self.score.drawable_id = engine.add_text(Text::from(self.score));
   }
 
   fn process_event(&mut self, event: Event) {
@@ -291,6 +311,7 @@ impl App for WormApp {
     if self.will_eat_food() {
       self.spawn_food(engine);
       self.grow_worm(engine);
+      self.add_score(engine);
       return;
     }
 

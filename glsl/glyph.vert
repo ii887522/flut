@@ -13,12 +13,12 @@ const vec2 VERTICES[] = vec2[](
 struct Mesh {
   vec2 position;
   vec2 size;
-  vec4 color;
   vec2 texPosition;
-  vec2 pad;
+  uint color;
+  float pad;
 };
 
-layout(std430, buffer_reference, buffer_reference_align = 16) readonly buffer MeshBuffer {
+layout(std430, buffer_reference, buffer_reference_align = 8) readonly buffer MeshBuffer {
   Mesh meshes[];
 };
 
@@ -39,7 +39,13 @@ void main() {
   const vec2 translation = map(mesh.position, vec2(0.0), pushConstant.cameraSize, vec2(-1.0), vec2(1.0));
   const vec2 scale = map(mesh.size, vec2(0.0), pushConstant.cameraSize, vec2(0.0), vec2(2.0));
   const vec2 position = VERTICES[gl_VertexIndex % VERTICES.length()];
+
   gl_Position = vec4(position * scale + translation, 0.0, 1.0);
-  fragColor = mesh.color.rgb;
   fragTexCoord = position * mesh.size + mesh.texPosition;
+
+  fragColor = vec3(
+    float(mesh.color >> 24) / 255.0,
+    float((mesh.color >> 16) & 0xFF) / 255.0,
+    float((mesh.color >> 8) & 0xFF) / 255.0
+  );
 }

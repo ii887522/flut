@@ -1,5 +1,5 @@
 use crate::consts;
-use flut::models::Glyph;
+use flut::models::Rect;
 use std::sync::atomic::{AtomicU16, Ordering};
 
 pub(crate) struct Food {
@@ -25,12 +25,16 @@ impl Clone for Food {
   }
 }
 
-impl From<Food> for Glyph {
+impl From<Food> for Rect {
   fn from(food: Food) -> Self {
     Self::new(
       (
-        ((food.position % consts::GRID_SIZE.0) * (consts::CELL_SIZE.0 + consts::GAP_SIZE.0)) as _,
-        ((food.position / consts::GRID_SIZE.0) * (consts::CELL_SIZE.1 + consts::GAP_SIZE.1)) as _,
+        (consts::WORLD_POSITION.0
+          + (food.position % consts::GRID_SIZE.0) * (consts::CELL_SIZE.0 + consts::GAP_SIZE.0))
+          as _,
+        (consts::WORLD_POSITION.1
+          + (food.position / consts::GRID_SIZE.0) * (consts::CELL_SIZE.1 + consts::GAP_SIZE.1))
+          as _,
       ),
       (consts::CELL_SIZE.0 as _, consts::CELL_SIZE.1 as _),
       (0, 255, 0),

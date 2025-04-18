@@ -64,3 +64,11 @@ pub fn par_swap_remove<T: Send>(vec: &mut Vec<T>, indices: impl RangeBounds<usiz
     vec.truncate(vec_start_index);
   }
 }
+
+const fn pack_color(color: (u8, u8, u8)) -> u32 {
+  ((color.0 as u32) << 24) | ((color.1 as u32) << 16) | ((color.2 as u32) << 8) | 0xFF
+}
+
+const fn unpack_color(color: u32) -> (u8, u8, u8) {
+  ((color >> 24) as u8, (color >> 16) as u8, (color >> 8) as u8)
+}

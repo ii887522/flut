@@ -1,4 +1,8 @@
-use crate::{batches::GlyphBatch, collections::StringSlice, models::Glyph};
+use crate::{
+  batches::GlyphBatch,
+  collections::{SparseVec, StringSlice},
+  models::{Glyph, Rect, Text},
+};
 use ash::{
   Device, Entry, Instance,
   khr::{surface, swapchain},
@@ -25,6 +29,7 @@ use gpu_allocator::{
   AllocationSizes, AllocatorDebugSettings,
   vulkan::{Allocator, AllocatorCreateDesc},
 };
+use rayon::prelude::*;
 use sdl2::video::Window;
 use std::{cell::RefCell, mem, rc::Rc};
 
@@ -60,15 +65,16 @@ pub struct Engine<'a> {
   swapchain_framebuffers: Vec<Framebuffer>,
   surface_extent: Extent2D,
   frame_index: usize,
+  text_ids: SparseVec<Vec<u16>>,
 }
 
 pub struct DrawableCaps {
-  pub rect_cap: usize,
+  pub glyph_cap: usize,
 }
 
 impl Default for DrawableCaps {
   fn default() -> Self {
-    Self { rect_cap: 3000 }
+    Self { glyph_cap: 3000 }
   }
 }
 
@@ -332,7 +338,7 @@ impl<'a> Engine<'a> {
     let glyph_batch = GlyphBatch::new(
       device.clone(),
       memory_allocator.clone(),
-      drawable_caps.rect_cap,
+      drawable_caps.glyph_cap,
     );
 
     let command_pool_create_info = CommandPoolCreateInfo {
@@ -479,6 +485,7 @@ impl<'a> Engine<'a> {
       swapchain_framebuffers: vec![],
       surface_extent: Extent2D::default(),
       frame_index: 0,
+      text_ids: SparseVec::new(),
     };
 
     // Create a new swapchain and its dependents during initialization
@@ -863,6 +870,41 @@ impl<'a> Engine<'a> {
 
   pub fn clear_glyphs(&mut self) {
     self.glyph_batch.as_mut().unwrap().clear();
+  }
+
+  pub fn add_rect(&mut self, rect: Rect) -> u16 {
+    self.add_glyph(rect.into())
+  }
+
+  pub fn batch_add_rects(&mut self, rects: Vec<Rect>) -> Vec<u16> {
+    self.batch_add_glyphs(rects.into_par_iter().map(Into::into).collect())
+  }
+
+  pub fn update_rect(&mut self, id: u16, rect: Rect) {
+    self.update_glyph(id, rect.into());
+  }
+
+  pub fn batch_update_rects(&mut self, ids: &[u16], rects: Vec<Rect>) {
+    self.batch_update_glyphs(ids, rects.into_par_iter().map(Into::into).collect());
+  }
+
+  pub fn remove_rect(&mut self, id: u16) -> Rect {
+    self.remove_glyph(id).into()
+  }
+
+  pub fn batch_remove_rects(&mut self, ids: &[u16]) {
+    self.batch_remove_glyphs(ids);
+  }
+
+  pub fn add_text(&mut self, text: Text) -> u16 {
+    let glyph_batch = self.glyph_batch.as_ref().unwrap();
+    let ids = self.batch_add_glyphs(text.into_glyphs(&glyph_batch.font_atlas));
+    self.text_ids.push(ids)
+  }
+
+  pub fn remove_text(&mut self, id: u16) {
+    let glyph_ids = self.text_ids.remove(id);
+    self.batch_remove_glyphs(&glyph_ids);
   }
 }
 

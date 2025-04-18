@@ -17,7 +17,7 @@ pub(crate) struct GlyphVertShader<'a> {
 
 impl GlyphVertShader<'_> {
   pub(crate) fn new(device: Rc<Device>) -> Self {
-    const SHADER_CODE: &[u8] = include_bytes!("../../target/shaders/text.vert.spv");
+    const SHADER_CODE: &[u8] = include_bytes!("../../target/shaders/glyph.vert.spv");
 
     let shader_create_info = ShaderModuleCreateInfo {
       code_size: SHADER_CODE.len(),

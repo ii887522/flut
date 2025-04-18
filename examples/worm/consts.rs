@@ -3,8 +3,10 @@ pub(super) const APP_SIZE: (u32, u32) = (772, 840);
 pub(super) const WORLD_SIZE: (u16, u16) = (772, 772);
 pub(super) const CELL_SIZE: (u16, u16) = (16, 16);
 pub(super) const GAP_SIZE: (u16, u16) = (2, 2);
+pub(super) const SCORE_POSITION: (f32, f32) = ((WORLD_SIZE.0 >> 1) as _, 8 as _);
 pub(super) const UPDATES_PER_SECOND: f32 = 30.0;
 
+pub(super) const WORLD_POSITION: (u16, u16) = (0, APP_SIZE.1 as u16 - WORLD_SIZE.1);
 pub(super) const GRID_SIZE: (u16, u16) = (
   (WORLD_SIZE.0 + GAP_SIZE.0) / (CELL_SIZE.0 + GAP_SIZE.0),
   (WORLD_SIZE.1 + GAP_SIZE.1) / (CELL_SIZE.1 + GAP_SIZE.1),

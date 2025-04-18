@@ -87,7 +87,7 @@ impl GlyphBatch<'_> {
     let mesh_buffer = StreamBuffer::new(
       device.clone(),
       memory_allocator.clone(),
-      "rect_mesh_buffer",
+      "glyph_mesh_buffer",
       (cap * mem::size_of::<Glyph>()) as _,
       BufferUsageFlags::STORAGE_BUFFER | BufferUsageFlags::SHADER_DEVICE_ADDRESS,
     );
@@ -103,9 +103,9 @@ impl GlyphBatch<'_> {
       device.clone(),
       memory_allocator.clone(),
       "assets/fonts/arial.ttf",
-      32,
+      48,
       '0'..='9',
-      (128, 128),
+      (256, 256),
     );
 
     Self {
@@ -129,7 +129,7 @@ impl GlyphBatch<'_> {
       image_layout: ImageLayout::SHADER_READ_ONLY_OPTIMAL,
     };
 
-    let write_image_descriptor_set = WriteDescriptorSet {
+    let image_descriptor_set_write = WriteDescriptorSet {
       dst_set: descriptor_set,
       dst_binding: 0,
       dst_array_element: 0,
@@ -142,7 +142,7 @@ impl GlyphBatch<'_> {
     unsafe {
       self
         .device
-        .update_descriptor_sets(&[write_image_descriptor_set], &[])
+        .update_descriptor_sets(&[image_descriptor_set_write], &[])
     };
   }
 
@@ -280,79 +280,79 @@ impl GlyphBatch<'_> {
     }
   }
 
-  pub(crate) fn add(&mut self, rect: Glyph) -> u16 {
+  pub(crate) fn add(&mut self, glyph: Glyph) -> u16 {
     let mapped_mesh_alloc = self.mesh_buffer.alloc.mapped_ptr().unwrap();
 
     unsafe {
       ptr::copy_nonoverlapping(
-        &rect,
+        &glyph,
         (mapped_mesh_alloc.as_ptr() as *mut Glyph).add(self.glyphs.len()),
         1,
       );
     }
 
-    self.glyphs.push(rect)
+    self.glyphs.push(glyph)
   }
 
-  pub(crate) fn batch_add(&mut self, rects: Vec<Glyph>) -> Vec<u16> {
+  pub(crate) fn batch_add(&mut self, glyphs: Vec<Glyph>) -> Vec<u16> {
     let mapped_mesh_alloc = self.mesh_buffer.alloc.mapped_ptr().unwrap();
 
     unsafe {
       ptr::copy_nonoverlapping(
-        rects.as_ptr(),
+        glyphs.as_ptr(),
         (mapped_mesh_alloc.as_ptr() as *mut Glyph).add(self.glyphs.len()),
-        rects.len(),
+        glyphs.len(),
       );
     }
 
-    self.glyphs.par_extend(rects)
+    self.glyphs.par_extend(glyphs)
   }
 
-  pub(crate) fn update(&mut self, id: u16, rect: Glyph) {
+  pub(crate) fn update(&mut self, id: u16, glyph: Glyph) {
     let mapped_mesh_alloc = self.mesh_buffer.alloc.mapped_ptr().unwrap();
 
     unsafe {
       ptr::copy_nonoverlapping(
-        &rect,
+        &glyph,
         (mapped_mesh_alloc.as_ptr() as *mut Glyph).add(self.glyphs.get_dense_index(id) as _),
         1,
       );
     }
 
-    self.glyphs[id] = AtomicRefCell::new(rect);
+    self.glyphs[id] = AtomicRefCell::new(glyph);
   }
 
-  pub(crate) fn batch_update(&mut self, ids: &[u16], rects: Vec<Glyph>) {
+  pub(crate) fn batch_update(&mut self, ids: &[u16], glyphs: Vec<Glyph>) {
     ids
       .par_iter()
-      .zip(rects.par_iter())
-      .for_each(|(&id, rect)| unsafe {
+      .zip(glyphs.par_iter())
+      .for_each(|(&id, glyph)| unsafe {
         let mapped_mesh_alloc = self.mesh_buffer.alloc.mapped_ptr().unwrap();
 
         ptr::copy_nonoverlapping(
-          rect,
+          glyph,
           (mapped_mesh_alloc.as_ptr() as *mut Glyph).add(self.glyphs.get_dense_index(id) as _),
           1,
         );
       });
 
-    self.glyphs.par_set(ids, rects);
+    self.glyphs.par_set(ids, glyphs);
   }
 
   pub(crate) fn remove(&mut self, id: u16) -> Glyph {
     let index = self.glyphs.get_dense_index(id);
     let result = self.glyphs.remove(id);
 
-    let Some(rect) = self.glyphs.get_by_dense_index(index) else {
+    let Some(glyph) = self.glyphs.get_by_dense_index(index) else {
       return result;
     };
 
-    let rect = rect.borrow();
+    let glyph = glyph.borrow();
     let mapped_mesh_alloc = self.mesh_buffer.alloc.mapped_ptr().unwrap();
 
     unsafe {
       ptr::copy_nonoverlapping(
-        &*rect,
+        &*glyph,
         (mapped_mesh_alloc.as_ptr() as *mut Glyph).add(index as _),
         1,
       );
@@ -375,15 +375,15 @@ impl GlyphBatch<'_> {
         self
           .glyphs
           .get_by_dense_index(index)
-          .map(|rect| (index, rect))
+          .map(|glyph| (index, glyph))
       })
-      .for_each(|(index, rect)| {
-        let rect = rect.borrow();
+      .for_each(|(index, glyph)| {
+        let glyph = glyph.borrow();
         let mapped_mesh_alloc = self.mesh_buffer.alloc.mapped_ptr().unwrap();
 
         unsafe {
           ptr::copy_nonoverlapping(
-            &*rect,
+            &*glyph,
             (mapped_mesh_alloc.as_ptr() as *mut Glyph).add(index as _),
             1,
           );
