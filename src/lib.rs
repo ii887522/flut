@@ -2,6 +2,7 @@
 #![allow(clippy::needless_lifetimes, clippy::too_many_arguments)]
 
 pub mod app;
+mod audio;
 mod batches;
 mod buffers;
 pub mod clock;

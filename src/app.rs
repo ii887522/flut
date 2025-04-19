@@ -1,6 +1,6 @@
-use crate::{Engine, engine::DrawableCaps};
+use crate::{Engine, audio, engine::DrawableCaps};
 use sdl2::{event::Event, image::LoadSurface, surface::Surface};
-use std::time::Instant;
+use std::{sync::mpsc, thread, time::Instant};
 
 pub struct AppConfig {
   pub title: &'static str,
@@ -33,6 +33,9 @@ pub fn run(mut app: impl App) {
   let app_config = app.get_config();
   let sdl = sdl2::init().unwrap();
 
+  let (audio_tx, audio_rx) = mpsc::channel();
+  thread::spawn(|| audio::run(audio_rx));
+
   // Prevent SDL from creating an OpenGL context by itself
   sdl2::hint::set("SDL_VIDEO_EXTERNAL_CONTEXT", "1");
 
@@ -56,7 +59,13 @@ pub fn run(mut app: impl App) {
   // Call window.show() as early as possible to minimize the perceived startup time
   window.show();
 
-  let mut engine = Engine::new(window, app_config.prefer_dgpu, app_config.drawable_caps);
+  let mut engine = Engine::new(
+    window,
+    audio_tx,
+    app_config.prefer_dgpu,
+    app_config.drawable_caps,
+  );
+
   app.init(&mut engine);
 
   const UPDATES_PER_SECOND: f32 = 150.0;
