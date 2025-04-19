@@ -1,7 +1,7 @@
 use crate::{
   batches::GlyphBatch,
   collections::{SparseVec, StringSlice},
-  models::{Glyph, Rect, Text},
+  models::{AudioReq, Glyph, Rect, Text},
 };
 use ash::{
   Device, Entry, Instance,
@@ -31,7 +31,7 @@ use gpu_allocator::{
 };
 use rayon::prelude::*;
 use sdl2::video::Window;
-use std::{cell::RefCell, mem, rc::Rc};
+use std::{cell::RefCell, mem, rc::Rc, sync::mpsc::Sender};
 
 const MAX_IN_FLIGHT_FRAME_COUNT: u32 = 3;
 const MIN_ALLOC_SIZE: u64 = 4 * 1024 * 1024;
@@ -66,6 +66,7 @@ pub struct Engine<'a> {
   surface_extent: Extent2D,
   frame_index: usize,
   text_ids: SparseVec<Vec<u16>>,
+  audio_tx: Sender<AudioReq>,
 }
 
 pub struct DrawableCaps {
@@ -79,7 +80,12 @@ impl Default for DrawableCaps {
 }
 
 impl<'a> Engine<'a> {
-  pub(super) fn new(window: Window, prefer_dgpu: bool, drawable_caps: DrawableCaps) -> Self {
+  pub(super) fn new(
+    window: Window,
+    audio_tx: Sender<AudioReq>,
+    prefer_dgpu: bool,
+    drawable_caps: DrawableCaps,
+  ) -> Self {
     #[cfg(all(not(debug_assertions), target_os = "macos"))]
     let entry = ash_molten::load();
 
@@ -486,6 +492,7 @@ impl<'a> Engine<'a> {
       surface_extent: Extent2D::default(),
       frame_index: 0,
       text_ids: SparseVec::new(),
+      audio_tx,
     };
 
     // Create a new swapchain and its dependents during initialization
@@ -842,6 +849,10 @@ impl<'a> Engine<'a> {
     self.render_pass = render_pass;
     self.swapchain_framebuffers = swapchain_framebuffers;
     self.surface_extent = surface_extent;
+  }
+
+  pub const fn get_audio_tx(&self) -> &Sender<AudioReq> {
+    &self.audio_tx
   }
 
   pub fn add_glyph(&mut self, glyph: Glyph) -> u16 {

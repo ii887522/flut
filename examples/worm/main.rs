@@ -8,7 +8,7 @@ mod models;
 use flut::{
   App, AppConfig, Clock, Engine, app,
   collections::SparseVec,
-  models::{Rect, Text},
+  models::{AudioReq, Rect, Text},
 };
 use models::{Air, Direction, Food, Score, Wall, Worm};
 use rayon::prelude::*;
@@ -159,12 +159,22 @@ impl WormApp {
     self.worm.push_front(worm_cell_to_move);
   }
 
-  fn kill_worm(&mut self) {
+  fn kill_worm(&mut self, engine: &mut Engine<'_>) {
+    let _ = engine.get_audio_tx().send(AudioReq::StopMusic);
+
+    let _ = engine.get_audio_tx().send(AudioReq::PlaySound {
+      file_path: "assets/audio/dead.mp3",
+    });
+
     let worm_head = self.worm.front_mut().unwrap();
     worm_head.direction = None;
   }
 
   fn grow_worm(&mut self, engine: &mut Engine<'_>) {
+    let _ = engine.get_audio_tx().send(AudioReq::PlaySound {
+      file_path: "assets/audio/eat.mp3",
+    });
+
     let new_position = self.calc_new_worm_position();
     let worm_head = self.worm.front().unwrap();
 
@@ -196,6 +206,23 @@ impl App for WormApp {
   }
 
   fn init(&mut self, engine: &mut Engine<'_>) {
+    let _ = engine.get_audio_tx().send(AudioReq::LoadSound {
+      file_path: "assets/audio/dead.mp3",
+    });
+
+    let _ = engine.get_audio_tx().send(AudioReq::LoadSound {
+      file_path: "assets/audio/eat.mp3",
+    });
+
+    let _ = engine.get_audio_tx().send(AudioReq::LoadMusic {
+      file_path: "assets/audio/move.mp3",
+    });
+
+    let _ = engine.get_audio_tx().send(AudioReq::PlayMusic {
+      file_path: "assets/audio/move.mp3",
+      volume: 32,
+    });
+
     let air_rects = self
       .air
       .get_dense()
@@ -249,7 +276,6 @@ impl App for WormApp {
       });
 
     self.spawn_food(engine);
-
     self.score.drawable_id = engine.add_text(Text::from(self.score));
   }
 
@@ -316,7 +342,7 @@ impl App for WormApp {
     }
 
     if self.will_hit_obstacle() {
-      self.kill_worm();
+      self.kill_worm(engine);
       return;
     }
 
