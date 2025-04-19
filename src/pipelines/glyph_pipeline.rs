@@ -15,6 +15,7 @@ use std::rc::Rc;
 #[repr(C, align(8))]
 #[derive(Clone, Copy)]
 pub(crate) struct PushConstant {
+  pub(crate) camera_position: (f32, f32),
   pub(crate) camera_size: (f32, f32),
   pub(crate) mesh_buffer_addr: DeviceAddress,
 }

@@ -855,6 +855,14 @@ impl<'a> Engine<'a> {
     &self.audio_tx
   }
 
+  pub fn set_camera_position(&mut self, camera_position: (f32, f32)) {
+    self
+      .glyph_batch
+      .as_mut()
+      .unwrap()
+      .set_camera_position(camera_position);
+  }
+
   pub fn add_glyph(&mut self, glyph: Glyph) -> u16 {
     self.glyph_batch.as_mut().unwrap().add(glyph)
   }

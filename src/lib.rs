@@ -9,6 +9,7 @@ pub mod clock;
 pub mod collections;
 mod engine;
 mod font_atlas;
+pub mod gfx;
 mod images;
 pub mod models;
 mod pipelines;

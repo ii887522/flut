@@ -33,6 +33,7 @@ pub(crate) struct GlyphBatch<'a> {
   pub(crate) font_atlas: FontAtlas,
   pub(crate) pipeline: Option<GlyphPipeline>,
   glyphs: SparseVec<Glyph>,
+  camera_position: (f32, f32),
 }
 
 impl GlyphBatch<'_> {
@@ -119,6 +120,7 @@ impl GlyphBatch<'_> {
       font_atlas,
       pipeline: None,
       glyphs: SparseVec::with_capacity(cap),
+      camera_position: (0.0, 0.0),
     }
   }
 
@@ -244,6 +246,7 @@ impl GlyphBatch<'_> {
     }
 
     let glyph_push_const = GlyphPushConstant {
+      camera_position: self.camera_position,
       camera_size: (surface_extent.width as _, surface_extent.height as _),
       mesh_buffer_addr: self.mesh_buffer_addr,
     };
@@ -278,6 +281,10 @@ impl GlyphBatch<'_> {
         .device
         .cmd_draw(command_buffer, (6 * self.glyphs.len()) as _, 1, 0, 0);
     }
+  }
+
+  pub(crate) fn set_camera_position(&mut self, camera_position: (f32, f32)) {
+    self.camera_position = camera_position;
   }
 
   pub(crate) fn add(&mut self, glyph: Glyph) -> u16 {

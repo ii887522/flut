@@ -8,6 +8,7 @@ mod models;
 use flut::{
   App, AppConfig, Clock, Engine, app,
   collections::SparseVec,
+  gfx::Shake,
   models::{AudioReq, Rect, Text},
 };
 use models::{Air, Direction, Food, Score, Wall, Worm};
@@ -28,6 +29,7 @@ struct WormApp {
   worm: VecDeque<Worm>, // First element represents head, last element represents tail
   food: Food,
   score: Score,
+  shake: Option<Shake>,
   input_worm_direction: Option<Direction>,
 }
 
@@ -85,6 +87,7 @@ impl WormApp {
       worm,
       food: Food::default(), // Will be initialized in WormApp::init() method
       score,
+      shake: None,
       input_worm_direction: None,
     }
   }
@@ -168,6 +171,7 @@ impl WormApp {
 
     let worm_head = self.worm.front_mut().unwrap();
     worm_head.direction = None;
+    self.shake = Some(Shake::new(64.0, 0.5, 30.0));
   }
 
   fn grow_worm(&mut self, engine: &mut Engine<'_>) {
@@ -320,6 +324,12 @@ impl App for WormApp {
   }
 
   fn update(&mut self, dt: f32, engine: &mut Engine<'_>) {
+    if let Some(shake) = self.shake.take() {
+      self.shake = shake.update(dt, engine);
+    } else {
+      engine.set_camera_position((0.0, 0.0));
+    }
+
     if !self.clock.update(dt) {
       return;
     }
