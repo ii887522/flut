@@ -8,7 +8,7 @@ pub struct Rect {
 }
 
 impl Rect {
-  pub const fn new(position: (f32, f32), size: (f32, f32), color: (u8, u8, u8)) -> Self {
+  pub const fn new(position: (f32, f32), size: (f32, f32), color: (u8, u8, u8, u8)) -> Self {
     Self {
       position,
       size,

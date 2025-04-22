@@ -6,21 +6,29 @@ mod consts;
 mod models;
 
 use flut::{
-  App, AppConfig, Clock, Engine, app,
+  App, AppConfig, Clock, Engine, Transition, app,
   collections::SparseVec,
   gfx::Shake,
-  models::{AudioReq, Rect, Text},
+  models::{AudioReq, Glass, Rect, RoundRect, Text},
 };
 use models::{Air, Direction, Food, Score, Wall, Worm};
 use rayon::prelude::*;
 use sdl2::{event::Event, keyboard::Keycode};
 use std::{
   collections::VecDeque,
+  mem,
   sync::atomic::{AtomicU16, Ordering},
 };
 
 fn main() {
   app::run(WormApp::new());
+}
+
+enum State {
+  Playing,
+  DeadShaking(Shake),
+  DeadShowingDialog(Glass),
+  Pending,
 }
 
 struct WormApp {
@@ -29,7 +37,7 @@ struct WormApp {
   worm: VecDeque<Worm>, // First element represents head, last element represents tail
   food: Food,
   score: Score,
-  shake: Option<Shake>,
+  state: State,
   input_worm_direction: Option<Direction>,
 }
 
@@ -72,7 +80,7 @@ impl WormApp {
 
     worm.push_front(Worm {
       position: consts::INITIAL_WORM_POSITION_1D,
-      direction: Some(Direction::rand()),
+      direction: Direction::rand(),
       drawable_id: AtomicU16::new(u16::MAX), // Will be initialized in WormApp::init() method
     });
 
@@ -87,7 +95,7 @@ impl WormApp {
       worm,
       food: Food::default(), // Will be initialized in WormApp::init() method
       score,
-      shake: None,
+      state: State::Playing,
       input_worm_direction: None,
     }
   }
@@ -117,11 +125,10 @@ impl WormApp {
     let worm_head = self.worm.front().unwrap();
 
     match worm_head.direction {
-      Some(Direction::Up) => worm_head.position - consts::GRID_SIZE.0,
-      Some(Direction::Right) => worm_head.position + 1,
-      Some(Direction::Down) => worm_head.position + consts::GRID_SIZE.0,
-      Some(Direction::Left) => worm_head.position - 1,
-      None => worm_head.position,
+      Direction::Up => worm_head.position - consts::GRID_SIZE.0,
+      Direction::Right => worm_head.position + 1,
+      Direction::Down => worm_head.position + consts::GRID_SIZE.0,
+      Direction::Left => worm_head.position - 1,
     }
   }
 
@@ -169,9 +176,7 @@ impl WormApp {
       file_path: "assets/audio/dead.mp3",
     });
 
-    let worm_head = self.worm.front_mut().unwrap();
-    worm_head.direction = None;
-    self.shake = Some(Shake::new(64.0, 0.5, 30.0));
+    self.state = State::DeadShaking(Shake::new(64.0, 0.5, 30.0));
   }
 
   fn grow_worm(&mut self, engine: &mut Engine<'_>) {
@@ -294,28 +299,24 @@ impl App for WormApp {
 
     let worm_head = self.worm.front().unwrap();
 
-    let Some(worm_head_direction) = worm_head.direction else {
-      return;
-    };
-
     match keycode {
       Keycode::Up | Keycode::W => {
-        if !matches!(worm_head_direction, Direction::Down) {
+        if !matches!(worm_head.direction, Direction::Down) {
           self.input_worm_direction = Some(Direction::Up);
         }
       }
       Keycode::Right | Keycode::D => {
-        if !matches!(worm_head_direction, Direction::Left) {
+        if !matches!(worm_head.direction, Direction::Left) {
           self.input_worm_direction = Some(Direction::Right);
         }
       }
       Keycode::Down | Keycode::S => {
-        if !matches!(worm_head_direction, Direction::Up) {
+        if !matches!(worm_head.direction, Direction::Up) {
           self.input_worm_direction = Some(Direction::Down);
         }
       }
       Keycode::Left | Keycode::A => {
-        if !matches!(worm_head_direction, Direction::Right) {
+        if !matches!(worm_head.direction, Direction::Right) {
           self.input_worm_direction = Some(Direction::Left);
         }
       }
@@ -324,39 +325,68 @@ impl App for WormApp {
   }
 
   fn update(&mut self, dt: f32, engine: &mut Engine<'_>) {
-    if let Some(shake) = self.shake.take() {
-      self.shake = shake.update(dt, engine);
-    } else {
-      engine.set_camera_position((0.0, 0.0));
-    }
+    match mem::replace(&mut self.state, State::Pending) {
+      State::Playing => {
+        self.state = State::Playing;
 
-    if !self.clock.update(dt) {
-      return;
-    }
+        if !self.clock.update(dt) {
+          return;
+        }
 
-    let worm_head = self.worm.front_mut().unwrap();
+        if let Some(input_worm_direction) = self.input_worm_direction.take() {
+          let worm_head = self.worm.front_mut().unwrap();
+          worm_head.direction = input_worm_direction;
+        }
 
-    if worm_head.direction.is_none() {
-      return;
-    }
+        if self.will_eat_food() {
+          self.spawn_food(engine);
+          self.grow_worm(engine);
+          self.add_score(engine);
+          return;
+        }
 
-    if let Some(input_worm_direction) = self.input_worm_direction.take() {
-      worm_head.direction = Some(input_worm_direction);
-    }
+        if self.will_hit_obstacle() {
+          self.kill_worm(engine);
+          return;
+        }
 
-    if self.will_eat_food() {
-      self.spawn_food(engine);
-      self.grow_worm(engine);
-      self.add_score(engine);
-      return;
-    }
+        self.move_air(engine);
+        self.move_worm(engine);
+      }
+      State::DeadShaking(shake) => {
+        if let Some(shake) = shake.update(dt, engine) {
+          self.state = State::DeadShaking(shake);
+          return;
+        }
 
-    if self.will_hit_obstacle() {
-      self.kill_worm(engine);
-      return;
-    }
+        engine.set_camera_position((0.0, 0.0));
 
-    self.move_air(engine);
-    self.move_worm(engine);
+        let mut glass = Glass {
+          size: (consts::APP_SIZE.0 as _, consts::APP_SIZE.1 as _),
+          alpha: Transition::new(0.0, 128.0, 0.25),
+          drawable_id: u16::MAX,
+        };
+
+        glass.drawable_id = engine.add_rect(Rect::from(glass));
+
+        engine.add_round_rect(RoundRect::new(
+          (
+            ((consts::APP_SIZE.0 - consts::DIALOG_SIZE.0) >> 1) as _,
+            ((consts::APP_SIZE.1 - consts::DIALOG_SIZE.1) >> 1) as _,
+          ),
+          (consts::DIALOG_SIZE.0 as _, consts::DIALOG_SIZE.1 as _),
+          (255, 0, 0, 255),
+          8.0,
+        ));
+
+        self.state = State::DeadShowingDialog(glass);
+      }
+      State::DeadShowingDialog(mut glass) => {
+        glass.alpha.update(dt);
+        engine.update_rect(glass.drawable_id, Rect::from(glass));
+        self.state = State::DeadShowingDialog(glass);
+      }
+      State::Pending => unreachable!("Unexpected Pending state"),
+    };
   }
 }

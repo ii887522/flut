@@ -167,7 +167,7 @@ impl<T: Send + Sync> SparseVec<T> {
   }
 }
 
-impl<T: Send + Sync + Copy> SparseVec<T> {
+impl<T: Copy + Send + Sync> SparseVec<T> {
   pub fn par_remove(&mut self, ids: &[u16]) {
     let dense_indices = ids
       .par_iter()

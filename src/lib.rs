@@ -3,6 +3,7 @@
 
 pub mod app;
 mod audio;
+mod batch;
 mod batches;
 mod buffers;
 pub mod clock;
@@ -10,15 +11,17 @@ pub mod collections;
 mod engine;
 mod font_atlas;
 pub mod gfx;
+mod graphics_pipeline;
 mod images;
 pub mod models;
-mod pipelines;
-mod shaders;
+mod shader;
+pub mod transition;
 
 pub use app::App;
 pub use app::AppConfig;
 pub use clock::Clock;
 pub use engine::Engine;
+pub use transition::Transition;
 
 use rayon::prelude::*;
 use std::{
@@ -67,10 +70,15 @@ pub fn par_swap_remove<T: Send>(vec: &mut Vec<T>, indices: impl RangeBounds<usiz
   }
 }
 
-const fn pack_color(color: (u8, u8, u8)) -> u32 {
-  ((color.0 as u32) << 24) | ((color.1 as u32) << 16) | ((color.2 as u32) << 8) | 0xFF
+const fn pack_color(color: (u8, u8, u8, u8)) -> u32 {
+  ((color.0 as u32) << 24) | ((color.1 as u32) << 16) | ((color.2 as u32) << 8) | (color.3 as u32)
 }
 
-const fn unpack_color(color: u32) -> (u8, u8, u8) {
-  ((color >> 24) as u8, (color >> 16) as u8, (color >> 8) as u8)
+const fn unpack_color(color: u32) -> (u8, u8, u8, u8) {
+  (
+    (color >> 24) as u8,
+    (color >> 16) as u8,
+    (color >> 8) as u8,
+    color as u8,
+  )
 }

@@ -19,7 +19,7 @@ impl From<Air> for Rect {
           as _,
       ),
       (consts::CELL_SIZE.0 as _, consts::CELL_SIZE.1 as _),
-      (48, 48, 48),
+      (48, 48, 48, 255),
     )
   }
 }

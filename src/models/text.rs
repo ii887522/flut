@@ -7,7 +7,7 @@ use std::borrow::Cow;
 #[derive(Clone)]
 pub struct Text {
   pub(super) position: (f32, f32),
-  pub(super) color: (u8, u8, u8),
+  pub(super) color: (u8, u8, u8, u8),
   pub(super) text: Cow<'static, str>,
   pub(super) anchor: Anchor,
 }
@@ -17,7 +17,7 @@ impl Text {
   #[optarg_method(TextNewBuilder, call)]
   pub fn new(
     position: (f32, f32),
-    color: (u8, u8, u8),
+    color: (u8, u8, u8, u8),
     text: Cow<'static, str>,
     #[optarg_default] anchor: Anchor,
   ) -> Self {

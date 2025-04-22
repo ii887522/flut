@@ -1,13 +1,19 @@
 pub mod anchor;
 pub mod audio_req;
+pub mod glass;
 pub mod glyph;
 pub(super) mod glyph_metrics;
 pub mod rect;
+pub mod round_rect;
+pub(super) mod round_rect_part;
 pub mod text;
 
 pub use anchor::Anchor;
 pub use audio_req::AudioReq;
+pub use glass::Glass;
 pub use glyph::Glyph;
 pub(super) use glyph_metrics::GlyphMetrics;
 pub use rect::Rect;
+pub use round_rect::RoundRect;
+pub(super) use round_rect_part::RoundRectPart;
 pub use text::Text;

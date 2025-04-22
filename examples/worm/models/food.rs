@@ -37,7 +37,7 @@ impl From<Food> for Rect {
           as _,
       ),
       (consts::CELL_SIZE.0 as _, consts::CELL_SIZE.1 as _),
-      (0, 255, 0),
+      (0, 255, 0, 255),
     )
   }
 }

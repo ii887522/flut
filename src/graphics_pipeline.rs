@@ -1,39 +1,32 @@
-use crate::shaders::{GlyphFragShader, GlyphVertShader};
+use crate::shader::Shader;
 use ash::{
   Device,
   vk::{
-    self, BlendFactor, BlendOp, ColorComponentFlags, CullModeFlags, DeviceAddress, Extent2D,
-    FrontFace, GraphicsPipelineCreateInfo, Offset2D, Pipeline, PipelineCache,
+    self, BlendFactor, BlendOp, ColorComponentFlags, CullModeFlags, Extent2D, FrontFace,
+    GraphicsPipelineCreateInfo, Offset2D, Pipeline, PipelineCache,
     PipelineColorBlendAttachmentState, PipelineColorBlendStateCreateInfo, PipelineCreateFlags,
     PipelineInputAssemblyStateCreateInfo, PipelineLayout, PipelineMultisampleStateCreateInfo,
-    PipelineRasterizationStateCreateInfo, PipelineViewportStateCreateInfo, PolygonMode,
-    PrimitiveTopology, Rect2D, RenderPass, SampleCountFlags, Viewport,
+    PipelineRasterizationStateCreateInfo, PipelineVertexInputStateCreateInfo,
+    PipelineViewportStateCreateInfo, PolygonMode, PrimitiveTopology, Rect2D, RenderPass,
+    SampleCountFlags, Viewport,
   },
 };
 use std::rc::Rc;
 
-#[repr(C, align(8))]
-#[derive(Clone, Copy)]
-pub(crate) struct PushConstant {
-  pub(crate) camera_position: (f32, f32),
-  pub(crate) camera_size: (f32, f32),
-  pub(crate) mesh_buffer_addr: DeviceAddress,
-}
-
-pub(crate) struct GlyphPipeline {
+pub(crate) struct GraphicsPipeline {
   device: Rc<Device>,
   pub(crate) pipeline: Pipeline,
 }
 
-impl GlyphPipeline {
+impl GraphicsPipeline {
   pub(crate) fn new(
     device: Rc<Device>,
     surface_extent: Extent2D,
-    vert_shader: &GlyphVertShader<'_>,
-    frag_shader: &GlyphFragShader<'_>,
+    vert_shader: &Shader<'_>,
+    frag_shader: &Shader<'_>,
     layout: PipelineLayout,
     render_pass: RenderPass,
-    base_pipeline: Option<&GlyphPipeline>,
+    base_pipeline: Option<&GraphicsPipeline>,
   ) -> Self {
     let input_assembly_state_create_info = PipelineInputAssemblyStateCreateInfo {
       topology: PrimitiveTopology::TRIANGLE_LIST,
@@ -97,6 +90,8 @@ impl GlyphPipeline {
       frag_shader.shader_stage_create_info,
     ];
 
+    let vertex_input_state_create_info = PipelineVertexInputStateCreateInfo::default();
+
     let pipeline_create_info = GraphicsPipelineCreateInfo {
       flags: if base_pipeline.is_some() {
         PipelineCreateFlags::DERIVATIVE | PipelineCreateFlags::ALLOW_DERIVATIVES
@@ -105,7 +100,7 @@ impl GlyphPipeline {
       },
       stage_count: shader_stage_create_infos.len() as _,
       p_stages: shader_stage_create_infos.as_ptr(),
-      p_vertex_input_state: &vert_shader.vert_input_stage_create_info,
+      p_vertex_input_state: &vertex_input_state_create_info,
       p_input_assembly_state: &input_assembly_state_create_info,
       p_viewport_state: &viewport_state_create_info,
       p_rasterization_state: &rasterization_state_create_info,
@@ -136,7 +131,7 @@ impl GlyphPipeline {
   }
 }
 
-impl Drop for GlyphPipeline {
+impl Drop for GraphicsPipeline {
   fn drop(&mut self) {
     unsafe { self.device.destroy_pipeline(self.pipeline, None) };
   }

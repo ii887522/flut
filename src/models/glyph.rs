@@ -17,7 +17,7 @@ impl Glyph {
   pub fn new(
     position: (f32, f32),
     size: (f32, f32),
-    color: (u8, u8, u8),
+    color: (u8, u8, u8, u8),
     #[optarg((-size.0, -size.1))] tex_position: (f32, f32),
   ) -> Self {
     Self {

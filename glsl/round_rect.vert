@@ -13,9 +13,9 @@ const vec2 VERTICES[] = vec2[](
 struct Mesh {
   vec2 position;
   vec2 size;
-  vec2 texPosition;
   uint color;
-  float pad;
+  float controlRadius;
+  vec2 controlPoint;
 };
 
 layout(std430, buffer_reference, buffer_reference_align = 8) readonly buffer MeshBuffer {
@@ -23,10 +23,11 @@ layout(std430, buffer_reference, buffer_reference_align = 8) readonly buffer Mes
 };
 
 layout(location = 0) out vec4 fragColor;
-layout(location = 1) out vec2 fragTexCoord;
+layout(location = 1) out vec2 fragControlPoint;
+layout(location = 2) out float fragControlRadius;
+layout(location = 3) out vec2 fragBearing;
 
 layout(std430, push_constant) uniform PushConstant {
-  vec2 cameraPosition;
   vec2 cameraSize;
   MeshBuffer meshBuffer;
 } pushConstant;
@@ -37,25 +38,24 @@ vec2 map(const vec2 from, const vec2 minFrom, const vec2 maxFrom, const vec2 min
 
 void main() {
   const Mesh mesh = pushConstant.meshBuffer.meshes[gl_VertexIndex / VERTICES.length()];
-
-  const vec2 translation = map(
-    mesh.position,
-    pushConstant.cameraPosition,
-    pushConstant.cameraPosition + pushConstant.cameraSize,
-    vec2(-1.0),
-    vec2(1.0)
-  );
-
+  const vec2 translation = map(mesh.position, vec2(0.0), pushConstant.cameraSize, vec2(-1.0), vec2(1.0));
   const vec2 scale = map(mesh.size, vec2(0.0), pushConstant.cameraSize, vec2(0.0), vec2(2.0));
   const vec2 position = VERTICES[gl_VertexIndex % VERTICES.length()];
 
   gl_Position = vec4(position * scale + translation, 0.0, 1.0);
-  fragTexCoord = position * mesh.size + mesh.texPosition;
 
   fragColor = vec4(
     float(mesh.color >> 24) / 255.0,
     float((mesh.color >> 16) & 0xFF) / 255.0,
     float((mesh.color >> 8) & 0xFF) / 255.0,
     float(mesh.color & 0xFF) / 255.0
+  );
+
+  fragControlPoint = mesh.controlPoint;
+  fragControlRadius = mesh.controlRadius;
+
+  fragBearing = vec2(
+    normalize(mesh.controlPoint.x - (mesh.position.x + mesh.size.x * 0.5)),
+    normalize(mesh.controlPoint.y - (mesh.position.y + mesh.size.y * 0.5))
   );
 }

@@ -5,7 +5,7 @@ use std::sync::atomic::{AtomicU16, Ordering};
 
 pub(crate) struct Worm {
   pub(crate) position: u16,
-  pub(crate) direction: Option<Direction>,
+  pub(crate) direction: Direction,
   pub(crate) drawable_id: AtomicU16,
 }
 
@@ -31,7 +31,7 @@ impl From<Worm> for Rect {
           as _,
       ),
       (consts::CELL_SIZE.0 as _, consts::CELL_SIZE.1 as _),
-      (243, 125, 121),
+      (243, 125, 121, 255),
     )
   }
 }

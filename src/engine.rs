@@ -1,7 +1,7 @@
 use crate::{
-  batches::GlyphBatch,
+  batches::{GlyphBatch, RoundRectBatch},
   collections::{SparseVec, StringSlice},
-  models::{AudioReq, Glyph, Rect, Text},
+  models::{AudioReq, Glyph, Rect, RoundRect, Text},
 };
 use ash::{
   Device, Entry, Instance,
@@ -51,6 +51,7 @@ pub struct Engine<'a> {
   swapchain_device: swapchain::Device,
   memory_allocator: Option<Rc<RefCell<Allocator>>>,
   glyph_batch: Option<GlyphBatch<'a>>,
+  round_rect_batch: Option<RoundRectBatch<'a>>,
   command_pool: CommandPool,
   command_buffers: Vec<CommandBuffer>,
   descriptor_pool: DescriptorPool,
@@ -71,11 +72,15 @@ pub struct Engine<'a> {
 
 pub struct DrawableCaps {
   pub glyph_cap: usize,
+  pub round_rect_cap: usize,
 }
 
 impl Default for DrawableCaps {
   fn default() -> Self {
-    Self { glyph_cap: 3000 }
+    Self {
+      glyph_cap: 3000,
+      round_rect_cap: 100,
+    }
   }
 }
 
@@ -347,6 +352,12 @@ impl<'a> Engine<'a> {
       drawable_caps.glyph_cap,
     );
 
+    let round_rect_batch = RoundRectBatch::new(
+      device.clone(),
+      memory_allocator.clone(),
+      drawable_caps.round_rect_cap,
+    );
+
     let command_pool_create_info = CommandPoolCreateInfo {
       flags: CommandPoolCreateFlags::TRANSIENT | CommandPoolCreateFlags::RESET_COMMAND_BUFFER,
       queue_family_index: graphics_queue_family_index as _, // Graphics queue family implicitly supports transfer operations
@@ -476,6 +487,7 @@ impl<'a> Engine<'a> {
       present_queue,
       swapchain_device,
       glyph_batch: Some(glyph_batch),
+      round_rect_batch: Some(round_rect_batch),
       memory_allocator: Some(memory_allocator),
       command_pool,
       command_buffers,
@@ -582,6 +594,12 @@ impl<'a> Engine<'a> {
         self.descriptor_set,
         self.surface_extent,
       );
+
+      self
+        .round_rect_batch
+        .as_ref()
+        .unwrap()
+        .record_draw_commands(command_buffer, self.surface_extent);
 
       self
         .device
@@ -819,7 +837,9 @@ impl<'a> Engine<'a> {
     };
 
     let glyph_batch = self.glyph_batch.as_mut().unwrap();
+    let round_rect_batch = self.round_rect_batch.as_mut().unwrap();
     glyph_batch.on_swapchain_suboptimal(surface_extent, render_pass);
+    round_rect_batch.on_swapchain_suboptimal(surface_extent, render_pass);
 
     let swapchain_framebuffers = unsafe {
       swapchain_image_views
@@ -925,6 +945,18 @@ impl<'a> Engine<'a> {
     let glyph_ids = self.text_ids.remove(id);
     self.batch_remove_glyphs(&glyph_ids);
   }
+
+  pub fn add_round_rect(&mut self, round_rect: RoundRect) -> u16 {
+    self.round_rect_batch.as_mut().unwrap().add(round_rect)
+  }
+
+  pub fn remove_round_rect(&mut self, id: u16) {
+    self.round_rect_batch.as_mut().unwrap().remove(id);
+  }
+
+  pub fn clear_round_rects(&mut self) {
+    self.round_rect_batch.as_mut().unwrap().clear();
+  }
 }
 
 impl Drop for Engine<'_> {
@@ -949,6 +981,7 @@ impl Drop for Engine<'_> {
         .destroy_descriptor_pool(self.descriptor_pool, None);
 
       self.device.destroy_command_pool(self.command_pool, None);
+      drop(mem::take(&mut self.round_rect_batch));
       drop(mem::take(&mut self.glyph_batch));
       drop(mem::take(&mut self.memory_allocator));
       self.device.destroy_render_pass(self.render_pass, None);
