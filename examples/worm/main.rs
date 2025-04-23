@@ -6,10 +6,11 @@ mod consts;
 mod models;
 
 use flut::{
-  App, AppConfig, Clock, Engine, Transition, app,
+  App, AppConfig, Clock, Engine, app,
   collections::SparseVec,
   gfx::Shake,
-  models::{AudioReq, Glass, Rect, RoundRect, Text},
+  models::{AudioReq, Rect, Text},
+  widgets::Dialog,
 };
 use models::{Air, Direction, Food, Score, Wall, Worm};
 use rayon::prelude::*;
@@ -27,7 +28,7 @@ fn main() {
 enum State {
   Playing,
   DeadShaking(Shake),
-  DeadShowingDialog(Glass),
+  DeadShowingDialog(Dialog),
   Pending,
 }
 
@@ -361,30 +362,13 @@ impl App for WormApp {
 
         engine.set_camera_position((0.0, 0.0));
 
-        let mut glass = Glass {
-          size: (consts::APP_SIZE.0 as _, consts::APP_SIZE.1 as _),
-          alpha: Transition::new(0.0, 128.0, 0.25),
-          drawable_id: u16::MAX,
-        };
-
-        glass.drawable_id = engine.add_rect(Rect::from(glass));
-
-        engine.add_round_rect(RoundRect::new(
-          (
-            ((consts::APP_SIZE.0 - consts::DIALOG_SIZE.0) >> 1) as _,
-            ((consts::APP_SIZE.1 - consts::DIALOG_SIZE.1) >> 1) as _,
-          ),
-          (consts::DIALOG_SIZE.0 as _, consts::DIALOG_SIZE.1 as _),
-          (255, 0, 0, 255),
-          8.0,
-        ));
-
-        self.state = State::DeadShowingDialog(glass);
+        let mut dialog = Dialog::new();
+        dialog.init(engine);
+        self.state = State::DeadShowingDialog(dialog);
       }
-      State::DeadShowingDialog(mut glass) => {
-        glass.alpha.update(dt);
-        engine.update_rect(glass.drawable_id, Rect::from(glass));
-        self.state = State::DeadShowingDialog(glass);
+      State::DeadShowingDialog(mut dialog) => {
+        dialog.update(dt, engine);
+        self.state = State::DeadShowingDialog(dialog);
       }
       State::Pending => unreachable!("Unexpected Pending state"),
     };

@@ -10,7 +10,7 @@ use ash::{
   },
 };
 use gpu_allocator::vulkan::Allocator;
-use std::{cell::RefCell, rc::Rc};
+use std::{cell::RefCell, rc::Rc, sync::Arc};
 
 #[repr(C, align(8))]
 #[derive(Clone, Copy)]
@@ -30,7 +30,7 @@ pub(crate) struct GlyphBatch<'a> {
 
 impl GlyphBatch<'_> {
   pub(crate) fn new(
-    device: Rc<Device>,
+    device: Arc<Device>,
     memory_allocator: Rc<RefCell<Allocator>>,
     cap: usize,
   ) -> Self {
@@ -235,7 +235,7 @@ impl GlyphBatch<'_> {
     self.batch.update(id, glyph);
   }
 
-  pub(crate) fn batch_update(&mut self, ids: &[u16], glyphs: Vec<Glyph>) {
+  pub(crate) fn batch_update(&self, ids: &[u16], glyphs: Vec<Glyph>) {
     self.batch.batch_update(ids, glyphs);
   }
 

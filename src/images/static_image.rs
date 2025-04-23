@@ -12,10 +12,10 @@ use gpu_allocator::{
   MemoryLocation,
   vulkan::{Allocation, AllocationCreateDesc, AllocationScheme, Allocator},
 };
-use std::{cell::RefCell, mem, ptr, rc::Rc};
+use std::{cell::RefCell, mem, ptr, rc::Rc, sync::Arc};
 
 pub(crate) struct StaticImage {
-  device: Rc<Device>,
+  device: Arc<Device>,
   memory_allocator: Rc<RefCell<Allocator>>,
   pub(crate) staging_buffer: Buffer,
   staging_alloc: Allocation,
@@ -26,7 +26,7 @@ pub(crate) struct StaticImage {
 
 impl StaticImage {
   pub(crate) fn new(
-    device: Rc<Device>,
+    device: Arc<Device>,
     memory_allocator: Rc<RefCell<Allocator>>,
     name: &str,
     format: Format,

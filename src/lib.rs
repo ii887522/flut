@@ -16,6 +16,7 @@ mod images;
 pub mod models;
 mod shader;
 pub mod transition;
+pub mod widgets;
 
 pub use app::App;
 pub use app::AppConfig;
@@ -24,11 +25,14 @@ pub use engine::Engine;
 pub use transition::Transition;
 
 use rayon::prelude::*;
+use std::sync::atomic::AtomicU32;
 use std::{
   mem,
   ops::{Bound, RangeBounds},
   ptr,
 };
+
+static APP_SIZE: (AtomicU32, AtomicU32) = (AtomicU32::new(0), AtomicU32::new(0));
 
 const unsafe fn as_bytes<T>(from: &T) -> &[u8] {
   unsafe { &*ptr::slice_from_raw_parts(from as *const _ as *const _, mem::size_of::<T>()) }

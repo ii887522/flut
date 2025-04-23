@@ -11,16 +11,16 @@ use ash::{
     SampleCountFlags, Viewport,
   },
 };
-use std::rc::Rc;
+use std::sync::Arc;
 
 pub(crate) struct GraphicsPipeline {
-  device: Rc<Device>,
+  device: Arc<Device>,
   pub(crate) pipeline: Pipeline,
 }
 
 impl GraphicsPipeline {
   pub(crate) fn new(
-    device: Rc<Device>,
+    device: Arc<Device>,
     surface_extent: Extent2D,
     vert_shader: &Shader<'_>,
     frag_shader: &Shader<'_>,

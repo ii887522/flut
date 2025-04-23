@@ -1,10 +1,16 @@
 use crate::{Transition, models::Rect};
 
 #[derive(Clone, Copy)]
-pub struct Glass {
-  pub size: (f32, f32),
-  pub alpha: Transition,
-  pub drawable_id: u16,
+pub(super) struct Glass {
+  pub(super) size: (f32, f32),
+  pub(super) alpha: Transition,
+  pub(super) drawable_id: u16,
+}
+
+impl Glass {
+  pub(super) fn update(&mut self, dt: f32) {
+    self.alpha.update(dt);
+  }
 }
 
 impl From<Glass> for Rect {

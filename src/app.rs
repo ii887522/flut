@@ -1,6 +1,10 @@
 use crate::{Engine, audio, engine::DrawableCaps};
 use sdl2::{event::Event, image::LoadSurface, surface::Surface};
-use std::{sync::mpsc, thread, time::Instant};
+use std::{
+  sync::{atomic::Ordering, mpsc},
+  thread,
+  time::Instant,
+};
 
 pub struct AppConfig {
   pub title: &'static str,
@@ -31,6 +35,12 @@ pub trait App {
 
 pub fn run(mut app: impl App) {
   let app_config = app.get_config();
+
+  crate::APP_SIZE.0.store(app_config.width, Ordering::Relaxed);
+  crate::APP_SIZE
+    .1
+    .store(app_config.height, Ordering::Relaxed);
+
   let sdl = sdl2::init().unwrap();
 
   let (audio_tx, audio_rx) = mpsc::channel();

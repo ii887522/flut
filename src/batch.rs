@@ -13,10 +13,10 @@ use ash::{
 use atomic_refcell::AtomicRefCell;
 use gpu_allocator::vulkan::Allocator;
 use rayon::prelude::*;
-use std::{cell::RefCell, mem, ptr, rc::Rc};
+use std::{cell::RefCell, mem, ptr, rc::Rc, sync::Arc};
 
 pub(super) struct Batch<'a, Mesh> {
-  pub(super) device: Rc<Device>,
+  pub(super) device: Arc<Device>,
   vert_shader: Shader<'a>,
   frag_shader: Shader<'a>,
   pipeline_layout: PipelineLayout,
@@ -28,7 +28,7 @@ pub(super) struct Batch<'a, Mesh> {
 
 impl<Mesh> Batch<'_, Mesh> {
   pub(super) fn new<PushConstant>(
-    device: Rc<Device>,
+    device: Arc<Device>,
     memory_allocator: Rc<RefCell<Allocator>>,
     cap: usize,
     vert_shader_code: &[u8],
@@ -193,7 +193,7 @@ impl<Mesh: Copy + Send + Sync> Batch<'_, Mesh> {
     self.meshes[id] = AtomicRefCell::new(mesh);
   }
 
-  pub(super) fn batch_update(&mut self, ids: &[u16], meshes: Vec<Mesh>) {
+  pub(super) fn batch_update(&self, ids: &[u16], meshes: Vec<Mesh>) {
     ids
       .par_iter()
       .zip(meshes.par_iter())

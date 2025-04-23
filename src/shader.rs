@@ -2,17 +2,17 @@ use ash::{
   Device,
   vk::{PipelineShaderStageCreateInfo, ShaderModule, ShaderModuleCreateInfo, ShaderStageFlags},
 };
-use std::{ffi::CString, rc::Rc};
+use std::{ffi::CString, sync::Arc};
 
 pub(super) struct Shader<'a> {
-  device: Rc<Device>,
+  device: Arc<Device>,
   shader: ShaderModule,
   _entry_point_name: CString,
   pub(super) shader_stage_create_info: PipelineShaderStageCreateInfo<'a>,
 }
 
 impl Shader<'_> {
-  pub(crate) fn new(device: Rc<Device>, stage: ShaderStageFlags, code: &[u8]) -> Self {
+  pub(crate) fn new(device: Arc<Device>, stage: ShaderStageFlags, code: &[u8]) -> Self {
     let shader_create_info = ShaderModuleCreateInfo {
       code_size: code.len(),
       p_code: code.as_ptr() as *const _,

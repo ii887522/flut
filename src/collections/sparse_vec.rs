@@ -159,7 +159,7 @@ impl<T: Send + Sync> SparseVec<T> {
     ids
   }
 
-  pub fn par_set(&mut self, ids: &[u16], values: Vec<T>) {
+  pub fn par_set(&self, ids: &[u16], values: Vec<T>) {
     ids
       .par_iter()
       .zip(values.into_par_iter())

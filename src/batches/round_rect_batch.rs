@@ -8,7 +8,7 @@ use ash::{
   vk::{CommandBuffer, DeviceAddress, Extent2D, RenderPass},
 };
 use gpu_allocator::vulkan::Allocator;
-use std::{cell::RefCell, rc::Rc};
+use std::{cell::RefCell, rc::Rc, sync::Arc};
 
 #[repr(C, align(8))]
 #[derive(Clone, Copy)]
@@ -24,7 +24,7 @@ pub(crate) struct RoundRectBatch<'a> {
 
 impl RoundRectBatch<'_> {
   pub(crate) fn new(
-    device: Rc<Device>,
+    device: Arc<Device>,
     memory_allocator: Rc<RefCell<Allocator>>,
     cap: usize,
   ) -> Self {
@@ -73,6 +73,10 @@ impl RoundRectBatch<'_> {
     self.batch.batch_add(round_rect_parts)
   }
 
+  fn batch_update_part(&self, ids: &[u16], round_rect_parts: Vec<RoundRectPart>) {
+    self.batch.batch_update(ids, round_rect_parts);
+  }
+
   fn batch_remove_part(&mut self, ids: &[u16]) {
     self.batch.batch_remove(ids);
   }
@@ -80,6 +84,11 @@ impl RoundRectBatch<'_> {
   pub(crate) fn add(&mut self, round_rect: RoundRect) -> u16 {
     let ids = self.batch_add_part(Vec::from(round_rect));
     self.round_rect_ids.push(ids)
+  }
+
+  pub(crate) fn update(&self, id: u16, round_rect: RoundRect) {
+    let ids = self.round_rect_ids[id].borrow();
+    self.batch_update_part(&ids, Vec::from(round_rect));
   }
 
   pub(crate) fn remove(&mut self, id: u16) {

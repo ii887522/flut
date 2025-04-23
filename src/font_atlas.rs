@@ -9,7 +9,7 @@ use ash::{
 use gpu_allocator::vulkan::Allocator;
 use rayon::prelude::*;
 use sdl2::{pixels::Color, ttf};
-use std::{cell::RefCell, collections::HashMap, ops::RangeInclusive, rc::Rc};
+use std::{cell::RefCell, collections::HashMap, ops::RangeInclusive, rc::Rc, sync::Arc};
 
 pub(super) struct FontAtlas {
   pub(super) image: StaticImage,
@@ -19,7 +19,7 @@ pub(super) struct FontAtlas {
 
 impl FontAtlas {
   pub(super) fn new(
-    device: Rc<Device>,
+    device: Arc<Device>,
     memory_allocator: Rc<RefCell<Allocator>>,
     file_path: &str,
     font_size: u16,

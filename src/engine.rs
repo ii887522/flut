@@ -31,7 +31,12 @@ use gpu_allocator::{
 };
 use rayon::prelude::*;
 use sdl2::video::Window;
-use std::{cell::RefCell, mem, rc::Rc, sync::mpsc::Sender};
+use std::{
+  cell::RefCell,
+  mem,
+  rc::Rc,
+  sync::{Arc, mpsc::Sender},
+};
 
 const MAX_IN_FLIGHT_FRAME_COUNT: u32 = 3;
 const MIN_ALLOC_SIZE: u64 = 4 * 1024 * 1024;
@@ -45,7 +50,7 @@ pub struct Engine<'a> {
   physical_device: PhysicalDevice,
   graphics_queue_family_index: u32,
   present_queue_family_index: u32,
-  device: Rc<Device>,
+  device: Arc<Device>,
   graphics_queue: Queue,
   present_queue: Queue,
   swapchain_device: swapchain::Device,
@@ -310,7 +315,7 @@ impl<'a> Engine<'a> {
     };
 
     let device = unsafe {
-      Rc::new(
+      Arc::new(
         instance
           .create_device(physical_device, &device_create_info, None)
           .unwrap(),
@@ -895,8 +900,8 @@ impl<'a> Engine<'a> {
     self.glyph_batch.as_mut().unwrap().update(id, glyph);
   }
 
-  pub fn batch_update_glyphs(&mut self, ids: &[u16], glyphs: Vec<Glyph>) {
-    self.glyph_batch.as_mut().unwrap().batch_update(ids, glyphs);
+  pub fn batch_update_glyphs(&self, ids: &[u16], glyphs: Vec<Glyph>) {
+    self.glyph_batch.as_ref().unwrap().batch_update(ids, glyphs);
   }
 
   pub fn remove_glyph(&mut self, id: u16) -> Glyph {
@@ -923,7 +928,7 @@ impl<'a> Engine<'a> {
     self.update_glyph(id, rect.into());
   }
 
-  pub fn batch_update_rects(&mut self, ids: &[u16], rects: Vec<Rect>) {
+  pub fn batch_update_rects(&self, ids: &[u16], rects: Vec<Rect>) {
     self.batch_update_glyphs(ids, rects.into_par_iter().map(Into::into).collect());
   }
 
@@ -948,6 +953,14 @@ impl<'a> Engine<'a> {
 
   pub fn add_round_rect(&mut self, round_rect: RoundRect) -> u16 {
     self.round_rect_batch.as_mut().unwrap().add(round_rect)
+  }
+
+  pub fn update_round_rect(&self, id: u16, round_rect: RoundRect) {
+    self
+      .round_rect_batch
+      .as_ref()
+      .unwrap()
+      .update(id, round_rect);
   }
 
   pub fn remove_round_rect(&mut self, id: u16) {
