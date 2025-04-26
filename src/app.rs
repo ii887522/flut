@@ -57,6 +57,8 @@ pub fn run(mut app: impl App) {
   let mut window = vid_subsys
     .window(app_config.title, app_config.width, app_config.height)
     .allow_highdpi()
+    // By default, SDL create window will also show the window, explicitly hide it to avoid display black screen during startup
+    .hidden()
     .position_centered()
     .vulkan()
     .build()
@@ -65,9 +67,6 @@ pub fn run(mut app: impl App) {
   if let Ok(favicon) = Surface::from_file("assets/images/favicon.png") {
     window.set_icon(favicon);
   }
-
-  // Call window.show() as early as possible to minimize the perceived startup time
-  window.show();
 
   let mut engine = Engine::new(
     window,

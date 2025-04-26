@@ -515,6 +515,9 @@ impl<'a> Engine<'a> {
     // Create a new swapchain and its dependents during initialization
     this.on_swapchain_suboptimal();
 
+    // After initialized all the Vulkan objects, then only display the window to avoid display black screen during startup
+    this.window.show();
+
     unsafe {
       this.device.queue_wait_idle(graphics_queue).unwrap();
       let glyph_batch = this.glyph_batch.as_mut().unwrap();
