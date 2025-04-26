@@ -20,7 +20,8 @@ impl Transition {
     self.from + (self.to - self.from) * (self.t / self.duration)
   }
 
-  pub fn update(&mut self, dt: f32) {
+  pub fn update(&mut self, dt: f32) -> bool {
     self.t = self.duration.min(self.t + dt);
+    self.t >= self.duration
   }
 }

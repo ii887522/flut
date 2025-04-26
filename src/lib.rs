@@ -86,3 +86,7 @@ const fn unpack_color(color: u32) -> (u8, u8, u8, u8) {
     color as u8,
   )
 }
+
+const fn map(from: f32, min_from: f32, max_from: f32, min_to: f32, max_to: f32) -> f32 {
+  min_to + (from - min_from) * (max_to - min_to) / (max_from - min_from)
+}

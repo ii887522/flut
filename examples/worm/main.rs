@@ -290,6 +290,10 @@ impl App for WormApp {
   }
 
   fn process_event(&mut self, event: Event) {
+    if let State::DeadShowingDialog(dialog) = &mut self.state {
+      dialog.process_event(&event);
+    }
+
     let Event::KeyDown {
       keycode: Some(keycode),
       ..
@@ -362,7 +366,7 @@ impl App for WormApp {
 
         engine.set_camera_position((0.0, 0.0));
 
-        let mut dialog = Dialog::new();
+        let mut dialog = Dialog::new((255, 0, 0, 255));
         dialog.init(engine);
         self.state = State::DeadShowingDialog(dialog);
       }

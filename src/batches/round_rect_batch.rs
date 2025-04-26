@@ -14,6 +14,8 @@ use std::{cell::RefCell, rc::Rc, sync::Arc};
 #[derive(Clone, Copy)]
 struct PushConstant {
   camera_size: (f32, f32),
+  pixel_size: f32,
+  pad: f32,
   mesh_buffer_addr: DeviceAddress,
 }
 
@@ -58,9 +60,12 @@ impl RoundRectBatch<'_> {
     &self,
     command_buffer: CommandBuffer,
     surface_extent: Extent2D,
+    pixel_size: f32,
   ) {
     let push_const = PushConstant {
       camera_size: (surface_extent.width as _, surface_extent.height as _),
+      pixel_size,
+      pad: 0.0,
       mesh_buffer_addr: self.batch.mesh_buffer_addr,
     };
 

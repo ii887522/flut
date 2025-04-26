@@ -29,6 +29,8 @@ layout(location = 3) out vec2 fragBearing;
 
 layout(std430, push_constant) uniform PushConstant {
   vec2 cameraSize;
+  float pixelSize;
+  float pad;
   MeshBuffer meshBuffer;
 } pushConstant;
 
@@ -38,8 +40,10 @@ vec2 map(const vec2 from, const vec2 minFrom, const vec2 maxFrom, const vec2 min
 
 void main() {
   const Mesh mesh = pushConstant.meshBuffer.meshes[gl_VertexIndex / VERTICES.length()];
-  const vec2 translation = map(mesh.position, vec2(0.0), pushConstant.cameraSize, vec2(-1.0), vec2(1.0));
-  const vec2 scale = map(mesh.size, vec2(0.0), pushConstant.cameraSize, vec2(0.0), vec2(2.0));
+  const vec2 translation = map(
+    mesh.position, vec2(0.0), pushConstant.cameraSize * pushConstant.pixelSize, vec2(-1.0), vec2(1.0)
+  );
+  const vec2 scale = map(mesh.size, vec2(0.0), pushConstant.cameraSize * pushConstant.pixelSize, vec2(0.0), vec2(2.0));
   const vec2 position = VERTICES[gl_VertexIndex % VERTICES.length()];
 
   gl_Position = vec4(position * scale + translation, 0.0, 1.0);
@@ -51,8 +55,8 @@ void main() {
     float(mesh.color & 0xFF) / 255.0
   );
 
-  fragControlPoint = mesh.controlPoint;
-  fragControlRadius = mesh.controlRadius;
+  fragControlPoint = mesh.controlPoint / pushConstant.pixelSize;
+  fragControlRadius = mesh.controlRadius / pushConstant.pixelSize;
 
   fragBearing = vec2(
     normalize(mesh.controlPoint.x - (mesh.position.x + mesh.size.x * 0.5)),

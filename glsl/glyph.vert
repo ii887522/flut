@@ -28,6 +28,8 @@ layout(location = 1) out vec2 fragTexCoord;
 layout(std430, push_constant) uniform PushConstant {
   vec2 cameraPosition;
   vec2 cameraSize;
+  float pixelSize;
+  float pad;
   MeshBuffer meshBuffer;
 } pushConstant;
 
@@ -41,12 +43,12 @@ void main() {
   const vec2 translation = map(
     mesh.position,
     pushConstant.cameraPosition,
-    pushConstant.cameraPosition + pushConstant.cameraSize,
+    pushConstant.cameraPosition + pushConstant.cameraSize * pushConstant.pixelSize,
     vec2(-1.0),
     vec2(1.0)
   );
 
-  const vec2 scale = map(mesh.size, vec2(0.0), pushConstant.cameraSize, vec2(0.0), vec2(2.0));
+  const vec2 scale = map(mesh.size, vec2(0.0), pushConstant.cameraSize * pushConstant.pixelSize, vec2(0.0), vec2(2.0));
   const vec2 position = VERTICES[gl_VertexIndex % VERTICES.length()];
 
   gl_Position = vec4(position * scale + translation, 0.0, 1.0);

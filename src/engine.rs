@@ -582,6 +582,7 @@ impl<'a> Engine<'a> {
       };
 
       let subpass_end_info = SubpassEndInfo::default();
+      let pixel_size = self.window.size().0 as f32 / self.window.vulkan_drawable_size().0 as f32;
 
       self
         .device
@@ -598,13 +599,14 @@ impl<'a> Engine<'a> {
         command_buffer,
         self.descriptor_set,
         self.surface_extent,
+        pixel_size,
       );
 
       self
         .round_rect_batch
         .as_ref()
         .unwrap()
-        .record_draw_commands(command_buffer, self.surface_extent);
+        .record_draw_commands(command_buffer, self.surface_extent, pixel_size);
 
       self
         .device

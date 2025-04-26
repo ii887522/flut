@@ -1,6 +1,6 @@
 // Config
-pub(super) const APP_SIZE: (u32, u32) = (772, 840);
-pub(super) const WORLD_SIZE: (u16, u16) = (772, 772);
+pub(super) const APP_SIZE: (u32, u32) = (736, 804);
+pub(super) const WORLD_SIZE: (u16, u16) = (736, 736);
 pub(super) const CELL_SIZE: (u16, u16) = (16, 16);
 pub(super) const GAP_SIZE: (u16, u16) = (2, 2);
 pub(super) const SCORE_POSITION: (f32, f32) = ((WORLD_SIZE.0 >> 1) as _, 8 as _);

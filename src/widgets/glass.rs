@@ -8,8 +8,8 @@ pub(super) struct Glass {
 }
 
 impl Glass {
-  pub(super) fn update(&mut self, dt: f32) {
-    self.alpha.update(dt);
+  pub(super) fn update(&mut self, dt: f32) -> bool {
+    self.alpha.update(dt)
   }
 }
 
