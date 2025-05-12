@@ -8,25 +8,25 @@ use ash::{
 };
 use gpu_allocator::vulkan::Allocator;
 use rayon::prelude::*;
-use sdl2::{pixels::Color, ttf};
+use sdl2::{pixels::Color, ttf::Sdl2TtfContext};
 use std::{cell::RefCell, collections::HashMap, ops::RangeInclusive, rc::Rc, sync::Arc};
 
-pub(super) struct FontAtlas {
-  pub(super) image: StaticImage,
-  pub(super) buffer_image_copies: Vec<BufferImageCopy>,
+pub(crate) struct FontAtlas {
+  pub(crate) image: StaticImage,
+  pub(crate) buffer_image_copies: Vec<BufferImageCopy>,
   char_to_glyph_metrics: HashMap<char, GlyphMetrics>,
 }
 
 impl FontAtlas {
-  pub(super) fn new(
+  pub(crate) fn new(
     device: Arc<Device>,
     memory_allocator: Rc<RefCell<Allocator>>,
+    ttf: &Sdl2TtfContext,
     file_path: &str,
     font_size: u16,
     chars: RangeInclusive<char>,
     atlas_size: (u32, u32),
   ) -> Self {
-    let ttf = ttf::init().unwrap();
     let font = ttf.load_font(file_path, font_size).unwrap();
     let mut glyph_position = (0, 0);
     let mut max_glyph_height = 0;
@@ -103,7 +103,7 @@ impl FontAtlas {
     }
   }
 
-  pub(super) fn get_glyph_metrics(&self, char: char) -> Option<&GlyphMetrics> {
+  pub(crate) fn get_glyph_metrics(&self, char: char) -> Option<&GlyphMetrics> {
     self.char_to_glyph_metrics.get(&char)
   }
 }

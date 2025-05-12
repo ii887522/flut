@@ -1,4 +1,4 @@
-#version 460
+#version 460 core
 #extension GL_EXT_buffer_reference : require
 
 const vec2 VERTICES[] = vec2[](

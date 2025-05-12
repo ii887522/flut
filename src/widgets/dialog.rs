@@ -1,7 +1,7 @@
 use super::{Container, Glass};
 use crate::{
   Engine, Transition,
-  models::{Rect, RoundRect},
+  models::{Icon, IconName, Rect, RoundRect},
 };
 use sdl2::{event::Event, mouse::MouseButton};
 use std::sync::atomic::Ordering;
@@ -24,12 +24,13 @@ enum State {
 pub struct Dialog {
   glass: Glass,
   container: Container,
+  icon: Icon,
   is_mouse_down_outside: bool,
   state: State,
 }
 
 impl Dialog {
-  pub fn new(bg_color: (u8, u8, u8, u8)) -> Self {
+  pub fn new(bg_color: (u8, u8, u8, u8), color: (u8, u8, u8, u8), icon: IconName) -> Self {
     let app_size = (
       crate::APP_SIZE.0.load(Ordering::Relaxed),
       crate::APP_SIZE.1.load(Ordering::Relaxed),
@@ -64,6 +65,7 @@ impl Dialog {
         border_radius: Transition::new(0.0, DIALOG_BORDER_RADIUS, SCALING_UP_DURATION),
         drawable_id: u16::MAX,
       },
+      icon: Icon::new((to_position.0 as _, to_position.1 as _), color, icon),
       is_mouse_down_outside: false,
       state: State::ScalingUp,
     }
@@ -93,6 +95,7 @@ impl Dialog {
   pub fn init(&mut self, engine: &mut Engine<'_>) {
     self.glass.drawable_id = engine.add_rect(Rect::from(self.glass));
     self.container.drawable_id = engine.add_round_rect(RoundRect::from(self.container));
+    engine.add_icon(self.icon);
   }
 
   pub fn process_event(&mut self, event: &Event) {

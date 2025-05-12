@@ -131,11 +131,20 @@ dependencies = [
  "ash-molten",
  "atomic_refcell",
  "fastrand",
+ "flut_macro",
  "gpu-allocator",
  "optarg2chain",
  "rayon",
  "sdl2",
  "shaderc",
+]
+
+[[package]]
+name = "flut_macro"
+version = "0.1.0"
+dependencies = [
+ "quote",
+ "syn 2.0.100",
 ]
 
 [[package]]

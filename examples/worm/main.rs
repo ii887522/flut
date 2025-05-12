@@ -9,7 +9,7 @@ use flut::{
   App, AppConfig, Clock, Engine, app,
   collections::SparseVec,
   gfx::Shake,
-  models::{AudioReq, Rect, Text},
+  models::{AudioReq, IconName, Rect, Text},
   widgets::Dialog,
 };
 use models::{Air, Direction, Food, Score, Wall, Worm};
@@ -366,7 +366,7 @@ impl App for WormApp {
 
         engine.set_camera_position((0.0, 0.0));
 
-        let mut dialog = Dialog::new((255, 0, 0, 255));
+        let mut dialog = Dialog::new((255, 0, 0, 255), (255, 255, 255, 255), IconName::Skull);
         dialog.init(engine);
         self.state = State::DeadShowingDialog(dialog);
       }

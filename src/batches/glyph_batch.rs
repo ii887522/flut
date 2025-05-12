@@ -1,15 +1,19 @@
-use crate::{batch::Batch, font_atlas::FontAtlas, models::Glyph};
+use crate::{
+  atlases::{FontAtlas, IconAtlas},
+  batch::Batch,
+  models::Glyph,
+};
 use ash::{
   Device,
   vk::{
-    self, AccessFlags, BorderColor, CommandBuffer, DependencyFlags, DescriptorImageInfo,
-    DescriptorSet, DescriptorSetLayout, DescriptorSetLayoutBinding, DescriptorSetLayoutCreateInfo,
-    DescriptorType, DeviceAddress, Extent2D, Filter, ImageAspectFlags, ImageLayout,
-    ImageMemoryBarrier, ImageSubresourceRange, PipelineStageFlags, RenderPass, Sampler,
-    SamplerAddressMode, SamplerCreateInfo, SamplerMipmapMode, ShaderStageFlags, WriteDescriptorSet,
+    self, BorderColor, CommandBuffer, CommandPool, DescriptorImageInfo, DescriptorSet,
+    DescriptorSetLayout, DescriptorSetLayoutBinding, DescriptorSetLayoutCreateInfo, DescriptorType,
+    DeviceAddress, Extent2D, Filter, ImageLayout, RenderPass, Sampler, SamplerAddressMode,
+    SamplerCreateInfo, SamplerMipmapMode, ShaderStageFlags, WriteDescriptorSet,
   },
 };
 use gpu_allocator::vulkan::Allocator;
+use sdl2::ttf::Sdl2TtfContext;
 use std::{cell::RefCell, rc::Rc, sync::Arc};
 
 #[repr(C, align(8))]
@@ -27,26 +31,38 @@ pub(crate) struct GlyphBatch<'a> {
   pub(crate) descriptor_set_layout: DescriptorSetLayout,
   sampler: Sampler,
   pub(crate) font_atlas: FontAtlas,
+  pub(crate) icon_atlas: IconAtlas<'a>,
   camera_position: (f32, f32),
 }
 
-impl GlyphBatch<'_> {
+impl<'a> GlyphBatch<'a> {
   pub(crate) fn new(
     device: Arc<Device>,
     memory_allocator: Rc<RefCell<Allocator>>,
+    transfer_command_pool: CommandPool,
+    ttf: &'a Sdl2TtfContext,
     cap: usize,
   ) -> Self {
-    let sampler_layout_binding = DescriptorSetLayoutBinding {
-      binding: 0,
-      descriptor_type: DescriptorType::COMBINED_IMAGE_SAMPLER,
-      descriptor_count: 1,
-      stage_flags: ShaderStageFlags::FRAGMENT,
-      ..Default::default()
-    };
+    let layout_bindings = [
+      DescriptorSetLayoutBinding {
+        binding: 0,
+        descriptor_type: DescriptorType::SAMPLER,
+        descriptor_count: 1,
+        stage_flags: ShaderStageFlags::FRAGMENT,
+        ..Default::default()
+      },
+      DescriptorSetLayoutBinding {
+        binding: 1,
+        descriptor_type: DescriptorType::SAMPLED_IMAGE,
+        descriptor_count: 2,
+        stage_flags: ShaderStageFlags::FRAGMENT,
+        ..Default::default()
+      },
+    ];
 
     let descriptor_set_layout_create_info = DescriptorSetLayoutCreateInfo {
-      binding_count: 1,
-      p_bindings: &sampler_layout_binding,
+      binding_count: layout_bindings.len() as _,
+      p_bindings: layout_bindings.as_ptr(),
       ..Default::default()
     };
 
@@ -84,12 +100,23 @@ impl GlyphBatch<'_> {
     let sampler = unsafe { device.create_sampler(&sampler_create_info, None).unwrap() };
 
     let font_atlas = FontAtlas::new(
-      device,
-      memory_allocator,
+      device.clone(),
+      memory_allocator.clone(),
+      ttf,
       "assets/fonts/arial.ttf",
       48,
       '0'..='9',
       (256, 256),
+    );
+
+    let icon_atlas = IconAtlas::new(
+      device,
+      memory_allocator,
+      transfer_command_pool,
+      ttf,
+      "assets/fonts/MaterialSymbolsOutlined-Regular.ttf",
+      48,
+      (512, 512),
     );
 
     Self {
@@ -97,33 +124,71 @@ impl GlyphBatch<'_> {
       descriptor_set_layout,
       sampler,
       font_atlas,
+      icon_atlas,
       camera_position: (0.0, 0.0),
     }
   }
 
-  pub(crate) fn init_descriptor_set(&self, descriptor_set: DescriptorSet) {
-    let descriptor_image_info = DescriptorImageInfo {
+  pub(crate) fn init_descriptor_sets(&self, descriptor_sets: &[DescriptorSet]) {
+    let descriptor_sampler_info = DescriptorImageInfo {
       sampler: self.sampler,
-      image_view: self.font_atlas.image.view,
-      image_layout: ImageLayout::SHADER_READ_ONLY_OPTIMAL,
-    };
-
-    let image_descriptor_set_write = WriteDescriptorSet {
-      dst_set: descriptor_set,
-      dst_binding: 0,
-      dst_array_element: 0,
-      descriptor_count: 1,
-      descriptor_type: DescriptorType::COMBINED_IMAGE_SAMPLER,
-      p_image_info: &descriptor_image_info,
       ..Default::default()
     };
+
+    let descriptor_image_infos = self
+      .icon_atlas
+      .image
+      .views
+      .iter()
+      .map(|&icon_image_view| {
+        [
+          DescriptorImageInfo {
+            image_view: self.font_atlas.image.view,
+            image_layout: ImageLayout::SHADER_READ_ONLY_OPTIMAL,
+            ..Default::default()
+          },
+          DescriptorImageInfo {
+            image_view: icon_image_view,
+            image_layout: ImageLayout::SHADER_READ_ONLY_OPTIMAL,
+            ..Default::default()
+          },
+        ]
+      })
+      .collect::<Vec<_>>();
+
+    let descriptor_writes = descriptor_image_infos
+      .iter()
+      .zip(descriptor_sets.iter())
+      .flat_map(|(descriptor_image_infos, &descriptor_set)| {
+        [
+          WriteDescriptorSet {
+            dst_set: descriptor_set,
+            dst_binding: 0,
+            dst_array_element: 0,
+            descriptor_count: 1,
+            descriptor_type: DescriptorType::SAMPLER,
+            p_image_info: &descriptor_sampler_info,
+            ..Default::default()
+          },
+          WriteDescriptorSet {
+            dst_set: descriptor_set,
+            dst_binding: 1,
+            dst_array_element: 0,
+            descriptor_count: descriptor_image_infos.len() as _,
+            descriptor_type: DescriptorType::SAMPLED_IMAGE,
+            p_image_info: descriptor_image_infos.as_ptr(),
+            ..Default::default()
+          },
+        ]
+      })
+      .collect::<Vec<_>>();
 
     unsafe {
       self
         .batch
         .device
-        .update_descriptor_sets(&[image_descriptor_set_write], &[])
-    };
+        .update_descriptor_sets(&descriptor_writes, &[]);
+    }
   }
 
   pub(crate) fn on_swapchain_suboptimal(
@@ -134,74 +199,6 @@ impl GlyphBatch<'_> {
     self
       .batch
       .on_swapchain_suboptimal(surface_extent, render_pass);
-  }
-
-  pub(crate) fn record_init_commands(&self, command_buffer: CommandBuffer) {
-    let write_image_memory_barrier = ImageMemoryBarrier {
-      src_access_mask: AccessFlags::NONE,
-      dst_access_mask: AccessFlags::TRANSFER_WRITE,
-      old_layout: ImageLayout::UNDEFINED,
-      new_layout: ImageLayout::TRANSFER_DST_OPTIMAL,
-      src_queue_family_index: vk::QUEUE_FAMILY_IGNORED,
-      dst_queue_family_index: vk::QUEUE_FAMILY_IGNORED,
-      image: self.font_atlas.image.image,
-      subresource_range: ImageSubresourceRange {
-        aspect_mask: ImageAspectFlags::COLOR,
-        base_mip_level: 0,
-        level_count: 1,
-        base_array_layer: 0,
-        layer_count: 1,
-      },
-      ..Default::default()
-    };
-
-    let read_image_memory_barrier = ImageMemoryBarrier {
-      src_access_mask: AccessFlags::TRANSFER_WRITE,
-      dst_access_mask: AccessFlags::SHADER_READ,
-      old_layout: ImageLayout::TRANSFER_DST_OPTIMAL,
-      new_layout: ImageLayout::SHADER_READ_ONLY_OPTIMAL,
-      src_queue_family_index: vk::QUEUE_FAMILY_IGNORED,
-      dst_queue_family_index: vk::QUEUE_FAMILY_IGNORED,
-      image: self.font_atlas.image.image,
-      subresource_range: ImageSubresourceRange {
-        aspect_mask: ImageAspectFlags::COLOR,
-        base_mip_level: 0,
-        level_count: 1,
-        base_array_layer: 0,
-        layer_count: 1,
-      },
-      ..Default::default()
-    };
-
-    unsafe {
-      self.batch.device.cmd_pipeline_barrier(
-        command_buffer,
-        PipelineStageFlags::TOP_OF_PIPE,
-        PipelineStageFlags::TRANSFER,
-        DependencyFlags::empty(),
-        &[],
-        &[],
-        &[write_image_memory_barrier],
-      );
-
-      self.batch.device.cmd_copy_buffer_to_image(
-        command_buffer,
-        self.font_atlas.image.staging_buffer,
-        self.font_atlas.image.image,
-        ImageLayout::TRANSFER_DST_OPTIMAL,
-        &self.font_atlas.buffer_image_copies,
-      );
-
-      self.batch.device.cmd_pipeline_barrier(
-        command_buffer,
-        PipelineStageFlags::TRANSFER,
-        PipelineStageFlags::FRAGMENT_SHADER,
-        DependencyFlags::empty(),
-        &[],
-        &[],
-        &[read_image_memory_barrier],
-      );
-    }
   }
 
   pub(crate) fn record_draw_commands(

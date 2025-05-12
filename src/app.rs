@@ -1,5 +1,5 @@
-use crate::{Engine, audio, engine::DrawableCaps};
-use sdl2::{event::Event, image::LoadSurface, surface::Surface};
+use crate::{Engine, audio, consts, engine::DrawableCaps};
+use sdl2::{event::Event, image::LoadSurface, surface::Surface, ttf};
 use std::{
   sync::{atomic::Ordering, mpsc},
   thread,
@@ -42,6 +42,7 @@ pub fn run(mut app: impl App) {
     .store(app_config.height, Ordering::Relaxed);
 
   let sdl = sdl2::init().unwrap();
+  let ttf = ttf::init().unwrap();
 
   let (audio_tx, audio_rx) = mpsc::channel();
   thread::spawn(|| audio::run(audio_rx));
@@ -69,6 +70,7 @@ pub fn run(mut app: impl App) {
   }
 
   let mut engine = Engine::new(
+    &ttf,
     window,
     audio_tx,
     app_config.prefer_dgpu,
@@ -76,9 +78,6 @@ pub fn run(mut app: impl App) {
   );
 
   app.init(&mut engine);
-
-  const UPDATES_PER_SECOND: f32 = 150.0;
-  const MAX_UPDATES_PER_FRAME: u32 = 5;
 
   let mut event_pump = sdl.event_pump().unwrap();
   let mut prev = Instant::now();
@@ -94,10 +93,10 @@ pub fn run(mut app: impl App) {
 
     let mut frame_time = prev.elapsed().as_secs_f32();
     prev = Instant::now();
-    let mut updates_remaining = MAX_UPDATES_PER_FRAME;
+    let mut updates_remaining = consts::MAX_UPDATES_PER_FRAME;
 
     while frame_time > 0.0 && updates_remaining > 0 {
-      let dt = frame_time.min(1.0 / UPDATES_PER_SECOND);
+      let dt = frame_time.min(1.0 / consts::UPDATES_PER_SECOND);
       app.update(dt, &mut engine);
       frame_time -= dt;
       updates_remaining -= 1;

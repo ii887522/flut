@@ -1,5 +1,5 @@
 use super::{Anchor, Glyph};
-use crate::font_atlas::FontAtlas;
+use crate::atlases::FontAtlas;
 use optarg2chain::optarg_impl;
 use rayon::prelude::*;
 use std::borrow::Cow;
@@ -46,7 +46,11 @@ impl Text {
           (glyph_metrics.size.0 as _, glyph_metrics.size.1 as _),
           self.color,
         )
-        .tex_position((glyph_metrics.position.0 as _, glyph_metrics.position.1 as _))
+        .tex_position((
+          glyph_metrics.position.0 as _,
+          glyph_metrics.position.1 as _,
+          0.0,
+        ))
         .call();
 
         last_glyph_position = current_glyph_position;

@@ -1,4 +1,4 @@
-#version 460
+#version 460 core
 #extension GL_EXT_buffer_reference : require
 
 const vec2 VERTICES[] = vec2[](
@@ -13,17 +13,18 @@ const vec2 VERTICES[] = vec2[](
 struct Mesh {
   vec2 position;
   vec2 size;
-  vec2 texPosition;
+  vec3 texPosition;
   uint color;
-  float pad;
+  vec2 texSize;
+  vec2 pad;
 };
 
-layout(std430, buffer_reference, buffer_reference_align = 8) readonly buffer MeshBuffer {
+layout(std430, buffer_reference, buffer_reference_align = 16) readonly buffer MeshBuffer {
   Mesh meshes[];
 };
 
 layout(location = 0) out vec4 fragColor;
-layout(location = 1) out vec2 fragTexCoord;
+layout(location = 1) out vec3 fragTexCoord;
 
 layout(std430, push_constant) uniform PushConstant {
   vec2 cameraPosition;
@@ -52,7 +53,7 @@ void main() {
   const vec2 position = VERTICES[gl_VertexIndex % VERTICES.length()];
 
   gl_Position = vec4(position * scale + translation, 0.0, 1.0);
-  fragTexCoord = position * mesh.size + mesh.texPosition;
+  fragTexCoord = vec3(position * mesh.size + mesh.texPosition.xy, mesh.texPosition.z);
 
   fragColor = vec4(
     float(mesh.color >> 24) / 255.0,
