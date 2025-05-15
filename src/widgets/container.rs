@@ -2,7 +2,7 @@ use crate::{Transition, models::RoundRect};
 
 #[derive(Clone, Copy)]
 pub(super) struct Container {
-  pub(super) position: (Transition, Transition),
+  pub(super) position: (Transition, Transition, Transition),
   pub(super) size: (Transition, Transition),
   pub(super) bg_color: (u8, u8, u8, u8),
   pub(super) border_radius: Transition,
@@ -25,6 +25,7 @@ impl From<Container> for RoundRect {
       (
         container.position.0.get_value(),
         container.position.1.get_value(),
+        container.position.2.get_value(),
       ),
       (container.size.0.get_value(), container.size.1.get_value()),
       container.bg_color,

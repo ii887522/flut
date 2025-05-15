@@ -16,7 +16,7 @@ impl Glass {
 impl From<Glass> for Rect {
   fn from(glass: Glass) -> Self {
     Self::new(
-      (0.0, 0.0),
+      (0.0, 0.0, 1.0),
       glass.size,
       (0, 0, 0, glass.alpha.get_value() as _),
     )

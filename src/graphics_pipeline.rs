@@ -2,13 +2,13 @@ use crate::shader::Shader;
 use ash::{
   Device,
   vk::{
-    self, BlendFactor, BlendOp, ColorComponentFlags, CullModeFlags, Extent2D, FrontFace,
+    self, BlendFactor, BlendOp, ColorComponentFlags, CompareOp, CullModeFlags, Extent2D, FrontFace,
     GraphicsPipelineCreateInfo, Offset2D, Pipeline, PipelineCache,
     PipelineColorBlendAttachmentState, PipelineColorBlendStateCreateInfo, PipelineCreateFlags,
-    PipelineInputAssemblyStateCreateInfo, PipelineLayout, PipelineMultisampleStateCreateInfo,
-    PipelineRasterizationStateCreateInfo, PipelineVertexInputStateCreateInfo,
-    PipelineViewportStateCreateInfo, PolygonMode, PrimitiveTopology, Rect2D, RenderPass,
-    SampleCountFlags, Viewport,
+    PipelineDepthStencilStateCreateInfo, PipelineInputAssemblyStateCreateInfo, PipelineLayout,
+    PipelineMultisampleStateCreateInfo, PipelineRasterizationStateCreateInfo,
+    PipelineVertexInputStateCreateInfo, PipelineViewportStateCreateInfo, PolygonMode,
+    PrimitiveTopology, Rect2D, RenderPass, SampleCountFlags, Viewport,
   },
 };
 use std::sync::Arc;
@@ -68,6 +68,13 @@ impl GraphicsPipeline {
       ..Default::default()
     };
 
+    let depth_stencil_state_create_info = PipelineDepthStencilStateCreateInfo {
+      depth_test_enable: vk::TRUE,
+      depth_write_enable: vk::TRUE,
+      depth_compare_op: CompareOp::LESS_OR_EQUAL,
+      ..Default::default()
+    };
+
     let color_blend_attachment_state_create_info = PipelineColorBlendAttachmentState {
       blend_enable: vk::TRUE,
       src_color_blend_factor: BlendFactor::SRC_ALPHA,
@@ -105,6 +112,7 @@ impl GraphicsPipeline {
       p_viewport_state: &viewport_state_create_info,
       p_rasterization_state: &rasterization_state_create_info,
       p_multisample_state: &multisample_state_create_info,
+      p_depth_stencil_state: &depth_stencil_state_create_info,
       p_color_blend_state: &color_blend_state_create_info,
       layout,
       render_pass,

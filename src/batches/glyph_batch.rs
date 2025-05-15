@@ -83,8 +83,8 @@ impl<'a> GlyphBatch<'a> {
     );
 
     let sampler_create_info = SamplerCreateInfo {
-      mag_filter: Filter::NEAREST,
-      min_filter: Filter::NEAREST,
+      mag_filter: Filter::LINEAR,
+      min_filter: Filter::LINEAR,
       mipmap_mode: SamplerMipmapMode::NEAREST,
       address_mode_u: SamplerAddressMode::CLAMP_TO_BORDER,
       address_mode_v: SamplerAddressMode::CLAMP_TO_BORDER,
@@ -115,8 +115,8 @@ impl<'a> GlyphBatch<'a> {
       transfer_command_pool,
       ttf,
       "assets/fonts/MaterialSymbolsOutlined-Regular.ttf",
-      48,
-      (512, 512),
+      64,
+      (1024, 1024),
     );
 
     Self {

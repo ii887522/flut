@@ -1,7 +1,7 @@
-use super::{Container, Glass};
+use super::{Container, Glass, Icon};
 use crate::{
   Engine, Transition,
-  models::{Icon, IconName, Rect, RoundRect},
+  models::{self, IconName, Rect, RoundRect},
 };
 use sdl2::{event::Event, mouse::MouseButton};
 use std::sync::atomic::Ordering;
@@ -56,6 +56,7 @@ impl Dialog {
             to_position.1 as _,
             SCALING_UP_DURATION,
           ),
+          Transition::new(1.0, 1.0, SCALING_UP_DURATION),
         ),
         size: (
           Transition::new(0.0, DIALOG_SIZE.0 as _, SCALING_UP_DURATION),
@@ -65,7 +66,28 @@ impl Dialog {
         border_radius: Transition::new(0.0, DIALOG_BORDER_RADIUS, SCALING_UP_DURATION),
         drawable_id: u16::MAX,
       },
-      icon: Icon::new((to_position.0 as _, to_position.1 as _), color, icon),
+      icon: Icon {
+        position: (
+          Transition::new(
+            (app_size.0 >> 1) as _,
+            to_position.0 as _,
+            SCALING_UP_DURATION,
+          ),
+          Transition::new(
+            (app_size.1 >> 1) as _,
+            to_position.1 as _,
+            SCALING_UP_DURATION,
+          ),
+          Transition::new(0.99, 0.99, SCALING_UP_DURATION),
+        ),
+        size: (
+          Transition::new(0.0, 56.0, SCALING_UP_DURATION),
+          Transition::new(0.0, 64.0, SCALING_UP_DURATION),
+        ),
+        color,
+        name: icon,
+        drawable_id: u16::MAX,
+      },
       is_mouse_down_outside: false,
       state: State::ScalingUp,
     }
@@ -95,7 +117,7 @@ impl Dialog {
   pub fn init(&mut self, engine: &mut Engine<'_>) {
     self.glass.drawable_id = engine.add_rect(Rect::from(self.glass));
     self.container.drawable_id = engine.add_round_rect(RoundRect::from(self.container));
-    engine.add_icon(self.icon);
+    self.icon.drawable_id = engine.add_icon(models::Icon::from(self.icon));
   }
 
   pub fn process_event(&mut self, event: &Event) {
@@ -160,6 +182,7 @@ impl Dialog {
               ),
               VIBRATE_DURATION,
             ),
+            Transition::new(1.0, 1.0, VIBRATE_DURATION),
           ),
           size: (
             Transition::new(
@@ -182,6 +205,41 @@ impl Dialog {
           drawable_id: self.container.drawable_id,
         };
 
+        self.icon = Icon {
+          position: (
+            Transition::new(
+              from_position.0 as _,
+              crate::map(
+                MIN_VIBRATE_SCALE,
+                0.0,
+                1.0,
+                (app_size.0 >> 1) as _,
+                from_position.0 as _,
+              ),
+              VIBRATE_DURATION,
+            ),
+            Transition::new(
+              from_position.1 as _,
+              crate::map(
+                MIN_VIBRATE_SCALE,
+                0.0,
+                1.0,
+                (app_size.1 >> 1) as _,
+                from_position.1 as _,
+              ),
+              VIBRATE_DURATION,
+            ),
+            Transition::new(0.99, 0.99, VIBRATE_DURATION),
+          ),
+          size: (
+            Transition::new(56.0, 56.0 * MIN_VIBRATE_SCALE, VIBRATE_DURATION),
+            Transition::new(64.0, 64.0 * MIN_VIBRATE_SCALE, VIBRATE_DURATION),
+          ),
+          color: self.icon.color,
+          name: self.icon.name,
+          drawable_id: self.icon.drawable_id,
+        };
+
         self.state = State::ScalingDown;
       }
       _ => {}
@@ -191,7 +249,7 @@ impl Dialog {
   pub fn update(&mut self, dt: f32, engine: &mut Engine<'_>) {
     let prev_state = self.state;
 
-    if self.glass.update(dt) & self.container.update(dt) {
+    if self.glass.update(dt) & self.container.update(dt) & self.icon.update(dt) {
       match prev_state {
         State::ScalingUp => self.state = State::Idle,
         State::ScalingDown => {
@@ -226,6 +284,7 @@ impl Dialog {
                 from_position.1 as _,
                 VIBRATE_DURATION,
               ),
+              Transition::new(1.0, 1.0, VIBRATE_DURATION),
             ),
             size: (
               Transition::new(
@@ -248,6 +307,41 @@ impl Dialog {
             drawable_id: self.container.drawable_id,
           };
 
+          self.icon = Icon {
+            position: (
+              Transition::new(
+                crate::map(
+                  MIN_VIBRATE_SCALE,
+                  0.0,
+                  1.0,
+                  (app_size.0 >> 1) as _,
+                  from_position.0 as _,
+                ),
+                from_position.0 as _,
+                VIBRATE_DURATION,
+              ),
+              Transition::new(
+                crate::map(
+                  MIN_VIBRATE_SCALE,
+                  0.0,
+                  1.0,
+                  (app_size.1 >> 1) as _,
+                  from_position.1 as _,
+                ),
+                from_position.1 as _,
+                VIBRATE_DURATION,
+              ),
+              Transition::new(0.99, 0.99, VIBRATE_DURATION),
+            ),
+            size: (
+              Transition::new(56.0 * MIN_VIBRATE_SCALE, 56.0, VIBRATE_DURATION),
+              Transition::new(64.0 * MIN_VIBRATE_SCALE, 64.0, VIBRATE_DURATION),
+            ),
+            color: self.icon.color,
+            name: self.icon.name,
+            drawable_id: self.icon.drawable_id,
+          };
+
           self.state = State::ScalingUp;
         }
         _ => {}
@@ -257,6 +351,7 @@ impl Dialog {
     if !matches!(prev_state, State::Idle) {
       engine.update_rect(self.glass.drawable_id, Rect::from(self.glass));
       engine.update_round_rect(self.container.drawable_id, RoundRect::from(self.container));
+      engine.update_icon(self.icon.drawable_id, models::Icon::from(self.icon));
     }
   }
 }

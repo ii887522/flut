@@ -28,7 +28,7 @@ fn main() {
 enum State {
   Playing,
   DeadShaking(Shake),
-  DeadShowingDialog(Dialog),
+  DeadShowingDialog(Box<Dialog>),
   Pending,
 }
 
@@ -368,7 +368,7 @@ impl App for WormApp {
 
         let mut dialog = Dialog::new((255, 0, 0, 255), (255, 255, 255, 255), IconName::Skull);
         dialog.init(engine);
-        self.state = State::DeadShowingDialog(dialog);
+        self.state = State::DeadShowingDialog(Box::new(dialog));
       }
       State::DeadShowingDialog(mut dialog) => {
         dialog.update(dt, engine);

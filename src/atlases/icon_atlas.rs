@@ -1,4 +1,4 @@
-use crate::{images::DynamicImage, models::GlyphMetrics};
+use crate::{consts, images::DynamicImage, models::GlyphMetrics};
 use ash::{
   Device,
   vk::{
@@ -62,7 +62,7 @@ impl<'a> IconAtlas<'a> {
       buffer_image_copies,
       pixels,
       buffer_offset: 0,
-      icon_position: (0, 0),
+      icon_position: (consts::GLYPH_PADDING, consts::GLYPH_PADDING),
       max_icon_height: 0,
     }
   }
@@ -81,8 +81,11 @@ impl<'a> IconAtlas<'a> {
       .shaded(Color::WHITE, Color::BLACK)
       .unwrap();
 
-    if self.icon_position.0 + font_surface.width() > self.atlas_size.0 {
-      self.icon_position = (0, self.icon_position.1 + self.max_icon_height);
+    if self.icon_position.0 + font_surface.width() + consts::GLYPH_PADDING > self.atlas_size.0 {
+      self.icon_position = (
+        consts::GLYPH_PADDING,
+        self.icon_position.1 + self.max_icon_height + consts::GLYPH_PADDING,
+      );
     }
 
     let buffer_image_copy = BufferImageCopy {
@@ -122,7 +125,7 @@ impl<'a> IconAtlas<'a> {
 
     self.pixels.par_extend(pixels);
     self.buffer_offset += (font_surface.pitch() * font_surface.height()) as u64;
-    self.icon_position.0 += font_surface.width();
+    self.icon_position.0 += font_surface.width() + consts::GLYPH_PADDING;
     self.max_icon_height = self.max_icon_height.max(font_surface.height());
     Some(glyph_metrics)
   }

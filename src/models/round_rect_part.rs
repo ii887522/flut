@@ -1,18 +1,19 @@
 use super::RoundRect;
 
-#[repr(C, align(8))]
+#[repr(C, align(16))]
 #[derive(Clone, Copy)]
 pub(crate) struct RoundRectPart {
-  position: (f32, f32),
-  size: (f32, f32),
+  position: (f32, f32, f32),
   color: u32,
+  pad: (f32, f32, f32),
   control_radius: f32,
+  size: (f32, f32),
   control_point: (f32, f32),
 }
 
 impl RoundRectPart {
   pub(crate) const fn new(
-    position: (f32, f32),
+    position: (f32, f32, f32),
     size: (f32, f32),
     color: (u8, u8, u8, u8),
     control_radius: f32,
@@ -20,6 +21,7 @@ impl RoundRectPart {
   ) -> Self {
     Self {
       position,
+      pad: (0.0, 0.0, 0.0),
       size,
       color: crate::pack_color(color),
       control_radius,
@@ -47,6 +49,7 @@ impl From<RoundRect> for Vec<RoundRectPart> {
         (
           round_rect.position.0 + round_rect.size.0 * 0.5,
           round_rect.position.1,
+          round_rect.position.2,
         ),
         (round_rect.size.0 * 0.5, round_rect.size.1 * 0.5),
         round_rect.color,
@@ -61,6 +64,7 @@ impl From<RoundRect> for Vec<RoundRectPart> {
         (
           round_rect.position.0 + round_rect.size.0 * 0.5,
           round_rect.position.1 + round_rect.size.1 * 0.5,
+          round_rect.position.2,
         ),
         (round_rect.size.0 * 0.5, round_rect.size.1 * 0.5),
         round_rect.color,
@@ -75,6 +79,7 @@ impl From<RoundRect> for Vec<RoundRectPart> {
         (
           round_rect.position.0,
           round_rect.position.1 + round_rect.size.1 * 0.5,
+          round_rect.position.2,
         ),
         (round_rect.size.0 * 0.5, round_rect.size.1 * 0.5),
         round_rect.color,

@@ -1,4 +1,4 @@
-use crate::{images::StaticImage, models::GlyphMetrics};
+use crate::{consts, images::StaticImage, models::GlyphMetrics};
 use ash::{
   Device,
   vk::{
@@ -28,7 +28,7 @@ impl FontAtlas {
     atlas_size: (u32, u32),
   ) -> Self {
     let font = ttf.load_font(file_path, font_size).unwrap();
-    let mut glyph_position = (0, 0);
+    let mut glyph_position = (consts::GLYPH_PADDING, consts::GLYPH_PADDING);
     let mut max_glyph_height = 0;
     let mut buffer_offset = 0;
 
@@ -39,8 +39,11 @@ impl FontAtlas {
           .shaded(Color::WHITE, Color::BLACK)
           .unwrap();
 
-        if glyph_position.0 + font_surface.width() > atlas_size.0 {
-          glyph_position = (0, glyph_position.1 + max_glyph_height);
+        if glyph_position.0 + font_surface.width() + consts::GLYPH_PADDING > atlas_size.0 {
+          glyph_position = (
+            consts::GLYPH_PADDING,
+            glyph_position.1 + max_glyph_height + consts::GLYPH_PADDING,
+          );
         }
 
         let buffer_image_copy = BufferImageCopy {
@@ -73,7 +76,7 @@ impl FontAtlas {
           advance: glyph_metrics.advance,
         };
 
-        glyph_position.0 += font_surface.width();
+        glyph_position.0 += font_surface.width() + consts::GLYPH_PADDING;
         max_glyph_height = max_glyph_height.max(font_surface.height());
         buffer_offset += (font_surface.pitch() * font_surface.height()) as u64;
 
@@ -91,6 +94,7 @@ impl FontAtlas {
       Format::R8_UNORM,
       atlas_size,
       ImageUsageFlags::SAMPLED,
+      ImageAspectFlags::COLOR,
       &pixels,
     );
 

@@ -11,12 +11,12 @@ const vec2 VERTICES[] = vec2[](
 );
 
 struct Mesh {
-  vec2 position;
-  vec2 size;
-  vec3 texPosition;
+  vec3 position;
   uint color;
+  vec3 texPosition;
+  float pad;
+  vec2 size;
   vec2 texSize;
-  vec2 pad;
 };
 
 layout(std430, buffer_reference, buffer_reference_align = 16) readonly buffer MeshBuffer {
@@ -42,7 +42,7 @@ void main() {
   const Mesh mesh = pushConstant.meshBuffer.meshes[gl_VertexIndex / VERTICES.length()];
 
   const vec2 translation = map(
-    mesh.position,
+    mesh.position.xy,
     pushConstant.cameraPosition,
     pushConstant.cameraPosition + pushConstant.cameraSize * pushConstant.pixelSize,
     vec2(-1.0),
@@ -52,8 +52,8 @@ void main() {
   const vec2 scale = map(mesh.size, vec2(0.0), pushConstant.cameraSize * pushConstant.pixelSize, vec2(0.0), vec2(2.0));
   const vec2 position = VERTICES[gl_VertexIndex % VERTICES.length()];
 
-  gl_Position = vec4(position * scale + translation, 0.0, 1.0);
-  fragTexCoord = vec3(position * mesh.size + mesh.texPosition.xy, mesh.texPosition.z);
+  gl_Position = vec4(position * scale + translation, mesh.position.z, 1.0);
+  fragTexCoord = vec3(position * mesh.texSize + mesh.texPosition.xy, mesh.texPosition.z);
 
   fragColor = vec4(
     float(mesh.color >> 24) / 255.0,

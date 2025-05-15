@@ -35,6 +35,7 @@ impl From<Food> for Rect {
         (consts::WORLD_POSITION.1
           + (food.position / consts::GRID_SIZE.0) * (consts::CELL_SIZE.1 + consts::GAP_SIZE.1))
           as _,
+        1.0,
       ),
       (consts::CELL_SIZE.0 as _, consts::CELL_SIZE.1 as _),
       (0, 255, 0, 255),

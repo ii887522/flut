@@ -2,6 +2,7 @@ use crate::{
   batches::{GlyphBatch, RoundRectBatch},
   collections::{SparseVec, StringSlice},
   consts,
+  images::StaticImage,
   models::{AudioReq, Glyph, Icon, Rect, RoundRect, Text},
 };
 use ash::{
@@ -9,21 +10,22 @@ use ash::{
   khr::{surface, swapchain},
   vk::{
     self, AccessFlags, ApplicationInfo, AttachmentDescription2, AttachmentLoadOp,
-    AttachmentReference2, AttachmentStoreOp, ClearColorValue, ClearValue, CommandBuffer,
-    CommandBufferAllocateInfo, CommandBufferBeginInfo, CommandBufferLevel, CommandBufferUsageFlags,
-    CommandPool, CommandPoolCreateFlags, CommandPoolCreateInfo, CompositeAlphaFlagsKHR,
-    DependencyFlags, DescriptorPool, DescriptorPoolCreateInfo, DescriptorPoolSize, DescriptorSet,
-    DescriptorSetAllocateInfo, DescriptorType, DeviceCreateInfo, DeviceQueueCreateInfo,
-    DeviceQueueInfo2, Extent2D, Fence, FenceCreateFlags, FenceCreateInfo, Framebuffer,
-    FramebufferCreateInfo, Handle, Image, ImageAspectFlags, ImageLayout, ImageMemoryBarrier,
-    ImageSubresourceRange, ImageUsageFlags, ImageView, ImageViewCreateInfo, ImageViewType,
-    InstanceCreateFlags, InstanceCreateInfo, Offset2D, PhysicalDevice, PhysicalDeviceProperties2,
-    PhysicalDeviceType, PhysicalDeviceVulkan12Features, PipelineBindPoint, PipelineStageFlags,
-    PresentInfoKHR, PresentModeKHR, Queue, QueueFamilyProperties2, QueueFlags, Rect2D, RenderPass,
-    RenderPassBeginInfo, RenderPassCreateInfo2, SampleCountFlags, Semaphore, SemaphoreCreateInfo,
-    SharingMode, SubmitInfo, SubpassBeginInfo, SubpassContents, SubpassDependency2,
-    SubpassDescription2, SubpassEndInfo, SurfaceKHR, SwapchainCreateInfoKHR, SwapchainKHR,
-    ValidationFeatureEnableEXT, ValidationFeaturesEXT,
+    AttachmentReference2, AttachmentStoreOp, ClearColorValue, ClearDepthStencilValue, ClearValue,
+    CommandBuffer, CommandBufferAllocateInfo, CommandBufferBeginInfo, CommandBufferLevel,
+    CommandBufferUsageFlags, CommandPool, CommandPoolCreateFlags, CommandPoolCreateInfo,
+    CompositeAlphaFlagsKHR, DependencyFlags, DescriptorPool, DescriptorPoolCreateInfo,
+    DescriptorPoolSize, DescriptorSet, DescriptorSetAllocateInfo, DescriptorType, DeviceCreateInfo,
+    DeviceQueueCreateInfo, DeviceQueueInfo2, Extent2D, Fence, FenceCreateFlags, FenceCreateInfo,
+    Format, Framebuffer, FramebufferCreateInfo, Handle, Image, ImageAspectFlags, ImageLayout,
+    ImageMemoryBarrier, ImageSubresourceRange, ImageUsageFlags, ImageView, ImageViewCreateInfo,
+    ImageViewType, InstanceCreateFlags, InstanceCreateInfo, Offset2D, PhysicalDevice,
+    PhysicalDeviceProperties2, PhysicalDeviceType, PhysicalDeviceVulkan12Features,
+    PipelineBindPoint, PipelineStageFlags, PresentInfoKHR, PresentModeKHR, Queue,
+    QueueFamilyProperties2, QueueFlags, Rect2D, RenderPass, RenderPassBeginInfo,
+    RenderPassCreateInfo2, SampleCountFlags, Semaphore, SemaphoreCreateInfo, SharingMode,
+    SubmitInfo, SubpassBeginInfo, SubpassContents, SubpassDependency2, SubpassDescription2,
+    SubpassEndInfo, SurfaceKHR, SwapchainCreateInfoKHR, SwapchainKHR, ValidationFeatureEnableEXT,
+    ValidationFeaturesEXT,
   },
 };
 use gpu_allocator::{
@@ -69,6 +71,7 @@ pub struct Engine<'a> {
   swapchain: SwapchainKHR,
   swapchain_images: Vec<Image>,
   swapchain_image_views: Vec<ImageView>,
+  depth_images: Vec<StaticImage>,
   render_pass: RenderPass,
   swapchain_framebuffers: Vec<Framebuffer>,
   surface_extent: Extent2D,
@@ -611,6 +614,7 @@ impl<'a> Engine<'a> {
       swapchain: SwapchainKHR::null(),
       swapchain_images: vec![],
       swapchain_image_views: vec![],
+      depth_images: vec![],
       render_pass: RenderPass::null(),
       swapchain_framebuffers: vec![],
       surface_extent: Extent2D::default(),
@@ -681,11 +685,19 @@ impl<'a> Engine<'a> {
 
       let swapchain_framebuffer = self.swapchain_framebuffers[swapchain_image_index as usize];
 
-      let clear_value = ClearValue {
-        color: ClearColorValue {
-          float32: [0.0, 0.0, 0.0, 1.0],
+      let clear_values = [
+        ClearValue {
+          color: ClearColorValue {
+            float32: [0.0, 0.0, 0.0, 1.0],
+          },
         },
-      };
+        ClearValue {
+          depth_stencil: ClearDepthStencilValue {
+            depth: 1.0,
+            stencil: 0,
+          },
+        },
+      ];
 
       let render_pass_begin_info = RenderPassBeginInfo {
         render_pass: self.render_pass,
@@ -694,8 +706,8 @@ impl<'a> Engine<'a> {
           offset: Offset2D { x: 0, y: 0 },
           extent: self.surface_extent,
         },
-        clear_value_count: 1,
-        p_clear_values: &clear_value,
+        clear_value_count: clear_values.len() as _,
+        p_clear_values: clear_values.as_ptr(),
         ..Default::default()
       };
 
@@ -857,6 +869,7 @@ impl<'a> Engine<'a> {
       });
 
       self.device.destroy_render_pass(self.render_pass, None);
+      self.depth_images.clear();
 
       self.swapchain_image_views.iter().for_each(|&image_view| {
         self.device.destroy_image_view(image_view, None);
@@ -925,17 +938,49 @@ impl<'a> Engine<'a> {
     }
     .collect::<Vec<_>>();
 
-    let color_attachment_desc = AttachmentDescription2 {
-      format: surface_format.format,
-      samples: SampleCountFlags::TYPE_1,
-      load_op: AttachmentLoadOp::CLEAR,
-      store_op: AttachmentStoreOp::STORE,
-      stencil_load_op: AttachmentLoadOp::DONT_CARE,
-      stencil_store_op: AttachmentStoreOp::DONT_CARE,
-      initial_layout: ImageLayout::UNDEFINED,
-      final_layout: ImageLayout::PRESENT_SRC_KHR,
-      ..Default::default()
-    };
+    let memory_allocator = self.memory_allocator.as_ref().unwrap();
+
+    let depth_images = swapchain_image_views
+      .iter()
+      .enumerate()
+      .map(|(index, _)| {
+        StaticImage::new(
+          self.device.clone(),
+          memory_allocator.clone(),
+          &format!("depth_image_{index}"),
+          Format::D24_UNORM_S8_UINT,
+          (surface_extent.width, surface_extent.height),
+          ImageUsageFlags::DEPTH_STENCIL_ATTACHMENT,
+          ImageAspectFlags::DEPTH,
+          &[],
+        )
+      })
+      .collect::<Vec<_>>();
+
+    let attachment_descs = [
+      AttachmentDescription2 {
+        format: surface_format.format,
+        samples: SampleCountFlags::TYPE_1,
+        load_op: AttachmentLoadOp::CLEAR,
+        store_op: AttachmentStoreOp::STORE,
+        stencil_load_op: AttachmentLoadOp::DONT_CARE,
+        stencil_store_op: AttachmentStoreOp::DONT_CARE,
+        initial_layout: ImageLayout::UNDEFINED,
+        final_layout: ImageLayout::PRESENT_SRC_KHR,
+        ..Default::default()
+      },
+      AttachmentDescription2 {
+        format: Format::D24_UNORM_S8_UINT,
+        samples: SampleCountFlags::TYPE_1,
+        load_op: AttachmentLoadOp::CLEAR,
+        store_op: AttachmentStoreOp::DONT_CARE,
+        stencil_load_op: AttachmentLoadOp::DONT_CARE,
+        stencil_store_op: AttachmentStoreOp::DONT_CARE,
+        initial_layout: ImageLayout::UNDEFINED,
+        final_layout: ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+        ..Default::default()
+      },
+    ];
 
     let color_attachment_ref = AttachmentReference2 {
       attachment: 0,
@@ -943,27 +988,37 @@ impl<'a> Engine<'a> {
       ..Default::default()
     };
 
+    let depth_attachment_ref = AttachmentReference2 {
+      attachment: 1,
+      layout: ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+      ..Default::default()
+    };
+
     let subpass_desc = SubpassDescription2 {
       pipeline_bind_point: PipelineBindPoint::GRAPHICS,
       color_attachment_count: 1,
       p_color_attachments: &color_attachment_ref,
+      p_depth_stencil_attachment: &depth_attachment_ref,
       ..Default::default()
     };
 
     let subpass_dep = SubpassDependency2 {
       src_subpass: vk::SUBPASS_EXTERNAL,
       dst_subpass: 0,
-      src_stage_mask: PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
+      src_stage_mask: PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT
+        | PipelineStageFlags::EARLY_FRAGMENT_TESTS,
       src_access_mask: AccessFlags::empty(),
-      dst_stage_mask: PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
-      dst_access_mask: AccessFlags::COLOR_ATTACHMENT_WRITE,
+      dst_stage_mask: PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT
+        | PipelineStageFlags::EARLY_FRAGMENT_TESTS,
+      dst_access_mask: AccessFlags::COLOR_ATTACHMENT_WRITE
+        | AccessFlags::DEPTH_STENCIL_ATTACHMENT_WRITE,
       dependency_flags: DependencyFlags::BY_REGION,
       ..Default::default()
     };
 
     let render_pass_create_info = RenderPassCreateInfo2 {
-      attachment_count: 1,
-      p_attachments: &color_attachment_desc,
+      attachment_count: attachment_descs.len() as _,
+      p_attachments: attachment_descs.as_ptr(),
       subpass_count: 1,
       p_subpasses: &subpass_desc,
       dependency_count: 1,
@@ -986,11 +1041,14 @@ impl<'a> Engine<'a> {
     let swapchain_framebuffers = unsafe {
       swapchain_image_views
         .iter()
-        .map(|&image_view| {
+        .zip(depth_images.iter())
+        .map(|(&image_view, depth_image)| {
+          let attachments = [image_view, depth_image.view];
+
           let framebuffer_create_info = FramebufferCreateInfo {
             render_pass,
-            attachment_count: 1,
-            p_attachments: &image_view,
+            attachment_count: attachments.len() as _,
+            p_attachments: attachments.as_ptr(),
             width: surface_extent.width,
             height: surface_extent.height,
             layers: 1,
@@ -1008,6 +1066,7 @@ impl<'a> Engine<'a> {
     self.swapchain = swapchain;
     self.swapchain_images = swapchain_images;
     self.swapchain_image_views = swapchain_image_views;
+    self.depth_images = depth_images;
     self.render_pass = render_pass;
     self.swapchain_framebuffers = swapchain_framebuffers;
     self.surface_extent = surface_extent;
@@ -1188,6 +1247,8 @@ impl Drop for Engine<'_> {
       self.swapchain_framebuffers.iter().for_each(|&framebuffer| {
         self.device.destroy_framebuffer(framebuffer, None);
       });
+
+      self.depth_images.clear();
 
       self.swapchain_image_views.iter().for_each(|&image_view| {
         self.device.destroy_image_view(image_view, None);
