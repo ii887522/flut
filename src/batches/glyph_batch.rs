@@ -105,8 +105,8 @@ impl<'a> GlyphBatch<'a> {
       ttf,
       "assets/fonts/arial.ttf",
       48,
-      '0'..='9',
-      (256, 256),
+      ' '..='~',
+      (512, 512),
     );
 
     let icon_atlas = IconAtlas::new(

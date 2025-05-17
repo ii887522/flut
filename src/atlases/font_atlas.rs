@@ -12,6 +12,7 @@ use sdl2::{pixels::Color, ttf::Sdl2TtfContext};
 use std::{cell::RefCell, collections::HashMap, ops::RangeInclusive, rc::Rc, sync::Arc};
 
 pub(crate) struct FontAtlas {
+  pub(crate) font_size: u16,
   pub(crate) image: StaticImage,
   pub(crate) buffer_image_copies: Vec<BufferImageCopy>,
   char_to_glyph_metrics: HashMap<char, GlyphMetrics>,
@@ -101,6 +102,7 @@ impl FontAtlas {
     let char_to_glyph_metrics = HashMap::from_par_iter(char_to_glyph_metrics);
 
     Self {
+      font_size,
       image,
       buffer_image_copies,
       char_to_glyph_metrics,
