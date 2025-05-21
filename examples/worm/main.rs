@@ -365,12 +365,14 @@ impl App for WormApp {
         }
 
         engine.set_camera_position((0.0, 0.0));
+        let score = self.score.score;
 
         let mut dialog = Dialog::new(
           (255, 0, 0, 255),
           (255, 255, 255, 255),
           IconName::Skull,
           "Game Over".into(),
+          format!("You scored {score} points. Do you want to try again?").into(),
         );
         dialog.init(engine);
         self.state = State::DeadShowingDialog(Box::new(dialog));

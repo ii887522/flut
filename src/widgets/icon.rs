@@ -16,6 +16,7 @@ impl Icon {
   pub(super) fn update(&mut self, dt: f32) -> bool {
     self.position.0.update(dt)
       & self.position.1.update(dt)
+      & self.position.2.update(dt)
       & self.size.0.update(dt)
       & self.size.1.update(dt)
   }

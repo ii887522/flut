@@ -23,6 +23,10 @@ const ICON_SIZE: (f32, f32) = (56.0, 64.0);
 const TITLE_MARGIN: f32 = 18.0;
 const TITLE_FONT_SIZE: f32 = 44.0;
 
+// Description config
+const DESC_MARGIN: f32 = 16.0;
+const DESC_FONT_SIZE: f32 = 26.0;
+
 #[derive(Clone, Copy)]
 enum State {
   ScalingUp,
@@ -36,6 +40,7 @@ pub struct Dialog {
   container: Container,
   icon: Icon,
   title: Text,
+  desc: Text,
   is_mouse_down_outside: bool,
   state: State,
 }
@@ -46,6 +51,7 @@ impl Dialog {
     color: (u8, u8, u8, u8),
     icon: IconName,
     title: Cow<'static, str>,
+    desc: Cow<'static, str>,
   ) -> Self {
     let app_size = (
       crate::APP_SIZE.0.load(Ordering::Relaxed),
@@ -119,8 +125,33 @@ impl Dialog {
           Transition::new(0.99, 0.99, SCALING_UP_DURATION),
         ),
         size: Transition::new(0.0, TITLE_FONT_SIZE, SCALING_UP_DURATION),
+        max_width: Transition::new(f32::MAX, f32::MAX, SCALING_UP_DURATION),
         color,
         text: title,
+        drawable_id: u16::MAX,
+      },
+      desc: Text {
+        position: (
+          Transition::new(
+            (app_size.0 >> 1) as _,
+            to_position.0 as f32 + ICON_MARGIN.0,
+            SCALING_UP_DURATION,
+          ),
+          Transition::new(
+            (app_size.1 >> 1) as _,
+            to_position.1 as f32 + ICON_MARGIN.1 + ICON_SIZE.1 + DESC_MARGIN,
+            SCALING_UP_DURATION,
+          ),
+          Transition::new(0.99, 0.99, SCALING_UP_DURATION),
+        ),
+        size: Transition::new(0.0, DESC_FONT_SIZE, SCALING_UP_DURATION),
+        max_width: Transition::new(
+          0.0,
+          DIALOG_SIZE.0 as f32 - ICON_MARGIN.0 * 2.0,
+          SCALING_UP_DURATION,
+        ),
+        color,
+        text: desc,
         drawable_id: u16::MAX,
       },
       is_mouse_down_outside: false,
@@ -154,6 +185,7 @@ impl Dialog {
     self.container.drawable_id = engine.add_round_rect(RoundRect::from(self.container));
     self.icon.drawable_id = engine.add_icon(models::Icon::from(self.icon));
     self.title.drawable_id = engine.add_text(models::Text::from(self.title.clone()));
+    self.desc.drawable_id = engine.add_text(models::Text::from(self.desc.clone()));
   }
 
   pub fn process_event(&mut self, event: &Event) {
@@ -315,9 +347,51 @@ impl Dialog {
             TITLE_FONT_SIZE * MIN_VIBRATE_SCALE,
             VIBRATE_DURATION,
           ),
+          max_width: Transition::new(f32::MAX, f32::MAX, VIBRATE_DURATION),
           color: self.title.color,
           text: self.title.text.clone(),
           drawable_id: self.title.drawable_id,
+        };
+
+        self.desc = Text {
+          position: (
+            Transition::new(
+              from_position.0 as f32 + ICON_MARGIN.0,
+              crate::map(
+                MIN_VIBRATE_SCALE,
+                0.0,
+                1.0,
+                (app_size.0 >> 1) as _,
+                from_position.0 as f32 + ICON_MARGIN.0,
+              ),
+              VIBRATE_DURATION,
+            ),
+            Transition::new(
+              from_position.1 as f32 + ICON_MARGIN.1 + ICON_SIZE.1 + DESC_MARGIN,
+              crate::map(
+                MIN_VIBRATE_SCALE,
+                0.0,
+                1.0,
+                (app_size.1 >> 1) as _,
+                from_position.1 as f32 + ICON_MARGIN.1 + ICON_SIZE.1 + DESC_MARGIN,
+              ),
+              VIBRATE_DURATION,
+            ),
+            Transition::new(0.99, 0.99, VIBRATE_DURATION),
+          ),
+          size: Transition::new(
+            DESC_FONT_SIZE,
+            DESC_FONT_SIZE * MIN_VIBRATE_SCALE,
+            VIBRATE_DURATION,
+          ),
+          max_width: Transition::new(
+            DIALOG_SIZE.0 as f32 - ICON_MARGIN.0 * 2.0,
+            (DIALOG_SIZE.0 as f32 - ICON_MARGIN.0 * 2.0) * MIN_VIBRATE_SCALE,
+            VIBRATE_DURATION,
+          ),
+          color: self.desc.color,
+          text: self.desc.text.clone(),
+          drawable_id: self.desc.drawable_id,
         };
 
         self.state = State::ScalingDown;
@@ -333,6 +407,7 @@ impl Dialog {
       & self.container.update(dt)
       & self.icon.update(dt)
       & self.title.update(dt)
+      & self.desc.update(dt)
     {
       match prev_state {
         State::ScalingUp => self.state = State::Idle,
@@ -465,9 +540,51 @@ impl Dialog {
               TITLE_FONT_SIZE,
               VIBRATE_DURATION,
             ),
+            max_width: Transition::new(f32::MAX, f32::MAX, VIBRATE_DURATION),
             color: self.title.color,
             text: self.title.text.clone(),
             drawable_id: self.title.drawable_id,
+          };
+
+          self.desc = Text {
+            position: (
+              Transition::new(
+                crate::map(
+                  MIN_VIBRATE_SCALE,
+                  0.0,
+                  1.0,
+                  (app_size.0 >> 1) as _,
+                  from_position.0 as f32 + ICON_MARGIN.0,
+                ),
+                from_position.0 as f32 + ICON_MARGIN.0,
+                VIBRATE_DURATION,
+              ),
+              Transition::new(
+                crate::map(
+                  MIN_VIBRATE_SCALE,
+                  0.0,
+                  1.0,
+                  (app_size.1 >> 1) as _,
+                  from_position.1 as f32 + ICON_MARGIN.1 + ICON_SIZE.1 + DESC_MARGIN,
+                ),
+                from_position.1 as f32 + ICON_MARGIN.1 + ICON_SIZE.1 + DESC_MARGIN,
+                VIBRATE_DURATION,
+              ),
+              Transition::new(0.99, 0.99, VIBRATE_DURATION),
+            ),
+            size: Transition::new(
+              DESC_FONT_SIZE * MIN_VIBRATE_SCALE,
+              DESC_FONT_SIZE,
+              VIBRATE_DURATION,
+            ),
+            max_width: Transition::new(
+              (DIALOG_SIZE.0 as f32 - ICON_MARGIN.0 * 2.0) * MIN_VIBRATE_SCALE,
+              DIALOG_SIZE.0 as f32 - ICON_MARGIN.0 * 2.0,
+              VIBRATE_DURATION,
+            ),
+            color: self.desc.color,
+            text: self.desc.text.clone(),
+            drawable_id: self.desc.drawable_id,
           };
 
           self.state = State::ScalingUp;
@@ -480,8 +597,10 @@ impl Dialog {
       engine.update_rect(self.glass.drawable_id, Rect::from(self.glass));
       engine.update_round_rect(self.container.drawable_id, RoundRect::from(self.container));
       engine.update_icon(self.icon.drawable_id, models::Icon::from(self.icon));
+      engine.remove_text(self.desc.drawable_id);
       engine.remove_text(self.title.drawable_id);
       self.title.drawable_id = engine.add_text(models::Text::from(self.title.clone()));
+      self.desc.drawable_id = engine.add_text(models::Text::from(self.desc.clone()));
     }
   }
 }

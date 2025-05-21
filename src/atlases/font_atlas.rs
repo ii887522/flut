@@ -12,6 +12,7 @@ use sdl2::{pixels::Color, ttf::Sdl2TtfContext};
 use std::{cell::RefCell, collections::HashMap, ops::RangeInclusive, rc::Rc, sync::Arc};
 
 pub(crate) struct FontAtlas {
+  pub(crate) recommended_line_spacing: f32,
   pub(crate) font_size: u16,
   pub(crate) image: StaticImage,
   pub(crate) buffer_image_copies: Vec<BufferImageCopy>,
@@ -29,6 +30,7 @@ impl FontAtlas {
     atlas_size: (u32, u32),
   ) -> Self {
     let font = ttf.load_font(file_path, font_size).unwrap();
+    let recommended_line_spacing = font.recommended_line_spacing() as _;
     let mut glyph_position = (consts::GLYPH_PADDING, consts::GLYPH_PADDING);
     let mut max_glyph_height = 0;
     let mut buffer_offset = 0;
@@ -102,6 +104,7 @@ impl FontAtlas {
     let char_to_glyph_metrics = HashMap::from_par_iter(char_to_glyph_metrics);
 
     Self {
+      recommended_line_spacing,
       font_size,
       image,
       buffer_image_copies,
