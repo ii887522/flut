@@ -1,6 +1,8 @@
 use crate::{Engine, audio, consts, engine::DrawableCaps};
-use sdl2::{event::Event, image::LoadSurface, surface::Surface, ttf};
+use sdl2::{event::Event, image::LoadSurface, surface::Surface};
 use std::{
+  cell::RefCell,
+  rc::Rc,
   sync::{atomic::Ordering, mpsc},
   thread,
   time::Instant,
@@ -28,9 +30,9 @@ impl Default for AppConfig {
 
 pub trait App {
   fn get_config(&self) -> AppConfig;
-  fn init(&mut self, _engine: &mut Engine<'_>) {}
+  fn init(&mut self, _engine: Rc<RefCell<Engine>>) {}
   fn process_event(&mut self, _event: Event) {}
-  fn update(&mut self, _dt: f32, _engine: &mut Engine<'_>) {}
+  fn update(&mut self, _dt: f32, _engine: Rc<RefCell<Engine>>) {}
 }
 
 pub fn run(mut app: impl App) {
@@ -42,8 +44,6 @@ pub fn run(mut app: impl App) {
     .store(app_config.height, Ordering::Relaxed);
 
   let sdl = sdl2::init().unwrap();
-  let ttf = ttf::init().unwrap();
-
   let (audio_tx, audio_rx) = mpsc::channel();
   thread::spawn(|| audio::run(audio_rx));
 
@@ -53,6 +53,7 @@ pub fn run(mut app: impl App) {
   // Fix blurry UI on high DPI displays
   sdl2::hint::set("SDL_WINDOWS_DPI_AWARENESS", "permonitorv2");
 
+  let event_subsys = sdl.event().unwrap();
   let vid_subsys = sdl.video().unwrap();
 
   let mut window = vid_subsys
@@ -69,16 +70,15 @@ pub fn run(mut app: impl App) {
     window.set_icon(favicon);
   }
 
-  let mut engine = Engine::new(
-    &ttf,
+  let engine = Rc::new(RefCell::new(Engine::new(
     window,
     audio_tx,
+    event_subsys,
     app_config.prefer_dgpu,
     app_config.drawable_caps,
-  );
+  )));
 
-  app.init(&mut engine);
-
+  app.init(engine.clone());
   let mut event_pump = sdl.event_pump().unwrap();
   let mut prev = Instant::now();
 
@@ -97,11 +97,11 @@ pub fn run(mut app: impl App) {
 
     while frame_time > 0.0 && updates_remaining > 0 {
       let dt = frame_time.min(1.0 / consts::UPDATES_PER_SECOND);
-      app.update(dt, &mut engine);
+      app.update(dt, engine.clone());
       frame_time -= dt;
       updates_remaining -= 1;
     }
 
-    engine.draw();
+    engine.borrow_mut().draw();
   }
 }

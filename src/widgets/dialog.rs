@@ -1,8 +1,9 @@
-use super::{Container, Glass, Icon, Text};
+use super::{Button, Container, Glass, Icon, Text};
 use crate::{
   Engine, Transition,
-  models::{self, IconName, Rect, RoundRect},
+  models::{Anchor, IconName},
 };
+use optarg2chain::optarg_impl;
 use sdl2::{event::Event, mouse::MouseButton};
 use std::{borrow::Cow, sync::atomic::Ordering};
 
@@ -13,7 +14,6 @@ const MIN_VIBRATE_SCALE: f32 = 0.9;
 
 // Dialog config
 const DIALOG_SIZE: (u32, u32) = (512, 256);
-const DIALOG_BORDER_RADIUS: f32 = 10.0;
 
 // Icon config
 const ICON_MARGIN: (f32, f32) = (16.0, 8.0);
@@ -25,33 +25,70 @@ const TITLE_FONT_SIZE: f32 = 44.0;
 
 // Description config
 const DESC_MARGIN: f32 = 16.0;
-const DESC_FONT_SIZE: f32 = 26.0;
+const DESC_MAX_WIDTH: f32 = DIALOG_SIZE.0 as f32 - ICON_MARGIN.0 * 2.0;
 
-#[derive(Clone, Copy)]
+// Button config
+const BUTTON_MARGIN: (f32, f32) = (48.0, 16.0);
+
+#[derive(Clone, Copy, Debug)]
 enum State {
   ScalingUp,
   Idle,
   ScalingDown,
 }
 
-#[derive(Clone)]
+pub struct DialogButton {
+  bg_color: (u8, u8, u8, u8),
+  color: (u8, u8, u8, u8),
+  icon: IconName,
+  label: Cow<'static, str>,
+  on_click: Box<dyn FnMut()>,
+}
+
+#[optarg_impl]
+impl DialogButton {
+  #[optarg_method(DialogButtonNewBuilder, call)]
+  pub fn new(
+    #[optarg((0, 0, 0, 255))] bg_color: (u8, u8, u8, u8),
+    #[optarg((255, 255, 255, 255))] color: (u8, u8, u8, u8),
+    icon: IconName,
+    #[optarg_default] label: Cow<'static, str>,
+    #[optarg(Box::new(|| {}))] on_click: Box<dyn FnMut()>,
+  ) -> Self {
+    Self {
+      bg_color,
+      color,
+      icon,
+      label,
+      on_click,
+    }
+  }
+}
+
+#[derive(Debug)]
 pub struct Dialog {
   glass: Glass,
   container: Container,
   icon: Icon,
   title: Text,
   desc: Text,
-  is_mouse_down_outside: bool,
+  cancel_button: Button,
+  ok_button: Button,
+  mouse_down_outside: bool,
   state: State,
 }
 
+#[optarg_impl]
 impl Dialog {
+  #[optarg_method(DialogNewBuilder, call)]
   pub fn new(
-    bg_color: (u8, u8, u8, u8),
-    color: (u8, u8, u8, u8),
+    #[optarg((255, 255, 255, 255))] bg_color: (u8, u8, u8, u8),
+    #[optarg((0, 0, 0, 255))] color: (u8, u8, u8, u8),
     icon: IconName,
-    title: Cow<'static, str>,
-    desc: Cow<'static, str>,
+    #[optarg_default] title: Cow<'static, str>,
+    #[optarg_default] desc: Cow<'static, str>,
+    cancel_button: DialogButton,
+    ok_button: DialogButton,
   ) -> Self {
     let app_size = (
       crate::APP_SIZE.0.load(Ordering::Relaxed),
@@ -61,100 +98,79 @@ impl Dialog {
     let to_position = Self::get_position();
 
     Self {
-      glass: Glass {
-        size: (app_size.0 as _, app_size.1 as _),
-        alpha: Transition::new(0.0, 128.0, SCALING_UP_DURATION),
-        drawable_id: u16::MAX,
-      },
-      container: Container {
-        position: (
-          Transition::new(
-            (app_size.0 >> 1) as _,
-            to_position.0 as _,
-            SCALING_UP_DURATION,
-          ),
-          Transition::new(
-            (app_size.1 >> 1) as _,
-            to_position.1 as _,
-            SCALING_UP_DURATION,
-          ),
-          Transition::new(1.0, 1.0, SCALING_UP_DURATION),
-        ),
-        size: (
-          Transition::new(0.0, DIALOG_SIZE.0 as _, SCALING_UP_DURATION),
-          Transition::new(0.0, DIALOG_SIZE.1 as _, SCALING_UP_DURATION),
-        ),
-        bg_color,
-        border_radius: Transition::new(0.0, DIALOG_BORDER_RADIUS, SCALING_UP_DURATION),
-        drawable_id: u16::MAX,
-      },
-      icon: Icon {
-        position: (
-          Transition::new(
-            (app_size.0 >> 1) as _,
-            to_position.0 as f32 + ICON_MARGIN.0,
-            SCALING_UP_DURATION,
-          ),
-          Transition::new(
-            (app_size.1 >> 1) as _,
-            to_position.1 as f32 + ICON_MARGIN.1,
-            SCALING_UP_DURATION,
-          ),
-          Transition::new(0.99, 0.99, SCALING_UP_DURATION),
-        ),
-        size: (
-          Transition::new(0.0, ICON_SIZE.0, SCALING_UP_DURATION),
-          Transition::new(0.0, ICON_SIZE.1, SCALING_UP_DURATION),
-        ),
-        color,
-        name: icon,
-        drawable_id: u16::MAX,
-      },
-      title: Text {
-        position: (
-          Transition::new(
-            (app_size.0 >> 1) as _,
-            to_position.0 as f32 + ICON_MARGIN.0 + ICON_SIZE.0 + TITLE_MARGIN,
-            SCALING_UP_DURATION,
-          ),
-          Transition::new(
-            (app_size.1 >> 1) as _,
-            to_position.1 as f32 + TITLE_MARGIN,
-            SCALING_UP_DURATION,
-          ),
-          Transition::new(0.99, 0.99, SCALING_UP_DURATION),
-        ),
-        size: Transition::new(0.0, TITLE_FONT_SIZE, SCALING_UP_DURATION),
-        max_width: Transition::new(f32::MAX, f32::MAX, SCALING_UP_DURATION),
-        color,
-        text: title,
-        drawable_id: u16::MAX,
-      },
-      desc: Text {
-        position: (
-          Transition::new(
-            (app_size.0 >> 1) as _,
-            to_position.0 as f32 + ICON_MARGIN.0,
-            SCALING_UP_DURATION,
-          ),
-          Transition::new(
-            (app_size.1 >> 1) as _,
-            to_position.1 as f32 + ICON_MARGIN.1 + ICON_SIZE.1 + DESC_MARGIN,
-            SCALING_UP_DURATION,
-          ),
-          Transition::new(0.99, 0.99, SCALING_UP_DURATION),
-        ),
-        size: Transition::new(0.0, DESC_FONT_SIZE, SCALING_UP_DURATION),
-        max_width: Transition::new(
-          0.0,
-          DIALOG_SIZE.0 as f32 - ICON_MARGIN.0 * 2.0,
-          SCALING_UP_DURATION,
-        ),
-        color,
-        text: desc,
-        drawable_id: u16::MAX,
-      },
-      is_mouse_down_outside: false,
+      glass: Glass::new((app_size.0 as _, app_size.1 as _))
+        .alpha(Transition::new(0.0, 128.0, SCALING_UP_DURATION))
+        .call(),
+      container: Container::new((DIALOG_SIZE.0 as _, DIALOG_SIZE.1 as _))
+        .color(bg_color)
+        .position((to_position.0 as _, to_position.1 as _, 1.0))
+        .scale(Transition::new(0.0, 1.0, SCALING_UP_DURATION))
+        .scale_origin(((app_size.0 >> 1) as _, (app_size.1 >> 1) as _))
+        .call(),
+      icon: Icon::new(icon)
+        .color(color)
+        .position((
+          to_position.0 as f32 + ICON_MARGIN.0,
+          to_position.1 as f32 + ICON_MARGIN.1,
+          0.99,
+        ))
+        .scale(Transition::new(0.0, 1.0, SCALING_UP_DURATION))
+        .scale_origin(((app_size.0 >> 1) as _, (app_size.1 >> 1) as _))
+        .size(ICON_SIZE)
+        .call(),
+      title: Text::new()
+        .color(color)
+        .position((
+          to_position.0 as f32 + ICON_MARGIN.0 + ICON_SIZE.0 + TITLE_MARGIN,
+          to_position.1 as f32 + TITLE_MARGIN,
+          0.99,
+        ))
+        .scale(Transition::new(0.0, 1.0, SCALING_UP_DURATION))
+        .scale_origin(((app_size.0 >> 1) as _, (app_size.1 >> 1) as _))
+        .size(TITLE_FONT_SIZE)
+        .text(title)
+        .call(),
+      desc: Text::new()
+        .color(color)
+        .position((
+          to_position.0 as f32 + ICON_MARGIN.0,
+          to_position.1 as f32 + ICON_MARGIN.1 + ICON_SIZE.1 + DESC_MARGIN,
+          0.99,
+        ))
+        .max_width(DESC_MAX_WIDTH)
+        .scale(Transition::new(0.0, 1.0, SCALING_UP_DURATION))
+        .scale_origin(((app_size.0 >> 1) as _, (app_size.1 >> 1) as _))
+        .text(desc)
+        .call(),
+      cancel_button: Button::new(cancel_button.icon)
+        .anchor(Anchor::BottomLeft)
+        .position((
+          to_position.0 as f32 + BUTTON_MARGIN.0,
+          to_position.1 as f32 + DIALOG_SIZE.1 as f32 - BUTTON_MARGIN.1,
+          0.99,
+        ))
+        .bg_color(cancel_button.bg_color)
+        .color(cancel_button.color)
+        .label(cancel_button.label)
+        .scale(Transition::new(0.0, 1.0, SCALING_UP_DURATION))
+        .scale_origin(((app_size.0 >> 1) as _, (app_size.1 >> 1) as _))
+        .on_click(cancel_button.on_click)
+        .call(),
+      ok_button: Button::new(ok_button.icon)
+        .anchor(Anchor::BottomRight)
+        .position((
+          to_position.0 as f32 + DIALOG_SIZE.0 as f32 - BUTTON_MARGIN.0,
+          to_position.1 as f32 + DIALOG_SIZE.1 as f32 - BUTTON_MARGIN.1,
+          0.99,
+        ))
+        .bg_color(ok_button.bg_color)
+        .color(ok_button.color)
+        .label(ok_button.label)
+        .scale(Transition::new(0.0, 1.0, SCALING_UP_DURATION))
+        .scale_origin(((app_size.0 >> 1) as _, (app_size.1 >> 1) as _))
+        .on_click(ok_button.on_click)
+        .call(),
+      mouse_down_outside: false,
       state: State::ScalingUp,
     }
   }
@@ -180,15 +196,20 @@ impl Dialog {
       && mouse_position.1 < (position.1 + DIALOG_SIZE.1) as _
   }
 
-  pub fn init(&mut self, engine: &mut Engine<'_>) {
-    self.glass.drawable_id = engine.add_rect(Rect::from(self.glass));
-    self.container.drawable_id = engine.add_round_rect(RoundRect::from(self.container));
-    self.icon.drawable_id = engine.add_icon(models::Icon::from(self.icon));
-    self.title.drawable_id = engine.add_text(models::Text::from(self.title.clone()));
-    self.desc.drawable_id = engine.add_text(models::Text::from(self.desc.clone()));
+  pub fn init(&mut self, engine: &mut Engine) {
+    self.glass.init(engine);
+    self.container.init(engine);
+    self.icon.init(engine);
+    self.title.init(engine);
+    self.desc.init(engine);
+    self.cancel_button.init(engine);
+    self.ok_button.init(engine);
   }
 
   pub fn process_event(&mut self, event: &Event) {
+    self.cancel_button.process_event(event);
+    self.ok_button.process_event(event);
+
     match event {
       Event::MouseButtonDown {
         mouse_btn,
@@ -197,7 +218,7 @@ impl Dialog {
         ..
       } => {
         if *mouse_btn == MouseButton::Left && !Self::is_mouse_on_this((*mouse_x, *mouse_y)) {
-          self.is_mouse_down_outside = true;
+          self.mouse_down_outside = true;
         }
       }
       Event::MouseButtonUp {
@@ -210,397 +231,54 @@ impl Dialog {
           return;
         }
 
-        if !self.is_mouse_down_outside
+        if !self.mouse_down_outside
           || !matches!(self.state, State::Idle)
           || Self::is_mouse_on_this((*mouse_x, *mouse_y))
         {
-          self.is_mouse_down_outside = false;
+          self.mouse_down_outside = false;
           return;
         }
 
-        self.is_mouse_down_outside = false;
-        let from_position = Self::get_position();
-
-        let app_size = (
-          crate::APP_SIZE.0.load(Ordering::Relaxed),
-          crate::APP_SIZE.1.load(Ordering::Relaxed),
-        );
-
-        self.container = Container {
-          position: (
-            Transition::new(
-              from_position.0 as _,
-              crate::map(
-                MIN_VIBRATE_SCALE,
-                0.0,
-                1.0,
-                (app_size.0 >> 1) as _,
-                from_position.0 as _,
-              ),
-              VIBRATE_DURATION,
-            ),
-            Transition::new(
-              from_position.1 as _,
-              crate::map(
-                MIN_VIBRATE_SCALE,
-                0.0,
-                1.0,
-                (app_size.1 >> 1) as _,
-                from_position.1 as _,
-              ),
-              VIBRATE_DURATION,
-            ),
-            Transition::new(1.0, 1.0, VIBRATE_DURATION),
-          ),
-          size: (
-            Transition::new(
-              DIALOG_SIZE.0 as _,
-              DIALOG_SIZE.0 as f32 * MIN_VIBRATE_SCALE,
-              VIBRATE_DURATION,
-            ),
-            Transition::new(
-              DIALOG_SIZE.1 as _,
-              DIALOG_SIZE.1 as f32 * MIN_VIBRATE_SCALE,
-              VIBRATE_DURATION,
-            ),
-          ),
-          bg_color: self.container.bg_color,
-          border_radius: Transition::new(
-            DIALOG_BORDER_RADIUS,
-            crate::map(MIN_VIBRATE_SCALE, 0.0, 1.0, 0.0, DIALOG_BORDER_RADIUS),
-            VIBRATE_DURATION,
-          ),
-          drawable_id: self.container.drawable_id,
-        };
-
-        self.icon = Icon {
-          position: (
-            Transition::new(
-              from_position.0 as f32 + ICON_MARGIN.0,
-              crate::map(
-                MIN_VIBRATE_SCALE,
-                0.0,
-                1.0,
-                (app_size.0 >> 1) as _,
-                from_position.0 as f32 + ICON_MARGIN.0,
-              ),
-              VIBRATE_DURATION,
-            ),
-            Transition::new(
-              from_position.1 as f32 + ICON_MARGIN.1,
-              crate::map(
-                MIN_VIBRATE_SCALE,
-                0.0,
-                1.0,
-                (app_size.1 >> 1) as _,
-                from_position.1 as f32 + ICON_MARGIN.1,
-              ),
-              VIBRATE_DURATION,
-            ),
-            Transition::new(0.99, 0.99, VIBRATE_DURATION),
-          ),
-          size: (
-            Transition::new(
-              ICON_SIZE.0,
-              ICON_SIZE.0 * MIN_VIBRATE_SCALE,
-              VIBRATE_DURATION,
-            ),
-            Transition::new(
-              ICON_SIZE.1,
-              ICON_SIZE.1 * MIN_VIBRATE_SCALE,
-              VIBRATE_DURATION,
-            ),
-          ),
-          color: self.icon.color,
-          name: self.icon.name,
-          drawable_id: self.icon.drawable_id,
-        };
-
-        self.title = Text {
-          position: (
-            Transition::new(
-              from_position.0 as f32 + ICON_MARGIN.0 + ICON_SIZE.0 + TITLE_MARGIN,
-              crate::map(
-                MIN_VIBRATE_SCALE,
-                0.0,
-                1.0,
-                (app_size.0 >> 1) as _,
-                from_position.0 as f32 + ICON_MARGIN.1 + ICON_SIZE.0 + TITLE_MARGIN,
-              ),
-              VIBRATE_DURATION,
-            ),
-            Transition::new(
-              from_position.1 as f32 + TITLE_MARGIN,
-              crate::map(
-                MIN_VIBRATE_SCALE,
-                0.0,
-                1.0,
-                (app_size.1 >> 1) as _,
-                from_position.1 as f32 + TITLE_MARGIN,
-              ),
-              VIBRATE_DURATION,
-            ),
-            Transition::new(0.99, 0.99, VIBRATE_DURATION),
-          ),
-          size: Transition::new(
-            TITLE_FONT_SIZE,
-            TITLE_FONT_SIZE * MIN_VIBRATE_SCALE,
-            VIBRATE_DURATION,
-          ),
-          max_width: Transition::new(f32::MAX, f32::MAX, VIBRATE_DURATION),
-          color: self.title.color,
-          text: self.title.text.clone(),
-          drawable_id: self.title.drawable_id,
-        };
-
-        self.desc = Text {
-          position: (
-            Transition::new(
-              from_position.0 as f32 + ICON_MARGIN.0,
-              crate::map(
-                MIN_VIBRATE_SCALE,
-                0.0,
-                1.0,
-                (app_size.0 >> 1) as _,
-                from_position.0 as f32 + ICON_MARGIN.0,
-              ),
-              VIBRATE_DURATION,
-            ),
-            Transition::new(
-              from_position.1 as f32 + ICON_MARGIN.1 + ICON_SIZE.1 + DESC_MARGIN,
-              crate::map(
-                MIN_VIBRATE_SCALE,
-                0.0,
-                1.0,
-                (app_size.1 >> 1) as _,
-                from_position.1 as f32 + ICON_MARGIN.1 + ICON_SIZE.1 + DESC_MARGIN,
-              ),
-              VIBRATE_DURATION,
-            ),
-            Transition::new(0.99, 0.99, VIBRATE_DURATION),
-          ),
-          size: Transition::new(
-            DESC_FONT_SIZE,
-            DESC_FONT_SIZE * MIN_VIBRATE_SCALE,
-            VIBRATE_DURATION,
-          ),
-          max_width: Transition::new(
-            DIALOG_SIZE.0 as f32 - ICON_MARGIN.0 * 2.0,
-            (DIALOG_SIZE.0 as f32 - ICON_MARGIN.0 * 2.0) * MIN_VIBRATE_SCALE,
-            VIBRATE_DURATION,
-          ),
-          color: self.desc.color,
-          text: self.desc.text.clone(),
-          drawable_id: self.desc.drawable_id,
-        };
-
+        self.mouse_down_outside = false;
+        let to_scale = Transition::new(1.0, MIN_VIBRATE_SCALE, VIBRATE_DURATION);
+        self.container.set_scale(to_scale);
+        self.icon.set_scale(to_scale);
+        self.title.set_scale(to_scale);
+        self.desc.set_scale(to_scale);
+        self.cancel_button.set_scale(to_scale);
+        self.ok_button.set_scale(to_scale);
         self.state = State::ScalingDown;
       }
       _ => {}
     }
   }
 
-  pub fn update(&mut self, dt: f32, engine: &mut Engine<'_>) {
-    let prev_state = self.state;
-
-    if self.glass.update(dt)
-      & self.container.update(dt)
-      & self.icon.update(dt)
-      & self.title.update(dt)
-      & self.desc.update(dt)
+  pub fn update(&mut self, dt: f32, engine: &mut Engine) {
+    if self.glass.update(dt, engine)
+      & self.container.update(dt, engine)
+      & self.icon.update(dt, engine)
+      & self.title.update(dt, engine)
+      & self.desc.update(dt, engine)
+      & self.cancel_button.update(dt, engine)
+      & self.ok_button.update(dt, engine)
     {
-      match prev_state {
+      match self.state {
         State::ScalingUp => self.state = State::Idle,
         State::ScalingDown => {
-          let from_position = Self::get_position();
-
-          let app_size = (
-            crate::APP_SIZE.0.load(Ordering::Relaxed),
-            crate::APP_SIZE.1.load(Ordering::Relaxed),
-          );
-
-          self.container = Container {
-            position: (
-              Transition::new(
-                crate::map(
-                  MIN_VIBRATE_SCALE,
-                  0.0,
-                  1.0,
-                  (app_size.0 >> 1) as _,
-                  from_position.0 as _,
-                ),
-                from_position.0 as _,
-                VIBRATE_DURATION,
-              ),
-              Transition::new(
-                crate::map(
-                  MIN_VIBRATE_SCALE,
-                  0.0,
-                  1.0,
-                  (app_size.1 >> 1) as _,
-                  from_position.1 as _,
-                ),
-                from_position.1 as _,
-                VIBRATE_DURATION,
-              ),
-              Transition::new(1.0, 1.0, VIBRATE_DURATION),
-            ),
-            size: (
-              Transition::new(
-                DIALOG_SIZE.0 as f32 * MIN_VIBRATE_SCALE,
-                DIALOG_SIZE.0 as _,
-                VIBRATE_DURATION,
-              ),
-              Transition::new(
-                DIALOG_SIZE.1 as f32 * MIN_VIBRATE_SCALE,
-                DIALOG_SIZE.1 as _,
-                VIBRATE_DURATION,
-              ),
-            ),
-            bg_color: self.container.bg_color,
-            border_radius: Transition::new(
-              crate::map(MIN_VIBRATE_SCALE, 0.0, 1.0, 0.0, DIALOG_BORDER_RADIUS),
-              DIALOG_BORDER_RADIUS,
-              VIBRATE_DURATION,
-            ),
-            drawable_id: self.container.drawable_id,
-          };
-
-          self.icon = Icon {
-            position: (
-              Transition::new(
-                crate::map(
-                  MIN_VIBRATE_SCALE,
-                  0.0,
-                  1.0,
-                  (app_size.0 >> 1) as _,
-                  from_position.0 as f32 + ICON_MARGIN.0,
-                ),
-                from_position.0 as f32 + ICON_MARGIN.0,
-                VIBRATE_DURATION,
-              ),
-              Transition::new(
-                crate::map(
-                  MIN_VIBRATE_SCALE,
-                  0.0,
-                  1.0,
-                  (app_size.1 >> 1) as _,
-                  from_position.1 as f32 + ICON_MARGIN.1,
-                ),
-                from_position.1 as f32 + ICON_MARGIN.1,
-                VIBRATE_DURATION,
-              ),
-              Transition::new(0.99, 0.99, VIBRATE_DURATION),
-            ),
-            size: (
-              Transition::new(
-                ICON_SIZE.0 * MIN_VIBRATE_SCALE,
-                ICON_SIZE.0,
-                VIBRATE_DURATION,
-              ),
-              Transition::new(
-                ICON_SIZE.1 * MIN_VIBRATE_SCALE,
-                ICON_SIZE.1,
-                VIBRATE_DURATION,
-              ),
-            ),
-            color: self.icon.color,
-            name: self.icon.name,
-            drawable_id: self.icon.drawable_id,
-          };
-
-          self.title = Text {
-            position: (
-              Transition::new(
-                crate::map(
-                  MIN_VIBRATE_SCALE,
-                  0.0,
-                  1.0,
-                  (app_size.0 >> 1) as _,
-                  from_position.0 as f32 + ICON_MARGIN.0 + ICON_SIZE.0 + TITLE_MARGIN,
-                ),
-                from_position.0 as f32 + ICON_MARGIN.0 + ICON_SIZE.0 + TITLE_MARGIN,
-                VIBRATE_DURATION,
-              ),
-              Transition::new(
-                crate::map(
-                  MIN_VIBRATE_SCALE,
-                  0.0,
-                  1.0,
-                  (app_size.1 >> 1) as _,
-                  from_position.1 as f32 + TITLE_MARGIN,
-                ),
-                from_position.1 as f32 + TITLE_MARGIN,
-                VIBRATE_DURATION,
-              ),
-              Transition::new(0.99, 0.99, VIBRATE_DURATION),
-            ),
-            size: Transition::new(
-              TITLE_FONT_SIZE * MIN_VIBRATE_SCALE,
-              TITLE_FONT_SIZE,
-              VIBRATE_DURATION,
-            ),
-            max_width: Transition::new(f32::MAX, f32::MAX, VIBRATE_DURATION),
-            color: self.title.color,
-            text: self.title.text.clone(),
-            drawable_id: self.title.drawable_id,
-          };
-
-          self.desc = Text {
-            position: (
-              Transition::new(
-                crate::map(
-                  MIN_VIBRATE_SCALE,
-                  0.0,
-                  1.0,
-                  (app_size.0 >> 1) as _,
-                  from_position.0 as f32 + ICON_MARGIN.0,
-                ),
-                from_position.0 as f32 + ICON_MARGIN.0,
-                VIBRATE_DURATION,
-              ),
-              Transition::new(
-                crate::map(
-                  MIN_VIBRATE_SCALE,
-                  0.0,
-                  1.0,
-                  (app_size.1 >> 1) as _,
-                  from_position.1 as f32 + ICON_MARGIN.1 + ICON_SIZE.1 + DESC_MARGIN,
-                ),
-                from_position.1 as f32 + ICON_MARGIN.1 + ICON_SIZE.1 + DESC_MARGIN,
-                VIBRATE_DURATION,
-              ),
-              Transition::new(0.99, 0.99, VIBRATE_DURATION),
-            ),
-            size: Transition::new(
-              DESC_FONT_SIZE * MIN_VIBRATE_SCALE,
-              DESC_FONT_SIZE,
-              VIBRATE_DURATION,
-            ),
-            max_width: Transition::new(
-              (DIALOG_SIZE.0 as f32 - ICON_MARGIN.0 * 2.0) * MIN_VIBRATE_SCALE,
-              DIALOG_SIZE.0 as f32 - ICON_MARGIN.0 * 2.0,
-              VIBRATE_DURATION,
-            ),
-            color: self.desc.color,
-            text: self.desc.text.clone(),
-            drawable_id: self.desc.drawable_id,
-          };
-
+          let to_scale = Transition::new(MIN_VIBRATE_SCALE, 1.0, VIBRATE_DURATION);
+          self.container.set_scale(to_scale);
+          self.icon.set_scale(to_scale);
+          self.title.set_scale(to_scale);
+          self.desc.set_scale(to_scale);
+          self.cancel_button.set_scale(to_scale);
+          self.ok_button.set_scale(to_scale);
           self.state = State::ScalingUp;
         }
         _ => {}
       }
     }
 
-    if !matches!(prev_state, State::Idle) {
-      engine.update_rect(self.glass.drawable_id, Rect::from(self.glass));
-      engine.update_round_rect(self.container.drawable_id, RoundRect::from(self.container));
-      engine.update_icon(self.icon.drawable_id, models::Icon::from(self.icon));
-      engine.remove_text(self.desc.drawable_id);
-      engine.remove_text(self.title.drawable_id);
-      self.title.drawable_id = engine.add_text(models::Text::from(self.title.clone()));
-      self.desc.drawable_id = engine.add_text(models::Text::from(self.desc.clone()));
-    }
+    self.desc.finish_update(engine);
+    self.title.finish_update(engine);
   }
 }

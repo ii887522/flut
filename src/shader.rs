@@ -4,14 +4,14 @@ use ash::{
 };
 use std::{ffi::CString, sync::Arc};
 
-pub(super) struct Shader<'a> {
+pub(super) struct Shader {
   device: Arc<Device>,
   shader: ShaderModule,
   _entry_point_name: CString,
-  pub(super) shader_stage_create_info: PipelineShaderStageCreateInfo<'a>,
+  pub(super) shader_stage_create_info: PipelineShaderStageCreateInfo<'static>,
 }
 
-impl Shader<'_> {
+impl Shader {
   pub(crate) fn new(device: Arc<Device>, stage: ShaderStageFlags, code: &[u8]) -> Self {
     let shader_create_info = ShaderModuleCreateInfo {
       code_size: code.len(),
@@ -43,7 +43,7 @@ impl Shader<'_> {
   }
 }
 
-impl Drop for Shader<'_> {
+impl Drop for Shader {
   fn drop(&mut self) {
     unsafe {
       self.device.destroy_shader_module(self.shader, None);

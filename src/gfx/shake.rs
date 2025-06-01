@@ -1,5 +1,6 @@
 use crate::{Clock, Engine};
 
+#[derive(Debug)]
 pub struct Shake {
   clock: Clock,
   strength: f32,
@@ -17,7 +18,7 @@ impl Shake {
     }
   }
 
-  pub fn update(mut self, dt: f32, engine: &mut Engine<'_>) -> Option<Self> {
+  pub fn update(mut self, dt: f32, engine: &mut Engine) -> Option<Self> {
     self.t += dt;
 
     if !self.clock.update(dt) {

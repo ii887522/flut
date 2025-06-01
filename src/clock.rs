@@ -1,3 +1,4 @@
+#[derive(Debug)]
 pub struct Clock {
   tps: f32,
   t: f32,

@@ -26,12 +26,14 @@ use ash::{
     ImageAspectFlags, ImageLayout, ImageMemoryBarrier, ImageSubresourceRange, PipelineStageFlags,
   },
 };
+use models::Anchor;
 use rayon::prelude::*;
 use std::{
   mem,
   ops::{Bound, RangeBounds},
   ptr,
   sync::{Arc, atomic::AtomicU32},
+  time::{self, SystemTime},
 };
 
 pub use app::App;
@@ -97,6 +99,27 @@ const fn unpack_color(color: u32) -> (u8, u8, u8, u8) {
 
 const fn map(from: f32, min_from: f32, max_from: f32, min_to: f32, max_to: f32) -> f32 {
   min_to + (from - min_from) * (max_to - min_to) / (max_from - min_from)
+}
+
+const fn calc_position_offset(anchor: Anchor, size: (f32, f32)) -> (f32, f32) {
+  match anchor {
+    Anchor::TopLeft => (0.0, 0.0),
+    Anchor::Top => (-size.0 * 0.5, 0.0),
+    Anchor::TopRight => (-size.0, 0.0),
+    Anchor::Left => (0.0, -size.1 * 0.5),
+    Anchor::Center => (-size.0 * 0.5, -size.1 * 0.5),
+    Anchor::Right => (-size.0, -size.1 * 0.5),
+    Anchor::BottomLeft => (0.0, -size.1),
+    Anchor::Bottom => (-size.0 * 0.5, -size.1),
+    Anchor::BottomRight => (-size.0, -size.1),
+  }
+}
+
+pub fn get_current_timestamp() -> u128 {
+  SystemTime::now()
+    .duration_since(time::UNIX_EPOCH)
+    .unwrap()
+    .as_millis()
 }
 
 fn record_copy_buffer_to_image_commands(

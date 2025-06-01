@@ -24,7 +24,7 @@ impl Icon {
     }
   }
 
-  pub(crate) fn into_glyph(self, icon_atlas: &mut IconAtlas<'_>) -> Glyph {
+  pub(crate) fn into_glyph(self, icon_atlas: &mut IconAtlas) -> Glyph {
     let glyph_metrics = icon_atlas.get_glyph_metrics(self.code_point).unwrap();
 
     Glyph::new(self.position, self.size, self.color)

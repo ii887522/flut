@@ -8,7 +8,7 @@ use ash::{
 };
 use gpu_allocator::vulkan::Allocator;
 use rayon::prelude::*;
-use sdl2::{pixels::Color, ttf::Sdl2TtfContext};
+use sdl2::pixels::Color;
 use std::{cell::RefCell, collections::HashMap, ops::RangeInclusive, rc::Rc, sync::Arc};
 
 pub(crate) struct FontAtlas {
@@ -23,13 +23,12 @@ impl FontAtlas {
   pub(crate) fn new(
     device: Arc<Device>,
     memory_allocator: Rc<RefCell<Allocator>>,
-    ttf: &Sdl2TtfContext,
     file_path: &str,
     font_size: u16,
     chars: RangeInclusive<char>,
     atlas_size: (u32, u32),
   ) -> Self {
-    let font = ttf.load_font(file_path, font_size).unwrap();
+    let font = consts::TTF.load_font(file_path, font_size).unwrap();
     let recommended_line_spacing = font.recommended_line_spacing() as _;
     let mut glyph_position = (consts::GLYPH_PADDING, consts::GLYPH_PADDING);
     let mut max_glyph_height = 0;

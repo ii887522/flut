@@ -22,8 +22,8 @@ impl GraphicsPipeline {
   pub(crate) fn new(
     device: Arc<Device>,
     surface_extent: Extent2D,
-    vert_shader: &Shader<'_>,
-    frag_shader: &Shader<'_>,
+    vert_shader: &Shader,
+    frag_shader: &Shader,
     layout: PipelineLayout,
     render_pass: RenderPass,
     base_pipeline: Option<&GraphicsPipeline>,

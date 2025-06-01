@@ -24,7 +24,7 @@ pub fn gen_icon_name_enum(_input: TokenStream) -> TokenStream {
   let icon_names = codepoint_to_icon_name.values();
 
   quote! {
-    #[derive(Clone, Copy)]
+    #[derive(Clone, Copy, Debug)]
     #[repr(u16)]
     pub enum IconName {
       #(#icon_names = #codepoints,)*

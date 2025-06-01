@@ -19,12 +19,12 @@ struct PushConstant {
   mesh_buffer_addr: DeviceAddress,
 }
 
-pub(crate) struct RoundRectBatch<'a> {
-  batch: Batch<'a, RoundRectPart>,
+pub(crate) struct RoundRectBatch {
+  batch: Batch<RoundRectPart>,
   round_rect_ids: SparseVec<Vec<u16>>,
 }
 
-impl RoundRectBatch<'_> {
+impl RoundRectBatch {
   pub(crate) fn new(
     device: Arc<Device>,
     memory_allocator: Rc<RefCell<Allocator>>,

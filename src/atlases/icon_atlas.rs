@@ -8,15 +8,12 @@ use ash::{
 };
 use gpu_allocator::vulkan::Allocator;
 use rayon::prelude::*;
-use sdl2::{
-  pixels::Color,
-  ttf::{Font, Sdl2TtfContext},
-};
+use sdl2::{pixels::Color, ttf::Font};
 use std::{cell::RefCell, collections::HashMap, mem, rc::Rc, sync::Arc};
 
-pub(crate) struct IconAtlas<'a> {
+pub(crate) struct IconAtlas {
   pub(crate) image: DynamicImage,
-  font: Font<'a, 'static>,
+  font: Font<'static, 'static>,
   atlas_size: (u32, u32),
   code_point_to_glyph_metrics: HashMap<u16, GlyphMetrics>,
   buffer_image_copies: Vec<BufferImageCopy>,
@@ -26,17 +23,16 @@ pub(crate) struct IconAtlas<'a> {
   max_icon_height: u32,
 }
 
-impl<'a> IconAtlas<'a> {
+impl IconAtlas {
   pub(crate) fn new(
     device: Arc<Device>,
     memory_allocator: Rc<RefCell<Allocator>>,
     transfer_command_pool: CommandPool,
-    ttf: &'a Sdl2TtfContext,
     file_path: &str,
     font_size: u16,
     atlas_size: (u32, u32),
   ) -> Self {
-    let font = ttf.load_font(file_path, font_size).unwrap();
+    let font = consts::TTF.load_font(file_path, font_size).unwrap();
 
     let image = DynamicImage::new(
       device,

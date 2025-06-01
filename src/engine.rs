@@ -33,7 +33,7 @@ use gpu_allocator::{
   vulkan::{Allocator, AllocatorCreateDesc},
 };
 use rayon::prelude::*;
-use sdl2::{ttf::Sdl2TtfContext, video::Window};
+use sdl2::{EventSubsystem, event::Event, video::Window};
 use std::{
   cell::RefCell,
   collections::HashSet,
@@ -42,7 +42,7 @@ use std::{
   sync::{Arc, mpsc::Sender},
 };
 
-pub struct Engine<'a> {
+pub struct Engine {
   window: Window,
   _entry: Entry,
   instance: Instance,
@@ -58,8 +58,8 @@ pub struct Engine<'a> {
   transfer_queue: Queue,
   swapchain_device: swapchain::Device,
   memory_allocator: Option<Rc<RefCell<Allocator>>>,
-  glyph_batch: Option<GlyphBatch<'a>>,
-  round_rect_batch: Option<RoundRectBatch<'a>>,
+  glyph_batch: Option<GlyphBatch>,
+  round_rect_batch: Option<RoundRectBatch>,
   graphics_command_pool: CommandPool,
   transfer_command_pool: CommandPool,
   graphics_command_buffers: Vec<CommandBuffer>,
@@ -78,6 +78,8 @@ pub struct Engine<'a> {
   frame_index: usize,
   text_ids: SparseVec<Vec<u16>>,
   audio_tx: Sender<AudioReq>,
+  event_subsys: EventSubsystem,
+  text_size: (f32, f32),
 }
 
 pub struct DrawableCaps {
@@ -94,11 +96,11 @@ impl Default for DrawableCaps {
   }
 }
 
-impl<'a> Engine<'a> {
+impl Engine {
   pub(super) fn new(
-    ttf: &'a Sdl2TtfContext,
     window: Window,
     audio_tx: Sender<AudioReq>,
+    event_subsys: EventSubsystem,
     prefer_dgpu: bool,
     drawable_caps: DrawableCaps,
   ) -> Self {
@@ -414,7 +416,6 @@ impl<'a> Engine<'a> {
       device.clone(),
       memory_allocator.clone(),
       transfer_command_pool,
-      ttf,
       drawable_caps.glyph_cap,
     );
 
@@ -621,6 +622,8 @@ impl<'a> Engine<'a> {
       frame_index: 0,
       text_ids: SparseVec::new(),
       audio_tx,
+      event_subsys,
+      text_size: (0.0, 0.0),
     };
 
     // Create a new swapchain and its dependents during initialization
@@ -643,11 +646,15 @@ impl<'a> Engine<'a> {
     this
   }
 
+  pub(super) const fn get_text_size(&self) -> (f32, f32) {
+    self.text_size
+  }
+
   pub(super) fn draw(&mut self) {
     unsafe {
       let glyph_batch = self.glyph_batch.as_mut().unwrap();
 
-      let is_drawing_icon_atlas = glyph_batch.icon_atlas.draw(
+      let drawing_icon_atlas = glyph_batch.icon_atlas.draw(
         self.transfer_queue,
         self.graphics_queue_family_index,
         self.transfer_queue_family_index,
@@ -666,7 +673,7 @@ impl<'a> Engine<'a> {
       // If after acquired a swapchain image found that the swapchain is suboptimal, we still proceed to submit command buffer
       // because the swapchain image is already acquired and need to be presented before call on_swapchain_suboptimal()
       // to ensure no swapchain images are holding by draw() forever causing deadlock
-      let (swapchain_image_index, _is_swapchain_suboptimal) =
+      let (swapchain_image_index, _swapchain_suboptimal) =
         match self.swapchain_device.acquire_next_image(
           self.swapchain,
           u64::MAX,
@@ -753,7 +760,7 @@ impl<'a> Engine<'a> {
       let mut wait_semaphores = vec![image_avail_semaphore];
       let mut wait_dst_stage_mask = vec![PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT];
 
-      if is_drawing_icon_atlas {
+      if drawing_icon_atlas {
         wait_semaphores.push(glyph_batch.icon_atlas.image.get_draw_done_semaphore());
         wait_dst_stage_mask.push(PipelineStageFlags::FRAGMENT_SHADER);
       }
@@ -1138,7 +1145,9 @@ impl<'a> Engine<'a> {
 
   pub fn add_text(&mut self, text: Text) -> u16 {
     let glyph_batch = self.glyph_batch.as_ref().unwrap();
-    let ids = self.batch_add_glyphs(text.into_glyphs(&glyph_batch.font_atlas));
+    let glyphs = text.into_glyphs(&glyph_batch.font_atlas);
+    self.text_size = glyphs.text_size;
+    let ids = self.batch_add_glyphs(glyphs.glyphs);
     self.text_ids.push(ids)
   }
 
@@ -1208,9 +1217,18 @@ impl<'a> Engine<'a> {
   pub fn batch_remove_icons(&mut self, ids: &[u16]) {
     self.batch_remove_glyphs(ids);
   }
+
+  pub fn clear(&mut self) {
+    self.clear_glyphs();
+    self.clear_round_rects();
+  }
+
+  pub fn send_event(&self, event: Event) {
+    self.event_subsys.push_event(event).unwrap();
+  }
 }
 
-impl Drop for Engine<'_> {
+impl Drop for Engine {
   fn drop(&mut self) {
     unsafe {
       self.device.device_wait_idle().unwrap();

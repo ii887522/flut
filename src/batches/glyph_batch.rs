@@ -13,7 +13,6 @@ use ash::{
   },
 };
 use gpu_allocator::vulkan::Allocator;
-use sdl2::ttf::Sdl2TtfContext;
 use std::{cell::RefCell, rc::Rc, sync::Arc};
 
 #[repr(C, align(8))]
@@ -26,21 +25,20 @@ struct PushConstant {
   mesh_buffer_addr: DeviceAddress,
 }
 
-pub(crate) struct GlyphBatch<'a> {
-  batch: Batch<'a, Glyph>,
+pub(crate) struct GlyphBatch {
+  batch: Batch<Glyph>,
   pub(crate) descriptor_set_layout: DescriptorSetLayout,
   sampler: Sampler,
   pub(crate) font_atlas: FontAtlas,
-  pub(crate) icon_atlas: IconAtlas<'a>,
+  pub(crate) icon_atlas: IconAtlas,
   camera_position: (f32, f32),
 }
 
-impl<'a> GlyphBatch<'a> {
+impl GlyphBatch {
   pub(crate) fn new(
     device: Arc<Device>,
     memory_allocator: Rc<RefCell<Allocator>>,
     transfer_command_pool: CommandPool,
-    ttf: &'a Sdl2TtfContext,
     cap: usize,
   ) -> Self {
     let layout_bindings = [
@@ -102,7 +100,6 @@ impl<'a> GlyphBatch<'a> {
     let font_atlas = FontAtlas::new(
       device.clone(),
       memory_allocator.clone(),
-      ttf,
       "assets/fonts/arial.ttf",
       48,
       ' '..='~',
@@ -113,7 +110,6 @@ impl<'a> GlyphBatch<'a> {
       device,
       memory_allocator,
       transfer_command_pool,
-      ttf,
       "assets/fonts/MaterialSymbolsOutlined-Regular.ttf",
       64,
       (1024, 1024),
@@ -254,7 +250,7 @@ impl<'a> GlyphBatch<'a> {
   }
 }
 
-impl Drop for GlyphBatch<'_> {
+impl Drop for GlyphBatch {
   fn drop(&mut self) {
     unsafe {
       self.batch.device.destroy_sampler(self.sampler, None);

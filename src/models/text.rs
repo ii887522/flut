@@ -1,4 +1,4 @@
-use super::{Anchor, Glyph};
+use super::{Anchor, Glyph, Glyphs};
 use crate::atlases::FontAtlas;
 use optarg2chain::optarg_impl;
 use rayon::prelude::*;
@@ -35,7 +35,7 @@ impl Text {
     }
   }
 
-  pub(crate) fn into_glyphs(self, font_atlas: &FontAtlas) -> Vec<Glyph> {
+  pub(crate) fn into_glyphs(self, font_atlas: &FontAtlas) -> Glyphs {
     let font_scale = self.font_size / font_atlas.font_size as f32;
     let mut last_glyph_position = self.position;
     let mut current_glyph_position = self.position;
@@ -99,20 +99,9 @@ impl Text {
       .collect::<Vec<_>>();
 
     text_size.1 = last_glyph_position.1 + max_glyph_height - self.position.1;
+    let offset = crate::calc_position_offset(self.anchor, text_size);
 
-    let offset = match self.anchor {
-      Anchor::TopLeft => (0.0, 0.0),
-      Anchor::Top => (-text_size.0 * 0.5, 0.0),
-      Anchor::TopRight => (-text_size.0, 0.0),
-      Anchor::Left => (0.0, -text_size.1 * 0.5),
-      Anchor::Center => (-text_size.0 * 0.5, -text_size.1 * 0.5),
-      Anchor::Right => (-text_size.0, -text_size.1 * 0.5),
-      Anchor::BottomLeft => (0.0, -text_size.1),
-      Anchor::Bottom => (-text_size.0 * 0.5, -text_size.1),
-      Anchor::BottomRight => (-text_size.0, -text_size.1),
-    };
-
-    glyphs
+    let glyphs = glyphs
       .into_par_iter()
       .map(|glyph| {
         Glyph::new(
@@ -128,6 +117,8 @@ impl Text {
         .tex_size(glyph.tex_size)
         .call()
       })
-      .collect()
+      .collect();
+
+    Glyphs { glyphs, text_size }
   }
 }

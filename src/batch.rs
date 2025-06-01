@@ -15,10 +15,10 @@ use gpu_allocator::vulkan::Allocator;
 use rayon::prelude::*;
 use std::{cell::RefCell, mem, ptr, rc::Rc, sync::Arc};
 
-pub(super) struct Batch<'a, Mesh> {
+pub(super) struct Batch<Mesh> {
   pub(super) device: Arc<Device>,
-  vert_shader: Shader<'a>,
-  frag_shader: Shader<'a>,
+  vert_shader: Shader,
+  frag_shader: Shader,
   pipeline_layout: PipelineLayout,
   pub(super) mesh_buffer: StreamBuffer,
   pub(super) mesh_buffer_addr: DeviceAddress,
@@ -26,7 +26,7 @@ pub(super) struct Batch<'a, Mesh> {
   meshes: SparseVec<Mesh>,
 }
 
-impl<Mesh> Batch<'_, Mesh> {
+impl<Mesh> Batch<Mesh> {
   pub(super) fn new<PushConstant>(
     device: Arc<Device>,
     memory_allocator: Rc<RefCell<Allocator>>,
@@ -150,7 +150,7 @@ impl<Mesh> Batch<'_, Mesh> {
   }
 }
 
-impl<Mesh: Copy + Send + Sync> Batch<'_, Mesh> {
+impl<Mesh: Copy + Send + Sync> Batch<Mesh> {
   pub(super) fn add(&mut self, mesh: Mesh) -> u16 {
     let mapped_mesh_alloc = self.mesh_buffer.alloc.mapped_ptr().unwrap();
 
@@ -267,7 +267,7 @@ impl<Mesh: Copy + Send + Sync> Batch<'_, Mesh> {
   }
 }
 
-impl<Mesh> Drop for Batch<'_, Mesh> {
+impl<Mesh> Drop for Batch<Mesh> {
   fn drop(&mut self) {
     unsafe {
       self
