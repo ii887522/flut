@@ -8,13 +8,18 @@ mod models;
 use flut::{
   App, AppConfig, Clock, Engine, app,
   collections::SparseVec,
-  models::{AudioReq, Rect, Text},
+  gfx::Shake,
+  models::{AudioReq, IconName, Rect, Text},
+  widgets::{Dialog, dialog::DialogButton},
 };
 use models::{Air, Direction, Food, Score, Wall, Worm};
 use rayon::prelude::*;
 use sdl2::{event::Event, keyboard::Keycode};
 use std::{
+  cell::RefCell,
   collections::VecDeque,
+  mem,
+  rc::Rc,
   sync::atomic::{AtomicU16, Ordering},
 };
 
@@ -24,10 +29,7 @@ fn main() {
 
 struct WormApp {
   clock: Clock,
-  air: SparseVec<Air>,
-  worm: VecDeque<Worm>, // First element represents head, last element represents tail
-  food: Food,
-  score: Score,
+  game: Rc<RefCell<WormGame>>,
   input_worm_direction: Option<Direction>,
 }
 
@@ -70,7 +72,7 @@ impl WormApp {
 
     worm.push_front(Worm {
       position: consts::INITIAL_WORM_POSITION_1D,
-      direction: Some(Direction::rand()),
+      direction: Direction::rand(),
       drawable_id: AtomicU16::new(u16::MAX), // Will be initialized in WormApp::init() method
     });
 
@@ -81,68 +83,78 @@ impl WormApp {
 
     Self {
       clock,
-      air,
-      worm,
-      food: Food::default(), // Will be initialized in WormApp::init() method
-      score,
+      game: Rc::new(RefCell::new(WormGame {
+        air,
+        worm,
+        food: Food::default(), // Will be initialized in WormApp::init() method
+        score,
+        state: State::Playing,
+      })),
       input_worm_direction: None,
     }
   }
 
-  fn spawn_food(&mut self, engine: &mut Engine<'_>) {
-    let rand_air = self
-      .air
-      .remove_by_dense_index(fastrand::u16(0..self.air.len() as _));
+  fn spawn_food(&mut self, engine: &mut Engine) {
+    let mut game = self.game.borrow_mut();
+    let air_count = game.air.len() as _;
+    let rand_air = game.air.remove_by_dense_index(fastrand::u16(0..air_count));
 
     engine.remove_rect(rand_air.drawable_id);
 
     // Has spawn food before
-    if self.food.position < u16::MAX {
-      self.food.position = rand_air.position;
+    if game.food.position < u16::MAX {
+      game.food.position = rand_air.position;
 
       engine.update_rect(
-        *self.food.drawable_id.get_mut(),
-        Rect::from(self.food.clone()),
+        *game.food.drawable_id.get_mut(),
+        Rect::from(game.food.clone()),
       );
     } else {
-      self.food.position = rand_air.position;
-      self.food.drawable_id = AtomicU16::new(engine.add_rect(Rect::from(self.food.clone())));
+      game.food.position = rand_air.position;
+      game.food.drawable_id = AtomicU16::new(engine.add_rect(Rect::from(game.food.clone())));
     }
   }
 
   fn calc_new_worm_position(&self) -> u16 {
-    let worm_head = self.worm.front().unwrap();
+    let game = self.game.borrow();
+    let worm_head = game.worm.front().unwrap();
 
     match worm_head.direction {
-      Some(Direction::Up) => worm_head.position - consts::GRID_SIZE.0,
-      Some(Direction::Right) => worm_head.position + 1,
-      Some(Direction::Down) => worm_head.position + consts::GRID_SIZE.0,
-      Some(Direction::Left) => worm_head.position - 1,
-      None => worm_head.position,
+      Direction::Up => worm_head.position - consts::GRID_SIZE.0,
+      Direction::Right => worm_head.position + 1,
+      Direction::Down => worm_head.position + consts::GRID_SIZE.0,
+      Direction::Left => worm_head.position - 1,
     }
   }
 
   fn will_eat_food(&self) -> bool {
-    self.calc_new_worm_position() == self.food.position
+    self.calc_new_worm_position() == self.game.borrow().food.position
   }
 
   fn will_hit_obstacle(&self) -> bool {
-    !self.air.contains(self.calc_new_worm_position())
+    !self
+      .game
+      .borrow()
+      .air
+      .contains(self.calc_new_worm_position())
   }
 
-  fn move_air(&mut self, engine: &mut Engine<'_>) {
-    let worm_tail = self.worm.back().unwrap();
-    let mut air_to_move = self.air.remove(self.calc_new_worm_position());
+  fn move_air(&mut self, engine: &mut Engine) {
+    let new_worm_position = self.calc_new_worm_position();
+    let mut game = self.game.borrow_mut();
+    let mut air_to_move = game.air.remove(new_worm_position);
+    let worm_tail = game.worm.back().unwrap().clone();
     air_to_move.position = worm_tail.position;
-    self.air.push_by_id(worm_tail.position, air_to_move);
+    game.air.push_by_id(worm_tail.position, air_to_move);
     engine.update_rect(air_to_move.drawable_id, Rect::from(air_to_move));
   }
 
-  fn move_worm(&mut self, engine: &mut Engine<'_>) {
+  fn move_worm(&mut self, engine: &mut Engine) {
     let new_position = self.calc_new_worm_position();
-    let mut worm_cell_to_move = self.worm.pop_back().unwrap();
+    let mut game = self.game.borrow_mut();
+    let mut worm_cell_to_move = game.worm.pop_back().unwrap();
 
-    let worm_head = if let Some(worm_head) = self.worm.front() {
+    let worm_head = if let Some(worm_head) = game.worm.front() {
       worm_head
     } else {
       &worm_cell_to_move
@@ -156,27 +168,27 @@ impl WormApp {
       Rect::from(worm_cell_to_move.clone()),
     );
 
-    self.worm.push_front(worm_cell_to_move);
+    game.worm.push_front(worm_cell_to_move);
   }
 
-  fn kill_worm(&mut self, engine: &mut Engine<'_>) {
+  fn kill_worm(&mut self, engine: &mut Engine) {
     let _ = engine.get_audio_tx().send(AudioReq::StopMusic);
 
     let _ = engine.get_audio_tx().send(AudioReq::PlaySound {
       file_path: "assets/audio/dead.mp3",
     });
 
-    let worm_head = self.worm.front_mut().unwrap();
-    worm_head.direction = None;
+    self.game.borrow_mut().state = State::DeadShaking(Shake::new(64.0, 0.5, 30.0));
   }
 
-  fn grow_worm(&mut self, engine: &mut Engine<'_>) {
+  fn grow_worm(&mut self, engine: &mut Engine) {
     let _ = engine.get_audio_tx().send(AudioReq::PlaySound {
       file_path: "assets/audio/eat.mp3",
     });
 
     let new_position = self.calc_new_worm_position();
-    let worm_head = self.worm.front().unwrap();
+    let mut game = self.game.borrow_mut();
+    let worm_head = game.worm.front().unwrap();
 
     let mut new_worm_head = Worm {
       position: new_position,
@@ -185,13 +197,14 @@ impl WormApp {
     };
 
     new_worm_head.drawable_id = AtomicU16::new(engine.add_rect(Rect::from(new_worm_head.clone())));
-    self.worm.push_front(new_worm_head);
+    game.worm.push_front(new_worm_head);
   }
 
-  fn add_score(&mut self, engine: &mut Engine<'_>) {
-    self.score.score += 1;
-    engine.remove_text(self.score.drawable_id);
-    self.score.drawable_id = engine.add_text(Text::from(self.score));
+  fn add_score(&mut self, engine: &mut Engine) {
+    let mut game = self.game.borrow_mut();
+    game.score.score += 1;
+    engine.remove_text(game.score.drawable_id);
+    game.score.drawable_id = engine.add_text(Text::from(game.score));
   }
 }
 
@@ -205,7 +218,9 @@ impl App for WormApp {
     }
   }
 
-  fn init(&mut self, engine: &mut Engine<'_>) {
+  fn init(&mut self, engine: Rc<RefCell<Engine>>) {
+    let mut engine = engine.borrow_mut();
+
     let _ = engine.get_audio_tx().send(AudioReq::LoadSound {
       file_path: "assets/audio/dead.mp3",
     });
@@ -223,7 +238,9 @@ impl App for WormApp {
       volume: 32,
     });
 
-    let air_rects = self
+    let mut game = self.game.borrow_mut();
+
+    let air_rects = game
       .air
       .get_dense()
       .par_iter()
@@ -251,7 +268,7 @@ impl App for WormApp {
       })
     });
 
-    let worm_head = self.worm.front().unwrap();
+    let worm_head = game.worm.front().unwrap();
     let worm_head_rect = Rect::from(worm_head.clone());
 
     let rects = rayon::iter::once(worm_head_rect)
@@ -262,6 +279,9 @@ impl App for WormApp {
       .chain(right_wall_rects)
       .collect();
 
+    let air_count = game.air.len();
+    let air = game.air.get_dense();
+
     engine
       .batch_add_rects(rects)
       .into_par_iter()
@@ -269,17 +289,33 @@ impl App for WormApp {
       .for_each(|(index, id)| {
         if index == 0 {
           worm_head.drawable_id.store(id, Ordering::Relaxed);
-        } else if index >= 1 && index < 1 + self.air.len() {
-          let (_, air) = &self.air.get_dense()[index - 1];
+        } else if index >= 1 && index < 1 + air_count {
+          let (_, air) = &air[index - 1];
           air.borrow_mut().drawable_id = id;
         }
       });
 
-    self.spawn_food(engine);
-    self.score.drawable_id = engine.add_text(Text::from(self.score));
+    game.score.drawable_id = engine.add_text(Text::from(game.score));
+    drop(game);
+    self.spawn_food(&mut engine);
   }
 
   fn process_event(&mut self, event: Event) {
+    let dialog = if let State::DeadShowingDialog(dialog) = &mut self.game.borrow_mut().state {
+      Some(dialog.take().unwrap())
+    } else {
+      None
+    };
+
+    if let Some(mut dialog) = dialog {
+      dialog.process_event(&event);
+      let mut game = self.game.borrow_mut();
+
+      if let State::DeadShowingDialog(None) = game.state {
+        game.state = State::DeadShowingDialog(Some(dialog));
+      }
+    }
+
     let Event::KeyDown {
       keycode: Some(keycode),
       ..
@@ -288,30 +324,27 @@ impl App for WormApp {
       return;
     };
 
-    let worm_head = self.worm.front().unwrap();
-
-    let Some(worm_head_direction) = worm_head.direction else {
-      return;
-    };
+    let game = self.game.borrow();
+    let worm_head = game.worm.front().unwrap();
 
     match keycode {
       Keycode::Up | Keycode::W => {
-        if !matches!(worm_head_direction, Direction::Down) {
+        if !matches!(worm_head.direction, Direction::Down) {
           self.input_worm_direction = Some(Direction::Up);
         }
       }
       Keycode::Right | Keycode::D => {
-        if !matches!(worm_head_direction, Direction::Left) {
+        if !matches!(worm_head.direction, Direction::Left) {
           self.input_worm_direction = Some(Direction::Right);
         }
       }
       Keycode::Down | Keycode::S => {
-        if !matches!(worm_head_direction, Direction::Up) {
+        if !matches!(worm_head.direction, Direction::Up) {
           self.input_worm_direction = Some(Direction::Down);
         }
       }
       Keycode::Left | Keycode::A => {
-        if !matches!(worm_head_direction, Direction::Right) {
+        if !matches!(worm_head.direction, Direction::Right) {
           self.input_worm_direction = Some(Direction::Left);
         }
       }
@@ -319,34 +352,119 @@ impl App for WormApp {
     }
   }
 
-  fn update(&mut self, dt: f32, engine: &mut Engine<'_>) {
-    if !self.clock.update(dt) {
-      return;
-    }
+  fn update(&mut self, dt: f32, engine: Rc<RefCell<Engine>>) {
+    let cancel_button_engine = engine.clone();
+    let ok_button_engine = engine.clone();
+    let mut engine = engine.borrow_mut();
+    let mut game = self.game.borrow_mut();
 
-    let worm_head = self.worm.front_mut().unwrap();
+    match mem::replace(&mut game.state, State::Pending) {
+      State::Playing => {
+        game.state = State::Playing;
 
-    if worm_head.direction.is_none() {
-      return;
-    }
+        if !self.clock.update(dt) {
+          return;
+        }
 
-    if let Some(input_worm_direction) = self.input_worm_direction.take() {
-      worm_head.direction = Some(input_worm_direction);
-    }
+        if let Some(input_worm_direction) = self.input_worm_direction.take() {
+          let worm_head = game.worm.front_mut().unwrap();
+          worm_head.direction = input_worm_direction;
+        }
 
-    if self.will_eat_food() {
-      self.spawn_food(engine);
-      self.grow_worm(engine);
-      self.add_score(engine);
-      return;
-    }
+        drop(game);
 
-    if self.will_hit_obstacle() {
-      self.kill_worm(engine);
-      return;
-    }
+        if self.will_eat_food() {
+          self.spawn_food(&mut engine);
+          self.grow_worm(&mut engine);
+          self.add_score(&mut engine);
+          return;
+        }
 
-    self.move_air(engine);
-    self.move_worm(engine);
+        if self.will_hit_obstacle() {
+          self.kill_worm(&mut engine);
+          return;
+        }
+
+        self.move_air(&mut engine);
+        self.move_worm(&mut engine);
+      }
+      State::DeadShaking(shake) => {
+        if let Some(shake) = shake.update(dt, &mut engine) {
+          game.state = State::DeadShaking(shake);
+          return;
+        }
+
+        engine.set_camera_position((0.0, 0.0));
+        let score = game.score.score;
+        let game_rc = self.game.clone();
+
+        let mut dialog = Dialog::new(
+          IconName::Skull,
+          DialogButton::new(IconName::House)
+            .bg_color((0, 0, 128, 255))
+            .color((255, 255, 255, 255))
+            .label("Home")
+            .on_click(Box::new(move || {
+              cancel_button_engine.borrow().send_event(Event::Quit {
+                timestamp: flut::get_current_timestamp() as _,
+              });
+            }) as Box<_>)
+            .call(),
+          DialogButton::new(IconName::RestartAlt)
+            .bg_color((128, 0, 0, 255))
+            .color((255, 255, 255, 255))
+            .label("Play again")
+            .on_click(Box::new(move || {
+              ok_button_engine.borrow_mut().clear();
+              let mut app = Self::new();
+              app.init(ok_button_engine.clone());
+              let new_game = Rc::into_inner(app.game).unwrap().into_inner();
+              game_rc.borrow_mut().copy_from(new_game);
+            }) as Box<_>)
+            .call(),
+        )
+        .bg_color((255, 0, 0, 255))
+        .color((255, 255, 255, 255))
+        .title("Game Over")
+        .desc(format!(
+          "You scored {score} points. Do you want to try again?"
+        ))
+        .call();
+
+        dialog.init(&mut engine);
+        game.state = State::DeadShowingDialog(Some(Box::new(dialog)));
+      }
+      State::DeadShowingDialog(Some(mut dialog)) => {
+        dialog.update(dt, &mut engine);
+        game.state = State::DeadShowingDialog(Some(dialog));
+      }
+      state => unreachable!("Unexpected: {state:?}"),
+    };
+  }
+}
+
+#[derive(Debug)]
+enum State {
+  Playing,
+  DeadShaking(Shake),
+  DeadShowingDialog(Option<Box<Dialog>>),
+  Pending,
+}
+
+struct WormGame {
+  air: SparseVec<Air>,
+  worm: VecDeque<Worm>, // First element represents head, last element represents tail
+  food: Food,
+  score: Score,
+  state: State,
+}
+
+impl WormGame {
+  fn copy_from(&mut self, other: Self) {
+    self.air = other.air;
+    self.worm = other.worm;
+    self.food = other.food;
+    self.score = other.score;
+    self.state = other.state;
   }
 }

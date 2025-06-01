@@ -1,28 +1,31 @@
 use crate::{
-  batches::GlyphBatch,
+  batches::{GlyphBatch, RoundRectBatch},
   collections::{SparseVec, StringSlice},
-  models::{AudioReq, Glyph, Rect, Text},
+  consts,
+  images::StaticImage,
+  models::{AudioReq, Glyph, Icon, Rect, RoundRect, Text},
 };
 use ash::{
   Device, Entry, Instance,
   khr::{surface, swapchain},
   vk::{
     self, AccessFlags, ApplicationInfo, AttachmentDescription2, AttachmentLoadOp,
-    AttachmentReference2, AttachmentStoreOp, ClearColorValue, ClearValue, CommandBuffer,
-    CommandBufferAllocateInfo, CommandBufferBeginInfo, CommandBufferLevel, CommandBufferUsageFlags,
-    CommandPool, CommandPoolCreateFlags, CommandPoolCreateInfo, CompositeAlphaFlagsKHR,
-    DependencyFlags, DescriptorPool, DescriptorPoolCreateInfo, DescriptorPoolSize, DescriptorSet,
-    DescriptorSetAllocateInfo, DescriptorType, DeviceCreateInfo, DeviceQueueCreateInfo,
-    DeviceQueueInfo2, Extent2D, Fence, FenceCreateFlags, FenceCreateInfo, Framebuffer,
-    FramebufferCreateInfo, Handle, Image, ImageAspectFlags, ImageLayout, ImageSubresourceRange,
-    ImageUsageFlags, ImageView, ImageViewCreateInfo, ImageViewType, InstanceCreateFlags,
-    InstanceCreateInfo, Offset2D, PhysicalDevice, PhysicalDeviceProperties2, PhysicalDeviceType,
-    PhysicalDeviceVulkan12Features, PipelineBindPoint, PipelineStageFlags, PresentInfoKHR,
-    PresentModeKHR, Queue, QueueFamilyProperties2, QueueFlags, Rect2D, RenderPass,
-    RenderPassBeginInfo, RenderPassCreateInfo2, SampleCountFlags, Semaphore, SemaphoreCreateInfo,
-    SharingMode, SubmitInfo, SubpassBeginInfo, SubpassContents, SubpassDependency2,
-    SubpassDescription2, SubpassEndInfo, SurfaceKHR, SwapchainCreateInfoKHR, SwapchainKHR,
-    ValidationFeatureEnableEXT, ValidationFeaturesEXT,
+    AttachmentReference2, AttachmentStoreOp, ClearColorValue, ClearDepthStencilValue, ClearValue,
+    CommandBuffer, CommandBufferAllocateInfo, CommandBufferBeginInfo, CommandBufferLevel,
+    CommandBufferUsageFlags, CommandPool, CommandPoolCreateFlags, CommandPoolCreateInfo,
+    CompositeAlphaFlagsKHR, DependencyFlags, DescriptorPool, DescriptorPoolCreateInfo,
+    DescriptorPoolSize, DescriptorSet, DescriptorSetAllocateInfo, DescriptorType, DeviceCreateInfo,
+    DeviceQueueCreateInfo, DeviceQueueInfo2, Extent2D, Fence, FenceCreateFlags, FenceCreateInfo,
+    Format, Framebuffer, FramebufferCreateInfo, Handle, Image, ImageAspectFlags, ImageLayout,
+    ImageMemoryBarrier, ImageSubresourceRange, ImageUsageFlags, ImageView, ImageViewCreateInfo,
+    ImageViewType, InstanceCreateFlags, InstanceCreateInfo, Offset2D, PhysicalDevice,
+    PhysicalDeviceProperties2, PhysicalDeviceType, PhysicalDeviceVulkan12Features,
+    PipelineBindPoint, PipelineStageFlags, PresentInfoKHR, PresentModeKHR, Queue,
+    QueueFamilyProperties2, QueueFlags, Rect2D, RenderPass, RenderPassBeginInfo,
+    RenderPassCreateInfo2, SampleCountFlags, Semaphore, SemaphoreCreateInfo, SharingMode,
+    SubmitInfo, SubpassBeginInfo, SubpassContents, SubpassDependency2, SubpassDescription2,
+    SubpassEndInfo, SurfaceKHR, SwapchainCreateInfoKHR, SwapchainKHR, ValidationFeatureEnableEXT,
+    ValidationFeaturesEXT,
   },
 };
 use gpu_allocator::{
@@ -30,13 +33,16 @@ use gpu_allocator::{
   vulkan::{Allocator, AllocatorCreateDesc},
 };
 use rayon::prelude::*;
-use sdl2::video::Window;
-use std::{cell::RefCell, mem, rc::Rc, sync::mpsc::Sender};
+use sdl2::{EventSubsystem, event::Event, video::Window};
+use std::{
+  cell::RefCell,
+  collections::HashSet,
+  mem,
+  rc::Rc,
+  sync::{Arc, mpsc::Sender},
+};
 
-const MAX_IN_FLIGHT_FRAME_COUNT: u32 = 3;
-const MIN_ALLOC_SIZE: u64 = 4 * 1024 * 1024;
-
-pub struct Engine<'a> {
+pub struct Engine {
   window: Window,
   _entry: Entry,
   instance: Instance,
@@ -45,44 +51,56 @@ pub struct Engine<'a> {
   physical_device: PhysicalDevice,
   graphics_queue_family_index: u32,
   present_queue_family_index: u32,
-  device: Rc<Device>,
+  transfer_queue_family_index: u32,
+  device: Arc<Device>,
   graphics_queue: Queue,
   present_queue: Queue,
+  transfer_queue: Queue,
   swapchain_device: swapchain::Device,
   memory_allocator: Option<Rc<RefCell<Allocator>>>,
-  glyph_batch: Option<GlyphBatch<'a>>,
-  command_pool: CommandPool,
-  command_buffers: Vec<CommandBuffer>,
+  glyph_batch: Option<GlyphBatch>,
+  round_rect_batch: Option<RoundRectBatch>,
+  graphics_command_pool: CommandPool,
+  transfer_command_pool: CommandPool,
+  graphics_command_buffers: Vec<CommandBuffer>,
   descriptor_pool: DescriptorPool,
-  descriptor_set: DescriptorSet,
+  descriptor_sets: Vec<DescriptorSet>,
   image_avail_semaphores: Vec<Semaphore>,
   render_done_semaphores: Vec<Semaphore>,
   in_flight_fences: Vec<Fence>,
   swapchain: SwapchainKHR,
   swapchain_images: Vec<Image>,
   swapchain_image_views: Vec<ImageView>,
+  depth_images: Vec<StaticImage>,
   render_pass: RenderPass,
   swapchain_framebuffers: Vec<Framebuffer>,
   surface_extent: Extent2D,
   frame_index: usize,
   text_ids: SparseVec<Vec<u16>>,
   audio_tx: Sender<AudioReq>,
+  event_subsys: EventSubsystem,
+  text_size: (f32, f32),
 }
 
 pub struct DrawableCaps {
   pub glyph_cap: usize,
+  pub round_rect_cap: usize,
 }
 
 impl Default for DrawableCaps {
   fn default() -> Self {
-    Self { glyph_cap: 3000 }
+    Self {
+      glyph_cap: 3000,
+      round_rect_cap: 100,
+    }
   }
 }
 
-impl<'a> Engine<'a> {
+impl Engine {
   pub(super) fn new(
     window: Window,
     audio_tx: Sender<AudioReq>,
+    event_subsys: EventSubsystem,
     prefer_dgpu: bool,
     drawable_caps: DrawableCaps,
   ) -> Self {
@@ -158,7 +176,12 @@ impl<'a> Engine<'a> {
       vk::KHR_PORTABILITY_SUBSET_NAME,
     ];
 
-    let (physical_device, graphics_queue_family_index, present_queue_family_index) = unsafe {
+    let (
+      physical_device,
+      graphics_queue_family_index,
+      present_queue_family_index,
+      transfer_queue_family_index,
+    ) = unsafe {
       instance
         .enumerate_physical_devices()
         .unwrap()
@@ -188,6 +211,20 @@ impl<'a> Engine<'a> {
             &mut queue_family_properties,
           );
 
+          let (transfer_queue_family_index, _) = queue_family_properties
+            .iter()
+            .enumerate()
+            .filter(|&(_, queue_family_properties)| {
+              queue_family_properties
+                .queue_family_properties
+                .queue_flags
+                .contains(QueueFlags::TRANSFER)
+            })
+            .min_by_key(|&(_, queue_family_properties)| {
+              queue_family_properties.queue_family_properties.queue_flags
+            })
+            .unwrap();
+
           if let Some((queue_family_index, _)) = queue_family_properties.iter().enumerate().find(
             |&(queue_family_index, queue_family_properties)| {
               queue_family_properties
@@ -203,7 +240,12 @@ impl<'a> Engine<'a> {
                   .unwrap()
             },
           ) {
-            return Some((physical_device, queue_family_index, queue_family_index));
+            return Some((
+              physical_device,
+              queue_family_index,
+              queue_family_index,
+              transfer_queue_family_index,
+            ));
           }
 
           let (graphics_queue_family_index, _) =
@@ -235,9 +277,10 @@ impl<'a> Engine<'a> {
             physical_device,
             graphics_queue_family_index,
             present_queue_family_index,
+            transfer_queue_family_index,
           ))
         })
-        .max_by_key(|&(physical_device, _, _)| {
+        .min_by_key(|&(physical_device, _, _, _)| {
           let mut physical_device_properties = PhysicalDeviceProperties2::default();
 
           instance
@@ -246,21 +289,21 @@ impl<'a> Engine<'a> {
           match physical_device_properties.properties.device_type {
             PhysicalDeviceType::INTEGRATED_GPU => {
               if prefer_dgpu {
-                3
+                1
               } else {
-                4
+                0
               }
             }
             PhysicalDeviceType::DISCRETE_GPU => {
               if prefer_dgpu {
-                4
+                0
               } else {
-                3
+                1
               }
             }
             PhysicalDeviceType::VIRTUAL_GPU => 2,
-            PhysicalDeviceType::CPU => 1,
-            _ => 0,
+            PhysicalDeviceType::CPU => 3,
+            _ => 4,
           }
         })
         .unwrap()
@@ -268,21 +311,19 @@ impl<'a> Engine<'a> {
 
     let queue_priorities = [1.0];
 
-    let mut queue_create_infos = vec![DeviceQueueCreateInfo {
-      queue_family_index: graphics_queue_family_index as _,
+    let queue_create_infos = HashSet::<_>::from_iter([
+      graphics_queue_family_index,
+      present_queue_family_index,
+      transfer_queue_family_index,
+    ])
+    .iter()
+    .map(|&queue_family_index| DeviceQueueCreateInfo {
+      queue_family_index: queue_family_index as _,
       queue_count: 1,
       p_queue_priorities: queue_priorities.as_ptr(),
       ..Default::default()
-    }];
-
-    if graphics_queue_family_index != present_queue_family_index {
-      queue_create_infos.push(DeviceQueueCreateInfo {
-        queue_family_index: present_queue_family_index as _,
-        queue_count: 1,
-        p_queue_priorities: queue_priorities.as_ptr(),
-        ..Default::default()
-      });
-    }
+    })
+    .collect::<Vec<_>>();
 
     let enabled_device_exts = StringSlice::from(
       enabled_device_exts
@@ -305,7 +346,7 @@ impl<'a> Engine<'a> {
     };
 
     let device = unsafe {
-      Rc::new(
+      Arc::new(
         instance
           .create_device(physical_device, &device_create_info, None)
           .unwrap(),
@@ -324,8 +365,15 @@ impl<'a> Engine<'a> {
       ..Default::default()
     };
 
+    let transfer_queue_info = DeviceQueueInfo2 {
+      queue_family_index: transfer_queue_family_index as _,
+      queue_index: 0,
+      ..Default::default()
+    };
+
     let graphics_queue = unsafe { device.get_device_queue2(&graphics_queue_info) };
     let present_queue = unsafe { device.get_device_queue2(&present_queue_info) };
+    let transfer_queue = unsafe { device.get_device_queue2(&transfer_queue_info) };
 
     let swapchain_device = swapchain::Device::new(&instance, &device);
 
@@ -336,75 +384,148 @@ impl<'a> Engine<'a> {
         physical_device,
         debug_settings: AllocatorDebugSettings::default(),
         buffer_device_address: true,
-        allocation_sizes: AllocationSizes::new(MIN_ALLOC_SIZE, MIN_ALLOC_SIZE),
+        allocation_sizes: AllocationSizes::new(consts::MIN_ALLOC_SIZE, consts::MIN_ALLOC_SIZE),
       })
       .unwrap(),
     ));
 
+    let graphics_command_pool_create_info = CommandPoolCreateInfo {
+      flags: CommandPoolCreateFlags::TRANSIENT | CommandPoolCreateFlags::RESET_COMMAND_BUFFER,
+      queue_family_index: graphics_queue_family_index as _,
+      ..Default::default()
+    };
+
+    let transfer_command_pool_create_info = CommandPoolCreateInfo {
+      queue_family_index: transfer_queue_family_index as _,
+      ..Default::default()
+    };
+
+    let graphics_command_pool = unsafe {
+      device
+        .create_command_pool(&graphics_command_pool_create_info, None)
+        .unwrap()
+    };
+
+    let transfer_command_pool = unsafe {
+      device
+        .create_command_pool(&transfer_command_pool_create_info, None)
+        .unwrap()
+    };
+
     let glyph_batch = GlyphBatch::new(
       device.clone(),
       memory_allocator.clone(),
+      transfer_command_pool,
       drawable_caps.glyph_cap,
     );
 
-    let command_pool_create_info = CommandPoolCreateInfo {
-      flags: CommandPoolCreateFlags::TRANSIENT | CommandPoolCreateFlags::RESET_COMMAND_BUFFER,
-      queue_family_index: graphics_queue_family_index as _, // Graphics queue family implicitly supports transfer operations
-      ..Default::default()
-    };
+    let round_rect_batch = RoundRectBatch::new(
+      device.clone(),
+      memory_allocator.clone(),
+      drawable_caps.round_rect_cap,
+    );
 
-    let command_pool = unsafe {
-      device
-        .create_command_pool(&command_pool_create_info, None)
-        .unwrap()
-    };
-
-    let command_buffer_alloc_info = CommandBufferAllocateInfo {
-      command_pool,
+    let graphics_command_buffer_alloc_info = CommandBufferAllocateInfo {
+      command_pool: graphics_command_pool,
       level: CommandBufferLevel::PRIMARY,
-      command_buffer_count: MAX_IN_FLIGHT_FRAME_COUNT,
+      command_buffer_count: consts::MAX_IN_FLIGHT_FRAME_COUNT,
       ..Default::default()
     };
 
-    let command_buffers = unsafe {
+    let transfer_command_buffer_alloc_info = CommandBufferAllocateInfo {
+      command_pool: transfer_command_pool,
+      level: CommandBufferLevel::PRIMARY,
+      command_buffer_count: 1,
+      ..Default::default()
+    };
+
+    let graphics_command_buffers = unsafe {
       device
-        .allocate_command_buffers(&command_buffer_alloc_info)
+        .allocate_command_buffers(&graphics_command_buffer_alloc_info)
         .unwrap()
     };
 
-    let command_buffer_begin_info = CommandBufferBeginInfo {
+    let transfer_command_buffer = unsafe {
+      device
+        .allocate_command_buffers(&transfer_command_buffer_alloc_info)
+        .unwrap()[0]
+    };
+
+    let transfer_command_buffer_begin_info = CommandBufferBeginInfo {
       flags: CommandBufferUsageFlags::ONE_TIME_SUBMIT,
       ..Default::default()
     };
 
-    let queue_submit_info = SubmitInfo {
+    let transfer_queue_submit_info = SubmitInfo {
       command_buffer_count: 1,
-      p_command_buffers: command_buffers.as_ptr(),
+      p_command_buffers: &transfer_command_buffer,
       ..Default::default()
     };
 
-    let command_buffer = command_buffers[0];
+    let read_image_memory_barrier = ImageMemoryBarrier {
+      src_access_mask: AccessFlags::empty(),
+      dst_access_mask: AccessFlags::SHADER_READ,
+      old_layout: ImageLayout::UNDEFINED,
+      new_layout: ImageLayout::SHADER_READ_ONLY_OPTIMAL,
+      src_queue_family_index: vk::QUEUE_FAMILY_IGNORED,
+      dst_queue_family_index: vk::QUEUE_FAMILY_IGNORED,
+      image: glyph_batch.icon_atlas.image.images[glyph_batch.icon_atlas.image.image_index],
+      subresource_range: ImageSubresourceRange {
+        aspect_mask: ImageAspectFlags::COLOR,
+        base_mip_level: 0,
+        level_count: 1,
+        base_array_layer: 0,
+        layer_count: 1,
+      },
+      ..Default::default()
+    };
 
     unsafe {
       device
-        .begin_command_buffer(command_buffer, &command_buffer_begin_info)
+        .begin_command_buffer(transfer_command_buffer, &transfer_command_buffer_begin_info)
         .unwrap();
 
-      glyph_batch.record_init_commands(command_buffer);
-      device.end_command_buffer(command_buffer).unwrap();
+      crate::record_copy_buffer_to_image_commands(
+        device.clone(),
+        transfer_command_buffer,
+        glyph_batch.font_atlas.image.staging_buffer,
+        glyph_batch.font_atlas.image.image,
+        &glyph_batch.font_atlas.buffer_image_copies,
+        graphics_queue_family_index as _,
+        transfer_queue_family_index as _,
+        ImageLayout::UNDEFINED,
+      );
+
+      device.cmd_pipeline_barrier(
+        transfer_command_buffer,
+        PipelineStageFlags::TOP_OF_PIPE,
+        PipelineStageFlags::FRAGMENT_SHADER,
+        DependencyFlags::empty(),
+        &[],
+        &[],
+        &[read_image_memory_barrier],
+      );
+
+      device.end_command_buffer(transfer_command_buffer).unwrap();
 
       device
-        .queue_submit(graphics_queue, &[queue_submit_info], Fence::null())
+        .queue_submit(transfer_queue, &[transfer_queue_submit_info], Fence::null())
         .unwrap();
     }
 
-    let descriptor_pool_sizes = [DescriptorPoolSize {
-      ty: DescriptorType::COMBINED_IMAGE_SAMPLER,
-      descriptor_count: 1,
-    }];
+    let descriptor_pool_sizes = [
+      DescriptorPoolSize {
+        ty: DescriptorType::SAMPLER,
+        descriptor_count: 2,
+      },
+      DescriptorPoolSize {
+        ty: DescriptorType::SAMPLED_IMAGE,
+        descriptor_count: 4,
+      },
+    ];
 
     let descriptor_pool_create_info = DescriptorPoolCreateInfo {
-      max_sets: 1,
+      max_sets: 2,
       pool_size_count: descriptor_pool_sizes.len() as _,
       p_pool_sizes: descriptor_pool_sizes.as_ptr(),
       ..Default::default()
@@ -416,25 +537,28 @@ impl<'a> Engine<'a> {
         .unwrap()
     };
 
+    let descriptor_set_layouts =
+      [glyph_batch.descriptor_set_layout; consts::DYNAMIC_IMAGE_COUNT as _];
+
     let descriptor_set_alloc_info = DescriptorSetAllocateInfo {
       descriptor_pool,
-      descriptor_set_count: 1,
-      p_set_layouts: &glyph_batch.descriptor_set_layout,
+      descriptor_set_count: descriptor_set_layouts.len() as _,
+      p_set_layouts: descriptor_set_layouts.as_ptr(),
       ..Default::default()
     };
 
-    let descriptor_set = unsafe {
+    let descriptor_sets = unsafe {
       device
         .allocate_descriptor_sets(&descriptor_set_alloc_info)
-        .unwrap()[0]
+        .unwrap()
     };
 
-    glyph_batch.init_descriptor_set(descriptor_set);
+    glyph_batch.init_descriptor_sets(&descriptor_sets);
 
     let (image_avail_semaphores, (render_done_semaphores, in_flight_fences)): (
       Vec<Semaphore>,
       (Vec<Semaphore>, Vec<Fence>),
-    ) = (0..MAX_IN_FLIGHT_FRAME_COUNT)
+    ) = (0..consts::MAX_IN_FLIGHT_FRAME_COUNT)
       .map(|_| {
         let image_avail_semaphore_create_info = SemaphoreCreateInfo::default();
         let render_done_semaphore_create_info = SemaphoreCreateInfo::default();
@@ -471,35 +595,50 @@ impl<'a> Engine<'a> {
       physical_device,
       graphics_queue_family_index: graphics_queue_family_index as _,
       present_queue_family_index: present_queue_family_index as _,
+      transfer_queue_family_index: transfer_queue_family_index as _,
       device,
       graphics_queue,
       present_queue,
+      transfer_queue,
       swapchain_device,
       glyph_batch: Some(glyph_batch),
+      round_rect_batch: Some(round_rect_batch),
       memory_allocator: Some(memory_allocator),
-      command_pool,
-      command_buffers,
+      graphics_command_pool,
+      transfer_command_pool,
+      graphics_command_buffers,
       descriptor_pool,
-      descriptor_set,
+      descriptor_sets,
       image_avail_semaphores,
       render_done_semaphores,
       in_flight_fences,
       swapchain: SwapchainKHR::null(),
       swapchain_images: vec![],
       swapchain_image_views: vec![],
+      depth_images: vec![],
       render_pass: RenderPass::null(),
       swapchain_framebuffers: vec![],
       surface_extent: Extent2D::default(),
       frame_index: 0,
       text_ids: SparseVec::new(),
       audio_tx,
+      event_subsys,
+      text_size: (0.0, 0.0),
     };
 
     // Create a new swapchain and its dependents during initialization
     this.on_swapchain_suboptimal();
 
+    // After initialized all the Vulkan objects, then only display the window to avoid display black screen during startup
+    this.window.show();
+
     unsafe {
-      this.device.queue_wait_idle(graphics_queue).unwrap();
+      this.device.queue_wait_idle(transfer_queue).unwrap();
+
+      this
+        .device
+        .free_command_buffers(transfer_command_pool, &[transfer_command_buffer]);
+
       let glyph_batch = this.glyph_batch.as_mut().unwrap();
       glyph_batch.font_atlas.image.drop_staging();
     }
@@ -507,9 +646,21 @@ impl<'a> Engine<'a> {
     this
   }
 
+  pub(super) const fn get_text_size(&self) -> (f32, f32) {
+    self.text_size
+  }
+
   pub(super) fn draw(&mut self) {
     unsafe {
-      let command_buffer = self.command_buffers[self.frame_index];
+      let glyph_batch = self.glyph_batch.as_mut().unwrap();
+
+      let drawing_icon_atlas = glyph_batch.icon_atlas.draw(
+        self.transfer_queue,
+        self.graphics_queue_family_index,
+        self.transfer_queue_family_index,
+      );
+
+      let command_buffer = self.graphics_command_buffers[self.frame_index];
       let image_avail_semaphore = self.image_avail_semaphores[self.frame_index];
       let render_done_semaphore = self.render_done_semaphores[self.frame_index];
       let in_flight_fence = self.in_flight_fences[self.frame_index];
@@ -522,7 +673,7 @@ impl<'a> Engine<'a> {
       // If after acquired a swapchain image found that the swapchain is suboptimal, we still proceed to submit command buffer
       // because the swapchain image is already acquired and need to be presented before call on_swapchain_suboptimal()
       // to ensure no swapchain images are holding by draw() forever causing deadlock
-      let (swapchain_image_index, _is_swapchain_suboptimal) =
+      let (swapchain_image_index, _swapchain_suboptimal) =
         match self.swapchain_device.acquire_next_image(
           self.swapchain,
           u64::MAX,
@@ -541,11 +692,19 @@ impl<'a> Engine<'a> {
 
       let swapchain_framebuffer = self.swapchain_framebuffers[swapchain_image_index as usize];
 
-      let clear_value = ClearValue {
-        color: ClearColorValue {
-          float32: [0.0, 0.0, 0.0, 1.0],
+      let clear_values = [
+        ClearValue {
+          color: ClearColorValue {
+            float32: [0.0, 0.0, 0.0, 1.0],
+          },
         },
-      };
+        ClearValue {
+          depth_stencil: ClearDepthStencilValue {
+            depth: 1.0,
+            stencil: 0,
+          },
+        },
+      ];
 
       let render_pass_begin_info = RenderPassBeginInfo {
         render_pass: self.render_pass,
@@ -554,8 +713,8 @@ impl<'a> Engine<'a> {
           offset: Offset2D { x: 0, y: 0 },
           extent: self.surface_extent,
         },
-        clear_value_count: 1,
-        p_clear_values: &clear_value,
+        clear_value_count: clear_values.len() as _,
+        p_clear_values: clear_values.as_ptr(),
         ..Default::default()
       };
 
@@ -565,6 +724,7 @@ impl<'a> Engine<'a> {
       };
 
       let subpass_end_info = SubpassEndInfo::default();
+      let pixel_size = self.window.size().0 as f32 / self.window.vulkan_drawable_size().0 as f32;
 
       self
         .device
@@ -577,11 +737,18 @@ impl<'a> Engine<'a> {
         &subpass_begin_info,
       );
 
-      self.glyph_batch.as_ref().unwrap().record_draw_commands(
+      glyph_batch.record_draw_commands(
         command_buffer,
-        self.descriptor_set,
+        self.descriptor_sets[glyph_batch.icon_atlas.image.image_index],
         self.surface_extent,
+        pixel_size,
       );
+
+      self
+        .round_rect_batch
+        .as_ref()
+        .unwrap()
+        .record_draw_commands(command_buffer, self.surface_extent, pixel_size);
 
       self
         .device
@@ -589,12 +756,24 @@ impl<'a> Engine<'a> {
 
       self.device.end_command_buffer(command_buffer).unwrap();
       self.device.reset_fences(&[in_flight_fence]).unwrap();
-      let wait_dst_stage_mask = PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT;
+
+      let mut wait_semaphores = vec![image_avail_semaphore];
+      let mut wait_dst_stage_mask = vec![PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT];
+
+      if drawing_icon_atlas {
+        wait_semaphores.push(glyph_batch.icon_atlas.image.get_draw_done_semaphore());
+        wait_dst_stage_mask.push(PipelineStageFlags::FRAGMENT_SHADER);
+      }
+
+      glyph_batch
+        .icon_atlas
+        .image
+        .set_render_done_semaphore(render_done_semaphore);
 
       let queue_submit_info = SubmitInfo {
-        wait_semaphore_count: 1,
-        p_wait_semaphores: &image_avail_semaphore,
-        p_wait_dst_stage_mask: &wait_dst_stage_mask,
+        wait_semaphore_count: wait_semaphores.len() as _,
+        p_wait_semaphores: wait_semaphores.as_ptr(),
+        p_wait_dst_stage_mask: wait_dst_stage_mask.as_ptr(),
         command_buffer_count: 1,
         p_command_buffers: &command_buffer,
         signal_semaphore_count: 1,
@@ -697,6 +876,7 @@ impl<'a> Engine<'a> {
       });
 
       self.device.destroy_render_pass(self.render_pass, None);
+      self.depth_images.clear();
 
       self.swapchain_image_views.iter().for_each(|&image_view| {
         self.device.destroy_image_view(image_view, None);
@@ -765,17 +945,49 @@ impl<'a> Engine<'a> {
     }
     .collect::<Vec<_>>();
 
-    let color_attachment_desc = AttachmentDescription2 {
-      format: surface_format.format,
-      samples: SampleCountFlags::TYPE_1,
-      load_op: AttachmentLoadOp::CLEAR,
-      store_op: AttachmentStoreOp::STORE,
-      stencil_load_op: AttachmentLoadOp::DONT_CARE,
-      stencil_store_op: AttachmentStoreOp::DONT_CARE,
-      initial_layout: ImageLayout::UNDEFINED,
-      final_layout: ImageLayout::PRESENT_SRC_KHR,
-      ..Default::default()
-    };
+    let memory_allocator = self.memory_allocator.as_ref().unwrap();
+
+    let depth_images = swapchain_image_views
+      .iter()
+      .enumerate()
+      .map(|(index, _)| {
+        StaticImage::new(
+          self.device.clone(),
+          memory_allocator.clone(),
+          &format!("depth_image_{index}"),
+          Format::D24_UNORM_S8_UINT,
+          (surface_extent.width, surface_extent.height),
+          ImageUsageFlags::DEPTH_STENCIL_ATTACHMENT,
+          ImageAspectFlags::DEPTH,
+          &[],
+        )
+      })
+      .collect::<Vec<_>>();
+
+    let attachment_descs = [
+      AttachmentDescription2 {
+        format: surface_format.format,
+        samples: SampleCountFlags::TYPE_1,
+        load_op: AttachmentLoadOp::CLEAR,
+        store_op: AttachmentStoreOp::STORE,
+        stencil_load_op: AttachmentLoadOp::DONT_CARE,
+        stencil_store_op: AttachmentStoreOp::DONT_CARE,
+        initial_layout: ImageLayout::UNDEFINED,
+        final_layout: ImageLayout::PRESENT_SRC_KHR,
+        ..Default::default()
+      },
+      AttachmentDescription2 {
+        format: Format::D24_UNORM_S8_UINT,
+        samples: SampleCountFlags::TYPE_1,
+        load_op: AttachmentLoadOp::CLEAR,
+        store_op: AttachmentStoreOp::DONT_CARE,
+        stencil_load_op: AttachmentLoadOp::DONT_CARE,
+        stencil_store_op: AttachmentStoreOp::DONT_CARE,
+        initial_layout: ImageLayout::UNDEFINED,
+        final_layout: ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+        ..Default::default()
+      },
+    ];
 
     let color_attachment_ref = AttachmentReference2 {
       attachment: 0,
@@ -783,27 +995,37 @@ impl<'a> Engine<'a> {
       ..Default::default()
     };
 
+    let depth_attachment_ref = AttachmentReference2 {
+      attachment: 1,
+      layout: ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+      ..Default::default()
+    };
+
     let subpass_desc = SubpassDescription2 {
       pipeline_bind_point: PipelineBindPoint::GRAPHICS,
       color_attachment_count: 1,
       p_color_attachments: &color_attachment_ref,
+      p_depth_stencil_attachment: &depth_attachment_ref,
       ..Default::default()
     };
 
     let subpass_dep = SubpassDependency2 {
       src_subpass: vk::SUBPASS_EXTERNAL,
       dst_subpass: 0,
-      src_stage_mask: PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
+      src_stage_mask: PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT
+        | PipelineStageFlags::EARLY_FRAGMENT_TESTS,
       src_access_mask: AccessFlags::empty(),
-      dst_stage_mask: PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
-      dst_access_mask: AccessFlags::COLOR_ATTACHMENT_WRITE,
+      dst_stage_mask: PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT
+        | PipelineStageFlags::EARLY_FRAGMENT_TESTS,
+      dst_access_mask: AccessFlags::COLOR_ATTACHMENT_WRITE
+        | AccessFlags::DEPTH_STENCIL_ATTACHMENT_WRITE,
       dependency_flags: DependencyFlags::BY_REGION,
       ..Default::default()
     };
 
     let render_pass_create_info = RenderPassCreateInfo2 {
-      attachment_count: 1,
-      p_attachments: &color_attachment_desc,
+      attachment_count: attachment_descs.len() as _,
+      p_attachments: attachment_descs.as_ptr(),
       subpass_count: 1,
       p_subpasses: &subpass_desc,
       dependency_count: 1,
@@ -819,16 +1041,21 @@ impl<'a> Engine<'a> {
     };
 
     let glyph_batch = self.glyph_batch.as_mut().unwrap();
+    let round_rect_batch = self.round_rect_batch.as_mut().unwrap();
     glyph_batch.on_swapchain_suboptimal(surface_extent, render_pass);
+    round_rect_batch.on_swapchain_suboptimal(surface_extent, render_pass);
 
     let swapchain_framebuffers = unsafe {
       swapchain_image_views
         .iter()
-        .map(|&image_view| {
+        .zip(depth_images.iter())
+        .map(|(&image_view, depth_image)| {
+          let attachments = [image_view, depth_image.view];
+
           let framebuffer_create_info = FramebufferCreateInfo {
             render_pass,
-            attachment_count: 1,
-            p_attachments: &image_view,
+            attachment_count: attachments.len() as _,
+            p_attachments: attachments.as_ptr(),
             width: surface_extent.width,
             height: surface_extent.height,
             layers: 1,
@@ -846,6 +1073,7 @@ impl<'a> Engine<'a> {
     self.swapchain = swapchain;
     self.swapchain_images = swapchain_images;
     self.swapchain_image_views = swapchain_image_views;
+    self.depth_images = depth_images;
     self.render_pass = render_pass;
     self.swapchain_framebuffers = swapchain_framebuffers;
     self.surface_extent = surface_extent;
@@ -853,6 +1081,14 @@ impl<'a> Engine<'a> {
 
   pub const fn get_audio_tx(&self) -> &Sender<AudioReq> {
     &self.audio_tx
+  }
+
+  pub fn set_camera_position(&mut self, camera_position: (f32, f32)) {
+    self
+      .glyph_batch
+      .as_mut()
+      .unwrap()
+      .set_camera_position(camera_position);
   }
 
   pub fn add_glyph(&mut self, glyph: Glyph) -> u16 {
@@ -867,8 +1103,8 @@ impl<'a> Engine<'a> {
     self.glyph_batch.as_mut().unwrap().update(id, glyph);
   }
 
-  pub fn batch_update_glyphs(&mut self, ids: &[u16], glyphs: Vec<Glyph>) {
-    self.glyph_batch.as_mut().unwrap().batch_update(ids, glyphs);
+  pub fn batch_update_glyphs(&self, ids: &[u16], glyphs: Vec<Glyph>) {
+    self.glyph_batch.as_ref().unwrap().batch_update(ids, glyphs);
   }
 
   pub fn remove_glyph(&mut self, id: u16) -> Glyph {
@@ -895,7 +1131,7 @@ impl<'a> Engine<'a> {
     self.update_glyph(id, rect.into());
   }
 
-  pub fn batch_update_rects(&mut self, ids: &[u16], rects: Vec<Rect>) {
+  pub fn batch_update_rects(&self, ids: &[u16], rects: Vec<Rect>) {
     self.batch_update_glyphs(ids, rects.into_par_iter().map(Into::into).collect());
   }
 
@@ -909,7 +1145,9 @@ impl<'a> Engine<'a> {
 
   pub fn add_text(&mut self, text: Text) -> u16 {
     let glyph_batch = self.glyph_batch.as_ref().unwrap();
-    let ids = self.batch_add_glyphs(text.into_glyphs(&glyph_batch.font_atlas));
+    let glyphs = text.into_glyphs(&glyph_batch.font_atlas);
+    self.text_size = glyphs.text_size;
+    let ids = self.batch_add_glyphs(glyphs.glyphs);
     self.text_ids.push(ids)
   }
 
@@ -917,9 +1155,80 @@ impl<'a> Engine<'a> {
     let glyph_ids = self.text_ids.remove(id);
     self.batch_remove_glyphs(&glyph_ids);
   }
+
+  pub fn add_round_rect(&mut self, round_rect: RoundRect) -> u16 {
+    self.round_rect_batch.as_mut().unwrap().add(round_rect)
+  }
+
+  pub fn update_round_rect(&self, id: u16, round_rect: RoundRect) {
+    self
+      .round_rect_batch
+      .as_ref()
+      .unwrap()
+      .update(id, round_rect);
+  }
+
+  pub fn remove_round_rect(&mut self, id: u16) {
+    self.round_rect_batch.as_mut().unwrap().remove(id);
+  }
+
+  pub fn clear_round_rects(&mut self) {
+    self.round_rect_batch.as_mut().unwrap().clear();
+  }
+
+  pub fn add_icon(&mut self, icon: Icon) -> u16 {
+    let glyph_batch = self.glyph_batch.as_mut().unwrap();
+    let glyph = icon.into_glyph(&mut glyph_batch.icon_atlas);
+    self.add_glyph(glyph)
+  }
+
+  pub fn update_icon(&mut self, id: u16, icon: Icon) {
+    let glyph_batch = self.glyph_batch.as_mut().unwrap();
+    let glyph = icon.into_glyph(&mut glyph_batch.icon_atlas);
+    self.update_glyph(id, glyph);
+  }
+
+  pub fn remove_icon(&mut self, id: u16) {
+    self.remove_glyph(id);
+  }
+
+  pub fn batch_add_icons(&mut self, icons: Vec<Icon>) -> Vec<u16> {
+    let glyph_batch = self.glyph_batch.as_mut().unwrap();
+
+    let glyphs = icons
+      .into_iter()
+      .map(|icon| icon.into_glyph(&mut glyph_batch.icon_atlas))
+      .collect();
+
+    self.batch_add_glyphs(glyphs)
+  }
+
+  pub fn batch_update_icons(&mut self, ids: &[u16], icons: Vec<Icon>) {
+    let glyph_batch = self.glyph_batch.as_mut().unwrap();
+
+    let glyphs = icons
+      .into_iter()
+      .map(|icon| icon.into_glyph(&mut glyph_batch.icon_atlas))
+      .collect();
+
+    self.batch_update_glyphs(ids, glyphs);
+  }
+
+  pub fn batch_remove_icons(&mut self, ids: &[u16]) {
+    self.batch_remove_glyphs(ids);
+  }
+
+  pub fn clear(&mut self) {
+    self.clear_glyphs();
+    self.clear_round_rects();
+  }
+
+  pub fn send_event(&self, event: Event) {
+    self.event_subsys.push_event(event).unwrap();
+  }
 }
 
-impl Drop for Engine<'_> {
+impl Drop for Engine {
   fn drop(&mut self) {
     unsafe {
       self.device.device_wait_idle().unwrap();
@@ -940,7 +1249,15 @@ impl Drop for Engine<'_> {
         .device
         .destroy_descriptor_pool(self.descriptor_pool, None);
 
-      self.device.destroy_command_pool(self.command_pool, None);
+      self
+        .device
+        .destroy_command_pool(self.transfer_command_pool, None);
+
+      self
+        .device
+        .destroy_command_pool(self.graphics_command_pool, None);
+
+      drop(mem::take(&mut self.round_rect_batch));
       drop(mem::take(&mut self.glyph_batch));
       drop(mem::take(&mut self.memory_allocator));
       self.device.destroy_render_pass(self.render_pass, None);
@@ -948,6 +1265,8 @@ impl Drop for Engine<'_> {
       self.swapchain_framebuffers.iter().for_each(|&framebuffer| {
         self.device.destroy_framebuffer(framebuffer, None);
       });
+
+      self.depth_images.clear();
 
       self.swapchain_image_views.iter().for_each(|&image_view| {
         self.device.destroy_image_view(image_view, None);

@@ -1,0 +1,24 @@
+[package]
+name = "flut_macro"
+version = "0.1.0"
+edition = "2024"
+publish = false
+repository = "https://github.com/ii887522/flut"
+rust-version = "1.85"
+
+[profile.dev]
+split-debuginfo = "packed"
+
+[profile.release]
+codegen-units = 1
+lto = true
+panic = "abort"
+split-debuginfo = "packed"
+strip = true
+
+[lib]
+proc-macro = true
+
+[dependencies]
+syn = { version = "2.0", default-features = false }
+quote = { version = "1.0" }

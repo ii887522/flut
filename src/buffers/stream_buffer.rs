@@ -9,17 +9,17 @@ use gpu_allocator::{
   MemoryLocation,
   vulkan::{Allocation, AllocationCreateDesc, AllocationScheme, Allocator},
 };
-use std::{cell::RefCell, rc::Rc};
+use std::{cell::RefCell, rc::Rc, sync::Arc};
 
 pub(crate) struct StreamBuffer {
-  device: Rc<Device>,
+  device: Arc<Device>,
   pub(crate) buffer: Buffer,
   pub(crate) alloc: Allocation,
 }
 
 impl StreamBuffer {
   pub(crate) fn new(
-    device: Rc<Device>,
+    device: Arc<Device>,
     memory_allocator: Rc<RefCell<Allocator>>,
     name: &str,
     size: u64,

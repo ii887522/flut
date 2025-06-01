@@ -1,4 +1,3 @@
-use core::panic;
 use shaderc::{OptimizationLevel, ShaderKind};
 use std::fs;
 
@@ -27,7 +26,7 @@ fn main() {
     let shader_kind = match glsl_file_ext {
       "frag" => ShaderKind::Fragment,
       "vert" => ShaderKind::Vertex,
-      file_ext => panic!("Unknown shader type: {}", file_ext),
+      file_ext => unimplemented!("Unknown shader type: {}", file_ext),
     };
 
     let spirv_code = compiler

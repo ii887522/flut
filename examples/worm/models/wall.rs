@@ -16,9 +16,10 @@ impl From<Wall> for Rect {
         (consts::WORLD_POSITION.1
           + (wall.position / consts::GRID_SIZE.0) * (consts::CELL_SIZE.1 + consts::GAP_SIZE.1))
           as _,
+        1.0,
       ),
       (consts::CELL_SIZE.0 as _, consts::CELL_SIZE.1 as _),
-      (255, 0, 0),
+      (255, 0, 0, 255),
     )
   }
 }

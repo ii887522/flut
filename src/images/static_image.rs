@@ -2,20 +2,20 @@ use ash::{
   Device,
   vk::{
     BindBufferMemoryInfo, BindImageMemoryInfo, Buffer, BufferCreateInfo,
-    BufferMemoryRequirementsInfo2, BufferUsageFlags, Extent3D, Format, Image, ImageAspectFlags,
-    ImageCreateInfo, ImageLayout, ImageMemoryRequirementsInfo2, ImageSubresourceRange, ImageTiling,
-    ImageType, ImageUsageFlags, ImageView, ImageViewCreateInfo, ImageViewType, MemoryRequirements2,
-    SampleCountFlags, SharingMode,
+    BufferMemoryRequirementsInfo2, BufferUsageFlags, Extent3D, Format, Handle, Image,
+    ImageAspectFlags, ImageCreateInfo, ImageLayout, ImageMemoryRequirementsInfo2,
+    ImageSubresourceRange, ImageTiling, ImageType, ImageUsageFlags, ImageView, ImageViewCreateInfo,
+    ImageViewType, MemoryRequirements2, SampleCountFlags, SharingMode,
   },
 };
 use gpu_allocator::{
   MemoryLocation,
   vulkan::{Allocation, AllocationCreateDesc, AllocationScheme, Allocator},
 };
-use std::{cell::RefCell, mem, ptr, rc::Rc};
+use std::{cell::RefCell, mem, ptr, rc::Rc, sync::Arc};
 
 pub(crate) struct StaticImage {
-  device: Rc<Device>,
+  device: Arc<Device>,
   memory_allocator: Rc<RefCell<Allocator>>,
   pub(crate) staging_buffer: Buffer,
   staging_alloc: Allocation,
@@ -26,66 +26,83 @@ pub(crate) struct StaticImage {
 
 impl StaticImage {
   pub(crate) fn new(
-    device: Rc<Device>,
+    device: Arc<Device>,
     memory_allocator: Rc<RefCell<Allocator>>,
     name: &str,
     format: Format,
     size: (u32, u32),
     usage: ImageUsageFlags,
+    aspect_mask: ImageAspectFlags,
     data: &[u8],
   ) -> Self {
-    let staging_buffer_create_info = BufferCreateInfo {
-      size: mem::size_of_val(data) as _,
-      usage: BufferUsageFlags::TRANSFER_SRC,
-      sharing_mode: SharingMode::EXCLUSIVE,
-      ..Default::default()
+    let (staging_buffer, staging_alloc, usage) = if data.is_empty() {
+      (Buffer::null(), Allocation::default(), usage)
+    } else {
+      let staging_buffer_create_info = BufferCreateInfo {
+        size: mem::size_of_val(data) as _,
+        usage: BufferUsageFlags::TRANSFER_SRC,
+        sharing_mode: SharingMode::EXCLUSIVE,
+        ..Default::default()
+      };
+
+      let staging_buffer = unsafe {
+        device
+          .create_buffer(&staging_buffer_create_info, None)
+          .unwrap()
+      };
+
+      let staging_buffer_mem_req_info = BufferMemoryRequirementsInfo2 {
+        buffer: staging_buffer,
+        ..Default::default()
+      };
+
+      let mut staging_buffer_mem_req = MemoryRequirements2::default();
+
+      unsafe {
+        device.get_buffer_memory_requirements2(
+          &staging_buffer_mem_req_info,
+          &mut staging_buffer_mem_req,
+        );
+      }
+
+      let staging_alloc = memory_allocator
+        .borrow_mut()
+        .allocate(&AllocationCreateDesc {
+          name: &format!("staging_{name}"),
+          requirements: staging_buffer_mem_req.memory_requirements,
+          location: MemoryLocation::CpuToGpu,
+          linear: true,
+          allocation_scheme: AllocationScheme::DedicatedBuffer(staging_buffer),
+        })
+        .unwrap();
+
+      let bind_staging_buffer_mem_info = BindBufferMemoryInfo {
+        buffer: staging_buffer,
+        memory: unsafe { staging_alloc.memory() },
+        memory_offset: staging_alloc.offset(),
+        ..Default::default()
+      };
+
+      let mapped_staging_alloc = staging_alloc.mapped_ptr().unwrap();
+
+      unsafe {
+        ptr::copy_nonoverlapping(
+          data.as_ptr(),
+          mapped_staging_alloc.as_ptr() as *mut _,
+          data.len(),
+        );
+
+        device
+          .bind_buffer_memory2(&[bind_staging_buffer_mem_info])
+          .unwrap();
+      }
+
+      (
+        staging_buffer,
+        staging_alloc,
+        ImageUsageFlags::TRANSFER_DST | usage,
+      )
     };
-
-    let staging_buffer = unsafe {
-      device
-        .create_buffer(&staging_buffer_create_info, None)
-        .unwrap()
-    };
-
-    let staging_buffer_mem_req_info = BufferMemoryRequirementsInfo2 {
-      buffer: staging_buffer,
-      ..Default::default()
-    };
-
-    let mut staging_buffer_mem_req = MemoryRequirements2::default();
-
-    unsafe {
-      device
-        .get_buffer_memory_requirements2(&staging_buffer_mem_req_info, &mut staging_buffer_mem_req);
-    }
-
-    let staging_alloc = memory_allocator
-      .borrow_mut()
-      .allocate(&AllocationCreateDesc {
-        name: &format!("staging_{name}"),
-        requirements: staging_buffer_mem_req.memory_requirements,
-        location: MemoryLocation::CpuToGpu,
-        linear: true,
-        allocation_scheme: AllocationScheme::DedicatedBuffer(staging_buffer),
-      })
-      .unwrap();
-
-    let bind_staging_buffer_mem_info = BindBufferMemoryInfo {
-      buffer: staging_buffer,
-      memory: unsafe { staging_alloc.memory() },
-      memory_offset: staging_alloc.offset(),
-      ..Default::default()
-    };
-
-    let mapped_staging_alloc = staging_alloc.mapped_ptr().unwrap();
-
-    unsafe {
-      ptr::copy_nonoverlapping(
-        data.as_ptr(),
-        mapped_staging_alloc.as_ptr() as *mut _,
-        data.len(),
-      );
-    }
 
     let image_create_info = ImageCreateInfo {
       image_type: ImageType::TYPE_2D,
@@ -99,7 +116,7 @@ impl StaticImage {
       array_layers: 1,
       samples: SampleCountFlags::TYPE_1,
       tiling: ImageTiling::OPTIMAL,
-      usage: ImageUsageFlags::TRANSFER_DST | usage,
+      usage,
       sharing_mode: SharingMode::EXCLUSIVE,
       initial_layout: ImageLayout::UNDEFINED,
       ..Default::default()
@@ -137,10 +154,6 @@ impl StaticImage {
     };
 
     unsafe {
-      device
-        .bind_buffer_memory2(&[bind_staging_buffer_mem_info])
-        .unwrap();
-
       device.bind_image_memory2(&[bind_image_mem_info]).unwrap();
     }
 
@@ -149,7 +162,7 @@ impl StaticImage {
       view_type: ImageViewType::TYPE_2D,
       format,
       subresource_range: ImageSubresourceRange {
-        aspect_mask: ImageAspectFlags::COLOR,
+        aspect_mask,
         base_mip_level: 0,
         level_count: 1,
         base_array_layer: 0,
@@ -176,6 +189,10 @@ impl StaticImage {
   }
 
   pub(crate) fn drop_staging(&mut self) {
+    if self.staging_buffer.is_null() {
+      return;
+    }
+
     unsafe {
       self.device.destroy_buffer(self.staging_buffer, None);
     }

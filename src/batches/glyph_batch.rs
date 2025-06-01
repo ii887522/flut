@@ -1,60 +1,66 @@
 use crate::{
-  buffers::StreamBuffer,
-  collections::SparseVec,
-  font_atlas::FontAtlas,
+  atlases::{FontAtlas, IconAtlas},
+  batch::Batch,
   models::Glyph,
-  pipelines::{GlyphPipeline, GlyphPushConstant},
-  shaders::{GlyphFragShader, GlyphVertShader},
 };
 use ash::{
   Device,
   vk::{
-    self, AccessFlags, BufferDeviceAddressInfo, BufferUsageFlags, CommandBuffer, DependencyFlags,
-    DescriptorImageInfo, DescriptorSet, DescriptorSetLayout, DescriptorSetLayoutBinding,
-    DescriptorSetLayoutCreateInfo, DescriptorType, DeviceAddress, Extent2D, ImageAspectFlags,
-    ImageLayout, ImageMemoryBarrier, ImageSubresourceRange, PipelineBindPoint, PipelineLayout,
-    PipelineLayoutCreateInfo, PipelineStageFlags, PushConstantRange, RenderPass, ShaderStageFlags,
-    WriteDescriptorSet,
+    self, BorderColor, CommandBuffer, CommandPool, DescriptorImageInfo, DescriptorSet,
+    DescriptorSetLayout, DescriptorSetLayoutBinding, DescriptorSetLayoutCreateInfo, DescriptorType,
+    DeviceAddress, Extent2D, Filter, ImageLayout, RenderPass, Sampler, SamplerAddressMode,
+    SamplerCreateInfo, SamplerMipmapMode, ShaderStageFlags, WriteDescriptorSet,
   },
 };
-use atomic_refcell::AtomicRefCell;
 use gpu_allocator::vulkan::Allocator;
-use rayon::prelude::*;
-use std::{cell::RefCell, mem, ptr, rc::Rc};
+use std::{cell::RefCell, rc::Rc, sync::Arc};
 
-pub(crate) struct GlyphBatch<'a> {
-  device: Rc<Device>,
-  vert_shader: GlyphVertShader<'a>,
-  frag_shader: GlyphFragShader<'a>,
-  pub(crate) descriptor_set_layout: DescriptorSetLayout,
-  pipeline_layout: PipelineLayout,
-  pub(crate) mesh_buffer: StreamBuffer,
+#[repr(C, align(8))]
+#[derive(Clone, Copy)]
+struct PushConstant {
+  camera_position: (f32, f32),
+  camera_size: (f32, f32),
+  pixel_size: f32,
+  pad: f32,
   mesh_buffer_addr: DeviceAddress,
-  pub(crate) font_atlas: FontAtlas,
-  pub(crate) pipeline: Option<GlyphPipeline>,
-  glyphs: SparseVec<Glyph>,
 }
 
-impl GlyphBatch<'_> {
+pub(crate) struct GlyphBatch {
+  batch: Batch<Glyph>,
+  pub(crate) descriptor_set_layout: DescriptorSetLayout,
+  sampler: Sampler,
+  pub(crate) font_atlas: FontAtlas,
+  pub(crate) icon_atlas: IconAtlas,
+  camera_position: (f32, f32),
+}
+
+impl GlyphBatch {
   pub(crate) fn new(
-    device: Rc<Device>,
+    device: Arc<Device>,
     memory_allocator: Rc<RefCell<Allocator>>,
+    transfer_command_pool: CommandPool,
     cap: usize,
   ) -> Self {
-    let vert_shader = GlyphVertShader::new(device.clone());
-    let frag_shader = GlyphFragShader::new(device.clone());
-
-    let sampler_layout_binding = DescriptorSetLayoutBinding {
-      binding: 0,
-      descriptor_type: DescriptorType::COMBINED_IMAGE_SAMPLER,
-      descriptor_count: 1,
-      stage_flags: ShaderStageFlags::FRAGMENT,
-      ..Default::default()
-    };
+    let layout_bindings = [
+      DescriptorSetLayoutBinding {
+        binding: 0,
+        descriptor_type: DescriptorType::SAMPLER,
+        descriptor_count: 1,
+        stage_flags: ShaderStageFlags::FRAGMENT,
+        ..Default::default()
+      },
+      DescriptorSetLayoutBinding {
+        binding: 1,
+        descriptor_type: DescriptorType::SAMPLED_IMAGE,
+        descriptor_count: 2,
+        stage_flags: ShaderStageFlags::FRAGMENT,
+        ..Default::default()
+      },
+    ];
 
     let descriptor_set_layout_create_info = DescriptorSetLayoutCreateInfo {
-      binding_count: 1,
-      p_bindings: &sampler_layout_binding,
+      binding_count: layout_bindings.len() as _,
+      p_bindings: layout_bindings.as_ptr(),
       ..Default::default()
     };
 
@@ -64,86 +70,121 @@ impl GlyphBatch<'_> {
         .unwrap()
     };
 
-    let push_const_range = PushConstantRange {
-      stage_flags: ShaderStageFlags::VERTEX,
-      size: mem::size_of::<GlyphPushConstant>() as _,
-      ..Default::default()
-    };
-
-    let pipeline_layout_create_info = PipelineLayoutCreateInfo {
-      set_layout_count: 1,
-      p_set_layouts: &descriptor_set_layout,
-      push_constant_range_count: 1,
-      p_push_constant_ranges: &push_const_range,
-      ..Default::default()
-    };
-
-    let pipeline_layout = unsafe {
-      device
-        .create_pipeline_layout(&pipeline_layout_create_info, None)
-        .unwrap()
-    };
-
-    let mesh_buffer = StreamBuffer::new(
+    let batch = Batch::new::<PushConstant>(
       device.clone(),
       memory_allocator.clone(),
-      "glyph_mesh_buffer",
-      (cap * mem::size_of::<Glyph>()) as _,
-      BufferUsageFlags::STORAGE_BUFFER | BufferUsageFlags::SHADER_DEVICE_ADDRESS,
+      cap,
+      include_bytes!("../../target/shaders/glyph.vert.spv"),
+      include_bytes!("../../target/shaders/glyph.frag.spv"),
+      &[descriptor_set_layout],
+      "glyph_buffer",
     );
 
-    let mesh_buffer_addr_info = BufferDeviceAddressInfo {
-      buffer: mesh_buffer.buffer,
+    let sampler_create_info = SamplerCreateInfo {
+      mag_filter: Filter::LINEAR,
+      min_filter: Filter::LINEAR,
+      mipmap_mode: SamplerMipmapMode::NEAREST,
+      address_mode_u: SamplerAddressMode::CLAMP_TO_BORDER,
+      address_mode_v: SamplerAddressMode::CLAMP_TO_BORDER,
+      address_mode_w: SamplerAddressMode::CLAMP_TO_BORDER,
+      mip_lod_bias: 0.0,
+      anisotropy_enable: vk::FALSE,
+      compare_enable: vk::FALSE,
+      border_color: BorderColor::FLOAT_OPAQUE_WHITE,
+      unnormalized_coordinates: vk::TRUE,
       ..Default::default()
     };
 
-    let mesh_buffer_addr = unsafe { device.get_buffer_device_address(&mesh_buffer_addr_info) };
+    let sampler = unsafe { device.create_sampler(&sampler_create_info, None).unwrap() };
 
     let font_atlas = FontAtlas::new(
       device.clone(),
       memory_allocator.clone(),
       "assets/fonts/arial.ttf",
       48,
-      '0'..='9',
-      (256, 256),
+      ' '..='~',
+      (512, 512),
+    );
+
+    let icon_atlas = IconAtlas::new(
+      device,
+      memory_allocator,
+      transfer_command_pool,
+      "assets/fonts/MaterialSymbolsOutlined-Regular.ttf",
+      64,
+      (1024, 1024),
     );
 
     Self {
-      device,
-      vert_shader,
-      frag_shader,
+      batch,
       descriptor_set_layout,
-      pipeline_layout,
-      mesh_buffer,
-      mesh_buffer_addr,
+      sampler,
       font_atlas,
-      pipeline: None,
-      glyphs: SparseVec::with_capacity(cap),
+      icon_atlas,
+      camera_position: (0.0, 0.0),
     }
   }
 
-  pub(crate) fn init_descriptor_set(&self, descriptor_set: DescriptorSet) {
-    let descriptor_image_info = DescriptorImageInfo {
-      sampler: self.frag_shader.sampler,
-      image_view: self.font_atlas.image.view,
-      image_layout: ImageLayout::SHADER_READ_ONLY_OPTIMAL,
-    };
-
-    let image_descriptor_set_write = WriteDescriptorSet {
-      dst_set: descriptor_set,
-      dst_binding: 0,
-      dst_array_element: 0,
-      descriptor_count: 1,
-      descriptor_type: DescriptorType::COMBINED_IMAGE_SAMPLER,
-      p_image_info: &descriptor_image_info,
+  pub(crate) fn init_descriptor_sets(&self, descriptor_sets: &[DescriptorSet]) {
+    let descriptor_sampler_info = DescriptorImageInfo {
+      sampler: self.sampler,
       ..Default::default()
     };
 
+    let descriptor_image_infos = self
+      .icon_atlas
+      .image
+      .views
+      .iter()
+      .map(|&icon_image_view| {
+        [
+          DescriptorImageInfo {
+            image_view: self.font_atlas.image.view,
+            image_layout: ImageLayout::SHADER_READ_ONLY_OPTIMAL,
+            ..Default::default()
+          },
+          DescriptorImageInfo {
+            image_view: icon_image_view,
+            image_layout: ImageLayout::SHADER_READ_ONLY_OPTIMAL,
+            ..Default::default()
+          },
+        ]
+      })
+      .collect::<Vec<_>>();
+
+    let descriptor_writes = descriptor_image_infos
+      .iter()
+      .zip(descriptor_sets.iter())
+      .flat_map(|(descriptor_image_infos, &descriptor_set)| {
+        [
+          WriteDescriptorSet {
+            dst_set: descriptor_set,
+            dst_binding: 0,
+            dst_array_element: 0,
+            descriptor_count: 1,
+            descriptor_type: DescriptorType::SAMPLER,
+            p_image_info: &descriptor_sampler_info,
+            ..Default::default()
+          },
+          WriteDescriptorSet {
+            dst_set: descriptor_set,
+            dst_binding: 1,
+            dst_array_element: 0,
+            descriptor_count: descriptor_image_infos.len() as _,
+            descriptor_type: DescriptorType::SAMPLED_IMAGE,
+            p_image_info: descriptor_image_infos.as_ptr(),
+            ..Default::default()
+          },
+        ]
+      })
+      .collect::<Vec<_>>();
+
     unsafe {
       self
+        .batch
         .device
-        .update_descriptor_sets(&[image_descriptor_set_write], &[])
-    };
+        .update_descriptor_sets(&descriptor_writes, &[]);
+    }
   }
 
   pub(crate) fn on_swapchain_suboptimal(
@@ -151,86 +192,9 @@ impl GlyphBatch<'_> {
     surface_extent: Extent2D,
     render_pass: RenderPass,
   ) {
-    let glyph_pipeline = GlyphPipeline::new(
-      self.device.clone(),
-      surface_extent,
-      &self.vert_shader,
-      &self.frag_shader,
-      self.pipeline_layout,
-      render_pass,
-      self.pipeline.as_ref(),
-    );
-
-    drop(mem::take(&mut self.pipeline));
-    self.pipeline = Some(glyph_pipeline);
-  }
-
-  pub(crate) fn record_init_commands(&self, command_buffer: CommandBuffer) {
-    let write_image_memory_barrier = ImageMemoryBarrier {
-      src_access_mask: AccessFlags::NONE,
-      dst_access_mask: AccessFlags::TRANSFER_WRITE,
-      old_layout: ImageLayout::UNDEFINED,
-      new_layout: ImageLayout::TRANSFER_DST_OPTIMAL,
-      src_queue_family_index: vk::QUEUE_FAMILY_IGNORED,
-      dst_queue_family_index: vk::QUEUE_FAMILY_IGNORED,
-      image: self.font_atlas.image.image,
-      subresource_range: ImageSubresourceRange {
-        aspect_mask: ImageAspectFlags::COLOR,
-        base_mip_level: 0,
-        level_count: 1,
-        base_array_layer: 0,
-        layer_count: 1,
-      },
-      ..Default::default()
-    };
-
-    let read_image_memory_barrier = ImageMemoryBarrier {
-      src_access_mask: AccessFlags::TRANSFER_WRITE,
-      dst_access_mask: AccessFlags::SHADER_READ,
-      old_layout: ImageLayout::TRANSFER_DST_OPTIMAL,
-      new_layout: ImageLayout::SHADER_READ_ONLY_OPTIMAL,
-      src_queue_family_index: vk::QUEUE_FAMILY_IGNORED,
-      dst_queue_family_index: vk::QUEUE_FAMILY_IGNORED,
-      image: self.font_atlas.image.image,
-      subresource_range: ImageSubresourceRange {
-        aspect_mask: ImageAspectFlags::COLOR,
-        base_mip_level: 0,
-        level_count: 1,
-        base_array_layer: 0,
-        layer_count: 1,
-      },
-      ..Default::default()
-    };
-
-    unsafe {
-      self.device.cmd_pipeline_barrier(
-        command_buffer,
-        PipelineStageFlags::TOP_OF_PIPE,
-        PipelineStageFlags::TRANSFER,
-        DependencyFlags::empty(),
-        &[],
-        &[],
-        &[write_image_memory_barrier],
-      );
-
-      self.device.cmd_copy_buffer_to_image(
-        command_buffer,
-        self.font_atlas.image.staging_buffer,
-        self.font_atlas.image.image,
-        ImageLayout::TRANSFER_DST_OPTIMAL,
-        &self.font_atlas.buffer_image_copies,
-      );
-
-      self.device.cmd_pipeline_barrier(
-        command_buffer,
-        PipelineStageFlags::TRANSFER,
-        PipelineStageFlags::FRAGMENT_SHADER,
-        DependencyFlags::empty(),
-        &[],
-        &[],
-        &[read_image_memory_barrier],
-      );
-    }
+    self
+      .batch
+      .on_swapchain_suboptimal(surface_extent, render_pass);
   }
 
   pub(crate) fn record_draw_commands(
@@ -238,172 +202,61 @@ impl GlyphBatch<'_> {
     command_buffer: CommandBuffer,
     descriptor_set: DescriptorSet,
     surface_extent: Extent2D,
+    pixel_size: f32,
   ) {
-    if self.glyphs.is_empty() {
-      return;
-    }
-
-    let glyph_push_const = GlyphPushConstant {
+    let push_const = PushConstant {
+      camera_position: self.camera_position,
       camera_size: (surface_extent.width as _, surface_extent.height as _),
-      mesh_buffer_addr: self.mesh_buffer_addr,
+      pixel_size,
+      pad: 0.0,
+      mesh_buffer_addr: self.batch.mesh_buffer_addr,
     };
 
-    let pipeline = self.pipeline.as_ref().unwrap();
+    self
+      .batch
+      .record_draw_commands(command_buffer, &[descriptor_set], push_const);
+  }
 
-    unsafe {
-      self.device.cmd_bind_pipeline(
-        command_buffer,
-        PipelineBindPoint::GRAPHICS,
-        pipeline.pipeline,
-      );
-
-      self.device.cmd_bind_descriptor_sets(
-        command_buffer,
-        PipelineBindPoint::GRAPHICS,
-        self.pipeline_layout,
-        0,
-        &[descriptor_set],
-        &[],
-      );
-
-      self.device.cmd_push_constants(
-        command_buffer,
-        self.pipeline_layout,
-        ShaderStageFlags::VERTEX,
-        0,
-        crate::as_bytes(&glyph_push_const),
-      );
-
-      self
-        .device
-        .cmd_draw(command_buffer, (6 * self.glyphs.len()) as _, 1, 0, 0);
-    }
+  pub(crate) fn set_camera_position(&mut self, camera_position: (f32, f32)) {
+    self.camera_position = camera_position;
   }
 
   pub(crate) fn add(&mut self, glyph: Glyph) -> u16 {
-    let mapped_mesh_alloc = self.mesh_buffer.alloc.mapped_ptr().unwrap();
-
-    unsafe {
-      ptr::copy_nonoverlapping(
-        &glyph,
-        (mapped_mesh_alloc.as_ptr() as *mut Glyph).add(self.glyphs.len()),
-        1,
-      );
-    }
-
-    self.glyphs.push(glyph)
+    self.batch.add(glyph)
   }
 
   pub(crate) fn batch_add(&mut self, glyphs: Vec<Glyph>) -> Vec<u16> {
-    let mapped_mesh_alloc = self.mesh_buffer.alloc.mapped_ptr().unwrap();
-
-    unsafe {
-      ptr::copy_nonoverlapping(
-        glyphs.as_ptr(),
-        (mapped_mesh_alloc.as_ptr() as *mut Glyph).add(self.glyphs.len()),
-        glyphs.len(),
-      );
-    }
-
-    self.glyphs.par_extend(glyphs)
+    self.batch.batch_add(glyphs)
   }
 
   pub(crate) fn update(&mut self, id: u16, glyph: Glyph) {
-    let mapped_mesh_alloc = self.mesh_buffer.alloc.mapped_ptr().unwrap();
-
-    unsafe {
-      ptr::copy_nonoverlapping(
-        &glyph,
-        (mapped_mesh_alloc.as_ptr() as *mut Glyph).add(self.glyphs.get_dense_index(id) as _),
-        1,
-      );
-    }
-
-    self.glyphs[id] = AtomicRefCell::new(glyph);
+    self.batch.update(id, glyph);
   }
 
-  pub(crate) fn batch_update(&mut self, ids: &[u16], glyphs: Vec<Glyph>) {
-    ids
-      .par_iter()
-      .zip(glyphs.par_iter())
-      .for_each(|(&id, glyph)| unsafe {
-        let mapped_mesh_alloc = self.mesh_buffer.alloc.mapped_ptr().unwrap();
-
-        ptr::copy_nonoverlapping(
-          glyph,
-          (mapped_mesh_alloc.as_ptr() as *mut Glyph).add(self.glyphs.get_dense_index(id) as _),
-          1,
-        );
-      });
-
-    self.glyphs.par_set(ids, glyphs);
+  pub(crate) fn batch_update(&self, ids: &[u16], glyphs: Vec<Glyph>) {
+    self.batch.batch_update(ids, glyphs);
   }
 
   pub(crate) fn remove(&mut self, id: u16) -> Glyph {
-    let index = self.glyphs.get_dense_index(id);
-    let result = self.glyphs.remove(id);
-
-    let Some(glyph) = self.glyphs.get_by_dense_index(index) else {
-      return result;
-    };
-
-    let glyph = glyph.borrow();
-    let mapped_mesh_alloc = self.mesh_buffer.alloc.mapped_ptr().unwrap();
-
-    unsafe {
-      ptr::copy_nonoverlapping(
-        &*glyph,
-        (mapped_mesh_alloc.as_ptr() as *mut Glyph).add(index as _),
-        1,
-      );
-    }
-
-    result
+    self.batch.remove(id)
   }
 
   pub(crate) fn batch_remove(&mut self, ids: &[u16]) {
-    let indices = ids
-      .par_iter()
-      .map(|&id| self.glyphs.get_dense_index(id))
-      .collect::<Vec<_>>();
-
-    self.glyphs.par_remove(ids);
-
-    indices
-      .into_par_iter()
-      .filter_map(|index| {
-        self
-          .glyphs
-          .get_by_dense_index(index)
-          .map(|glyph| (index, glyph))
-      })
-      .for_each(|(index, glyph)| {
-        let glyph = glyph.borrow();
-        let mapped_mesh_alloc = self.mesh_buffer.alloc.mapped_ptr().unwrap();
-
-        unsafe {
-          ptr::copy_nonoverlapping(
-            &*glyph,
-            (mapped_mesh_alloc.as_ptr() as *mut Glyph).add(index as _),
-            1,
-          );
-        }
-      });
+    self.batch.batch_remove(ids);
   }
 
   pub(crate) fn clear(&mut self) {
-    self.glyphs.clear();
+    self.batch.clear();
   }
 }
 
-impl Drop for GlyphBatch<'_> {
+impl Drop for GlyphBatch {
   fn drop(&mut self) {
     unsafe {
-      self
-        .device
-        .destroy_pipeline_layout(self.pipeline_layout, None);
+      self.batch.device.destroy_sampler(self.sampler, None);
 
       self
+        .batch
         .device
         .destroy_descriptor_set_layout(self.descriptor_set_layout, None);
     }

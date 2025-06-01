@@ -1,4 +1,4 @@
-use crate::{images::StaticImage, models::GlyphMetrics};
+use crate::{consts, images::StaticImage, models::GlyphMetrics};
 use ash::{
   Device,
   vk::{
@@ -8,27 +8,29 @@ use ash::{
 };
 use gpu_allocator::vulkan::Allocator;
 use rayon::prelude::*;
-use sdl2::{pixels::Color, ttf};
-use std::{cell::RefCell, collections::HashMap, ops::RangeInclusive, rc::Rc};
+use sdl2::pixels::Color;
+use std::{cell::RefCell, collections::HashMap, ops::RangeInclusive, rc::Rc, sync::Arc};
 
-pub(super) struct FontAtlas {
-  pub(super) image: StaticImage,
-  pub(super) buffer_image_copies: Vec<BufferImageCopy>,
+pub(crate) struct FontAtlas {
+  pub(crate) recommended_line_spacing: f32,
+  pub(crate) font_size: u16,
+  pub(crate) image: StaticImage,
+  pub(crate) buffer_image_copies: Vec<BufferImageCopy>,
   char_to_glyph_metrics: HashMap<char, GlyphMetrics>,
 }
 
 impl FontAtlas {
-  pub(super) fn new(
-    device: Rc<Device>,
+  pub(crate) fn new(
+    device: Arc<Device>,
     memory_allocator: Rc<RefCell<Allocator>>,
     file_path: &str,
     font_size: u16,
     chars: RangeInclusive<char>,
     atlas_size: (u32, u32),
   ) -> Self {
-    let ttf = ttf::init().unwrap();
-    let font = ttf.load_font(file_path, font_size).unwrap();
-    let mut glyph_position = (0, 0);
+    let font = consts::TTF.load_font(file_path, font_size).unwrap();
+    let recommended_line_spacing = font.recommended_line_spacing() as _;
+    let mut glyph_position = (consts::GLYPH_PADDING, consts::GLYPH_PADDING);
     let mut max_glyph_height = 0;
     let mut buffer_offset = 0;
 
@@ -39,8 +41,11 @@ impl FontAtlas {
           .shaded(Color::WHITE, Color::BLACK)
           .unwrap();
 
-        if glyph_position.0 + font_surface.width() > atlas_size.0 {
-          glyph_position = (0, glyph_position.1 + max_glyph_height);
+        if glyph_position.0 + font_surface.width() + consts::GLYPH_PADDING > atlas_size.0 {
+          glyph_position = (
+            consts::GLYPH_PADDING,
+            glyph_position.1 + max_glyph_height + consts::GLYPH_PADDING,
+          );
         }
 
         let buffer_image_copy = BufferImageCopy {
@@ -73,7 +78,7 @@ impl FontAtlas {
           advance: glyph_metrics.advance,
         };
 
-        glyph_position.0 += font_surface.width();
+        glyph_position.0 += font_surface.width() + consts::GLYPH_PADDING;
         max_glyph_height = max_glyph_height.max(font_surface.height());
         buffer_offset += (font_surface.pitch() * font_surface.height()) as u64;
 
@@ -91,19 +96,22 @@ impl FontAtlas {
       Format::R8_UNORM,
       atlas_size,
       ImageUsageFlags::SAMPLED,
+      ImageAspectFlags::COLOR,
       &pixels,
     );
 
     let char_to_glyph_metrics = HashMap::from_par_iter(char_to_glyph_metrics);
 
     Self {
+      recommended_line_spacing,
+      font_size,
       image,
       buffer_image_copies,
       char_to_glyph_metrics,
     }
   }
 
-  pub(super) fn get_glyph_metrics(&self, char: char) -> Option<&GlyphMetrics> {
+  pub(crate) fn get_glyph_metrics(&self, char: char) -> Option<&GlyphMetrics> {
     self.char_to_glyph_metrics.get(&char)
   }
 }

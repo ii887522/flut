@@ -1,6 +1,12 @@
-use crate::{Engine, audio, engine::DrawableCaps};
+use crate::{Engine, audio, consts, engine::DrawableCaps};
 use sdl2::{event::Event, image::LoadSurface, surface::Surface};
-use std::{sync::mpsc, thread, time::Instant};
+use std::{
+  cell::RefCell,
+  rc::Rc,
+  sync::{atomic::Ordering, mpsc},
+  thread,
+  time::Instant,
+};
 
 pub struct AppConfig {
   pub title: &'static str,
@@ -24,15 +30,20 @@ impl Default for AppConfig {
 
 pub trait App {
   fn get_config(&self) -> AppConfig;
-  fn init(&mut self, _engine: &mut Engine<'_>) {}
+  fn init(&mut self, _engine: Rc<RefCell<Engine>>) {}
   fn process_event(&mut self, _event: Event) {}
-  fn update(&mut self, _dt: f32, _engine: &mut Engine<'_>) {}
+  fn update(&mut self, _dt: f32, _engine: Rc<RefCell<Engine>>) {}
 }
 
 pub fn run(mut app: impl App) {
   let app_config = app.get_config();
-  let sdl = sdl2::init().unwrap();
 
+  crate::APP_SIZE.0.store(app_config.width, Ordering::Relaxed);
+  crate::APP_SIZE
+    .1
+    .store(app_config.height, Ordering::Relaxed);
+
+  let sdl = sdl2::init().unwrap();
   let (audio_tx, audio_rx) = mpsc::channel();
   thread::spawn(|| audio::run(audio_rx));
 
@@ -42,11 +53,14 @@ pub fn run(mut app: impl App) {
   // Fix blurry UI on high DPI displays
   sdl2::hint::set("SDL_WINDOWS_DPI_AWARENESS", "permonitorv2");
 
+  let event_subsys = sdl.event().unwrap();
   let vid_subsys = sdl.video().unwrap();
 
   let mut window = vid_subsys
     .window(app_config.title, app_config.width, app_config.height)
     .allow_highdpi()
+    // By default, SDL create window will also show the window, explicitly hide it to avoid display black screen during startup
+    .hidden()
     .position_centered()
     .vulkan()
     .build()
@@ -56,21 +70,15 @@ pub fn run(mut app: impl App) {
     window.set_icon(favicon);
   }
 
-  // Call window.show() as early as possible to minimize the perceived startup time
-  window.show();
-
-  let mut engine = Engine::new(
+  let engine = Rc::new(RefCell::new(Engine::new(
     window,
     audio_tx,
+    event_subsys,
     app_config.prefer_dgpu,
     app_config.drawable_caps,
-  );
+  )));
 
-  app.init(&mut engine);
-
-  const UPDATES_PER_SECOND: f32 = 150.0;
-  const MAX_UPDATES_PER_FRAME: u32 = 5;
-
+  app.init(engine.clone());
   let mut event_pump = sdl.event_pump().unwrap();
   let mut prev = Instant::now();
 
@@ -85,15 +93,15 @@ pub fn run(mut app: impl App) {
 
     let mut frame_time = prev.elapsed().as_secs_f32();
     prev = Instant::now();
-    let mut updates_remaining = MAX_UPDATES_PER_FRAME;
+    let mut updates_remaining = consts::MAX_UPDATES_PER_FRAME;
 
     while frame_time > 0.0 && updates_remaining > 0 {
-      let dt = frame_time.min(1.0 / UPDATES_PER_SECOND);
-      app.update(dt, &mut engine);
+      let dt = frame_time.min(1.0 / consts::UPDATES_PER_SECOND);
+      app.update(dt, engine.clone());
       frame_time -= dt;
       updates_remaining -= 1;
     }
 
-    engine.draw();
+    engine.borrow_mut().draw();
   }
 }
