@@ -14,6 +14,16 @@ use std::{
 const ICON_MARGIN: (f32, f32) = (16.0, 8.0);
 const ICON_SIZE: (f32, f32) = (35.0, 40.0);
 const LABEL_MARGIN: (f32, f32) = (12.0, 12.0);
+const MOUSE_OVER_COLOR_SCALE_FACTOR: f32 = 0.85;
+const MOUSE_OVER_COLOR_SCALE_DURATION: f32 = 0.2;
+const MOUSE_OUT_COLOR_SCALE_DURATION: f32 = 0.2;
+
+enum State {
+  ScalingUp,
+  Idle,
+  MouseOvering,
+  MouseOuting,
+}
 
 pub(super) struct Button {
   container: Container,
@@ -24,6 +34,8 @@ pub(super) struct Button {
   on_click: Box<dyn FnMut()>,
   mouse_over: bool,
   mouse_down: bool,
+  state: State,
+  bg_color: (u8, u8, u8, u8),
 }
 
 impl Debug for Button {
@@ -92,6 +104,8 @@ impl Button {
       on_click,
       mouse_over: false,
       mouse_down: false,
+      state: State::ScalingUp,
+      bg_color,
     }
   }
 
@@ -158,9 +172,29 @@ impl Button {
       } => {
         if !self.mouse_over && self.is_mouse_on_this((*mouse_x, *mouse_y)) {
           self.mouse_over = true;
+          let bg_color = self.container.get_color();
+
+          self.container.set_color((
+            calc_mouse_over_color_scale_transition(bg_color.0),
+            calc_mouse_over_color_scale_transition(bg_color.1),
+            calc_mouse_over_color_scale_transition(bg_color.2),
+            calc_mouse_over_alpha_scale_transition(bg_color.3),
+          ));
+
+          self.state = State::MouseOvering;
           consts::HAND_CURSOR.with(|cursor| cursor.set());
         } else if self.mouse_over && !self.is_mouse_on_this((*mouse_x, *mouse_y)) {
           self.mouse_over = false;
+          let bg_color = self.container.get_color();
+
+          self.container.set_color((
+            calc_mouse_out_color_scale_transition(bg_color.0, self.bg_color.0),
+            calc_mouse_out_color_scale_transition(bg_color.1, self.bg_color.1),
+            calc_mouse_out_color_scale_transition(bg_color.2, self.bg_color.2),
+            calc_mouse_out_alpha_scale_transition(bg_color.3),
+          ));
+
+          self.state = State::MouseOuting;
           consts::ARROW_CURSOR.with(|cursor| cursor.set());
         }
       }
@@ -197,12 +231,19 @@ impl Button {
   }
 
   pub(super) fn update(&mut self, dt: f32, engine: &mut Engine) -> bool {
-    let done_scaling = self.icon.update(dt, engine)
+    let done_updating = self.icon.update(dt, engine)
       & self.container.update(dt, engine)
       & self.label.update(dt, engine);
 
+    if done_updating {
+      match self.state {
+        State::ScalingUp | State::MouseOvering | State::MouseOuting => self.state = State::Idle,
+        _ => {}
+      }
+    }
+
     self.label.finish_update(engine);
-    done_scaling
+    done_updating
   }
 }
 
@@ -212,4 +253,32 @@ impl Drop for Button {
       consts::ARROW_CURSOR.with(|cursor| cursor.set());
     }
   }
+}
+
+const fn calc_mouse_over_color_scale_transition(color: u8) -> Transition {
+  Transition::new(
+    color as _,
+    if color >= 128 {
+      color as f32 * MOUSE_OVER_COLOR_SCALE_FACTOR
+    } else {
+      255.0 - (255 - color) as f32 * MOUSE_OVER_COLOR_SCALE_FACTOR
+    },
+    MOUSE_OVER_COLOR_SCALE_DURATION,
+  )
+}
+
+const fn calc_mouse_over_alpha_scale_transition(alpha: u8) -> Transition {
+  Transition::new(alpha as _, alpha as _, MOUSE_OVER_COLOR_SCALE_DURATION)
+}
+
+const fn calc_mouse_out_color_scale_transition(from_color: u8, to_color: u8) -> Transition {
+  Transition::new(
+    from_color as _,
+    to_color as _,
+    MOUSE_OUT_COLOR_SCALE_DURATION,
+  )
+}
+
+const fn calc_mouse_out_alpha_scale_transition(alpha: u8) -> Transition {
+  Transition::new(alpha as _, alpha as _, MOUSE_OUT_COLOR_SCALE_DURATION)
 }
