@@ -5,7 +5,7 @@ use optarg2chain::optarg_impl;
 pub(super) struct Container {
   position: (f32, f32, f32),
   size: (f32, f32),
-  color: (u8, u8, u8, u8),
+  color: (Transition, Transition, Transition, Transition),
   border_radius: f32,
   scale: Transition,
   scale_origin: (f32, f32),
@@ -27,7 +27,12 @@ impl Container {
     Self {
       position,
       size,
-      color,
+      color: (
+        Transition::new(color.0 as _, color.0 as _, 0.001),
+        Transition::new(color.1 as _, color.1 as _, 0.001),
+        Transition::new(color.2 as _, color.2 as _, 0.001),
+        Transition::new(color.3 as _, color.3 as _, 0.001),
+      ),
       border_radius,
       scale,
       scale_origin,
@@ -61,9 +66,28 @@ impl Container {
     self.scaling = true;
   }
 
+  pub(super) const fn get_color(&self) -> (u8, u8, u8, u8) {
+    (
+      self.color.0.get_value() as _,
+      self.color.1.get_value() as _,
+      self.color.2.get_value() as _,
+      self.color.3.get_value() as _,
+    )
+  }
+
+  pub(super) fn set_color(&mut self, color: (Transition, Transition, Transition, Transition)) {
+    self.color = color;
+    self.scaling = true;
+  }
+
   pub(super) fn update(&mut self, dt: f32, engine: &mut Engine) -> bool {
     let prev_scaling = self.scaling;
-    let done_scaling = self.scale.update(dt);
+
+    let done_scaling = self.scale.update(dt)
+      & self.color.0.update(dt)
+      & self.color.1.update(dt)
+      & self.color.2.update(dt)
+      & self.color.3.update(dt);
 
     if done_scaling {
       self.scaling = false;
@@ -100,7 +124,12 @@ impl From<Container> for RoundRect {
         container.position.2,
       ),
       (container.size.0 * scale, container.size.1 * scale),
-      container.color,
+      (
+        container.color.0.get_value() as _,
+        container.color.1.get_value() as _,
+        container.color.2.get_value() as _,
+        container.color.3.get_value() as _,
+      ),
       container.border_radius * scale,
     )
   }
