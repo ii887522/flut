@@ -15,13 +15,16 @@ const ICON_MARGIN: (f32, f32) = (16.0, 8.0);
 const ICON_SIZE: (f32, f32) = (35.0, 40.0);
 const LABEL_MARGIN: (f32, f32) = (12.0, 12.0);
 const MOUSE_OVER_COLOR_SCALE_FACTOR: f32 = 0.85;
-const MOUSE_OVER_COLOR_SCALE_DURATION: f32 = 0.2;
+const MOUSE_IN_COLOR_SCALE_DURATION: f32 = 0.2;
+const MOUSE_DOWN_COLOR_SCALE_FACTOR: f32 = 0.8;
 const MOUSE_OUT_COLOR_SCALE_DURATION: f32 = 0.2;
 
 enum State {
   ScalingUp,
   Idle,
   MouseOvering,
+  MouseDowning,
+  MouseUping,
   MouseOuting,
 }
 
@@ -172,13 +175,24 @@ impl Button {
       } => {
         if !self.mouse_over && self.is_mouse_on_this((*mouse_x, *mouse_y)) {
           self.mouse_over = true;
-          let bg_color = self.container.get_color();
 
           self.container.set_color((
-            calc_mouse_over_color_scale_transition(bg_color.0),
-            calc_mouse_over_color_scale_transition(bg_color.1),
-            calc_mouse_over_color_scale_transition(bg_color.2),
-            calc_mouse_over_alpha_scale_transition(bg_color.3),
+            calc_mouse_in_color_scale_transition(
+              self.bg_color.0,
+              self.bg_color.0,
+              MOUSE_OVER_COLOR_SCALE_FACTOR,
+            ),
+            calc_mouse_in_color_scale_transition(
+              self.bg_color.1,
+              self.bg_color.1,
+              MOUSE_OVER_COLOR_SCALE_FACTOR,
+            ),
+            calc_mouse_in_color_scale_transition(
+              self.bg_color.2,
+              self.bg_color.2,
+              MOUSE_OVER_COLOR_SCALE_FACTOR,
+            ),
+            calc_mouse_in_alpha_scale_transition(self.bg_color.3),
           ));
 
           self.state = State::MouseOvering;
@@ -206,6 +220,28 @@ impl Button {
       } => {
         if *mouse_btn == MouseButton::Left && self.is_mouse_on_this((*mouse_x, *mouse_y)) {
           self.mouse_down = true;
+          let bg_color = self.container.get_color();
+
+          self.container.set_color((
+            calc_mouse_in_color_scale_transition(
+              bg_color.0,
+              self.bg_color.0,
+              MOUSE_DOWN_COLOR_SCALE_FACTOR,
+            ),
+            calc_mouse_in_color_scale_transition(
+              bg_color.1,
+              self.bg_color.1,
+              MOUSE_DOWN_COLOR_SCALE_FACTOR,
+            ),
+            calc_mouse_in_color_scale_transition(
+              bg_color.2,
+              self.bg_color.2,
+              MOUSE_DOWN_COLOR_SCALE_FACTOR,
+            ),
+            calc_mouse_in_alpha_scale_transition(bg_color.3),
+          ));
+
+          self.state = State::MouseDowning;
         }
       }
       Event::MouseButtonUp {
@@ -224,6 +260,28 @@ impl Button {
         }
 
         self.mouse_down = false;
+        let bg_color = self.container.get_color();
+
+        self.container.set_color((
+          calc_mouse_in_color_scale_transition(
+            bg_color.0,
+            self.bg_color.0,
+            MOUSE_OVER_COLOR_SCALE_FACTOR,
+          ),
+          calc_mouse_in_color_scale_transition(
+            bg_color.1,
+            self.bg_color.1,
+            MOUSE_OVER_COLOR_SCALE_FACTOR,
+          ),
+          calc_mouse_in_color_scale_transition(
+            bg_color.2,
+            self.bg_color.2,
+            MOUSE_OVER_COLOR_SCALE_FACTOR,
+          ),
+          calc_mouse_in_alpha_scale_transition(bg_color.3),
+        ));
+
+        self.state = State::MouseUping;
         (self.on_click)();
       }
       _ => {}
@@ -237,7 +295,11 @@ impl Button {
 
     if done_updating {
       match self.state {
-        State::ScalingUp | State::MouseOvering | State::MouseOuting => self.state = State::Idle,
+        State::ScalingUp
+        | State::MouseOvering
+        | State::MouseOuting
+        | State::MouseDowning
+        | State::MouseUping => self.state = State::Idle,
         _ => {}
       }
     }
@@ -255,20 +317,24 @@ impl Drop for Button {
   }
 }
 
-const fn calc_mouse_over_color_scale_transition(color: u8) -> Transition {
+const fn calc_mouse_in_color_scale_transition(
+  from_color: u8,
+  ori_color: u8,
+  scale_factor: f32,
+) -> Transition {
   Transition::new(
-    color as _,
-    if color >= 128 {
-      color as f32 * MOUSE_OVER_COLOR_SCALE_FACTOR
+    from_color as _,
+    if ori_color >= 128 {
+      ori_color as f32 * scale_factor
     } else {
-      255.0 - (255 - color) as f32 * MOUSE_OVER_COLOR_SCALE_FACTOR
+      255.0 - (255 - ori_color) as f32 * scale_factor
     },
-    MOUSE_OVER_COLOR_SCALE_DURATION,
+    MOUSE_IN_COLOR_SCALE_DURATION,
   )
 }
 
-const fn calc_mouse_over_alpha_scale_transition(alpha: u8) -> Transition {
-  Transition::new(alpha as _, alpha as _, MOUSE_OVER_COLOR_SCALE_DURATION)
+const fn calc_mouse_in_alpha_scale_transition(alpha: u8) -> Transition {
+  Transition::new(alpha as _, alpha as _, MOUSE_IN_COLOR_SCALE_DURATION)
 }
 
 const fn calc_mouse_out_color_scale_transition(from_color: u8, to_color: u8) -> Transition {
