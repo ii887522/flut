@@ -19,7 +19,7 @@ struct Mesh {
   vec2 texSize;
 };
 
-layout(std430, buffer_reference, buffer_reference_align = 16) readonly buffer MeshBuffer {
+layout(std430, buffer_reference, buffer_reference_align = 16) readonly restrict buffer MeshBuffer {
   Mesh meshes[];
 };
 
