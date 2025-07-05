@@ -56,3 +56,6 @@ features = [
   "static-link",
   "use-vcpkg",
 ]
+
+[build-dependencies]
+shaderc = { version = "0.9", default-features = false }

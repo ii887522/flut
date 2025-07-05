@@ -1,6 +1,8 @@
 #![deny(clippy::all, elided_lifetimes_in_paths)]
 #![allow(clippy::needless_lifetimes, clippy::too_many_arguments)]
 
+mod vk;
+
 use flut_macro::warn;
 use sdl2::{event::Event, image::LoadSurface, surface::Surface};
 
@@ -18,6 +20,7 @@ pub fn run_app(title: &str, size: (u32, u32), favicon_path: &str) {
   let mut window = vid_subsys
     .window(title, size.0, size.1)
     .allow_highdpi()
+    .hidden()
     .position_centered()
     .vulkan()
     .build()
@@ -28,6 +31,8 @@ pub fn run_app(title: &str, size: (u32, u32), favicon_path: &str) {
     Err(err) => warn!("{err}"),
   }
 
+  let mut renderer_result = vk::Renderer::new(window.clone()).finish();
+  window.show();
   let mut event_pump = sdl.event_pump().unwrap();
 
   'running: loop {
@@ -36,5 +41,16 @@ pub fn run_app(title: &str, size: (u32, u32), favicon_path: &str) {
         break 'running;
       }
     }
+
+    let Ok(renderer) = renderer_result else {
+      continue;
+    };
+
+    renderer_result = renderer.render();
+  }
+
+  match renderer_result {
+    Ok(renderer) => renderer.drop(),
+    Err(renderer) => renderer.drop(),
   }
 }
