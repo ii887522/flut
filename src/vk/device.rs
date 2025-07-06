@@ -37,24 +37,16 @@ impl Device {
       ext_name == vk::KHR_PORTABILITY_SUBSET_NAME
     });
 
-    let ext_names = [
+    let mut ext_names = vec![
+      vk::EXT_MEMORY_BUDGET_NAME.as_ptr(),
       vk::EXT_MEMORY_PRIORITY_NAME.as_ptr(),
       vk::EXT_PAGEABLE_DEVICE_LOCAL_MEMORY_NAME.as_ptr(),
       vk::KHR_SWAPCHAIN_NAME.as_ptr(),
     ];
 
-    let ext_names_with_portability_subset = [
-      vk::EXT_MEMORY_PRIORITY_NAME.as_ptr(),
-      vk::EXT_PAGEABLE_DEVICE_LOCAL_MEMORY_NAME.as_ptr(),
-      vk::KHR_SWAPCHAIN_NAME.as_ptr(),
-      vk::KHR_PORTABILITY_SUBSET_NAME.as_ptr(),
-    ];
-
-    let ext_names = if has_portability_subset_ext {
-      ext_names_with_portability_subset.as_slice()
-    } else {
-      ext_names.as_slice()
-    };
+    if has_portability_subset_ext {
+      ext_names.push(vk::KHR_PORTABILITY_SUBSET_NAME.as_ptr());
+    }
 
     let mut physical_device_pipeline_creation_cache_control_features =
       vk::PhysicalDevicePipelineCreationCacheControlFeatures::default();

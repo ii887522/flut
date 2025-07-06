@@ -1,7 +1,6 @@
 use super::{Device, GraphicsPipeline, StreamBuffer, graphics_pipeline};
 use crate::models::RectPushConst;
 use ash::vk::{self, Handle};
-use gpu_allocator::{AllocationSizes, AllocatorDebugSettings, vulkan};
 use sdl2::video::Window;
 use std::{ffi::CString, iter, mem, rc::Rc};
 
@@ -38,7 +37,7 @@ pub(crate) struct Renderer<State> {
   graphics_command_buffers: Box<[vk::CommandBuffer]>,
   swapchain_device: ash::khr::swapchain::Device,
   render_pass: vk::RenderPass,
-  vk_allocator: vulkan::Allocator,
+  vk_allocator: Rc<vk_mem::Allocator>,
   stream_buffer: StreamBuffer,
   image_avail_semaphores: Box<[vk::Semaphore]>,
   render_finished_semaphores: Box<[vk::Semaphore]>,
@@ -54,7 +53,7 @@ impl Renderer<Creating> {
     let app_info = vk::ApplicationInfo {
       p_application_name: app_name.as_ptr(),
       application_version: vk::make_api_version(0, 0, 1, 0),
-      api_version: vk::make_api_version(0, 1, 3, 0),
+      api_version: vk::API_VERSION_1_3,
       ..Default::default()
     };
 
@@ -434,25 +433,22 @@ impl Renderer<Creating> {
         .unwrap()
     };
 
-    let pageable_device_local_memory_device =
-      ash::ext::pageable_device_local_memory::Device::new(&instance, device);
+    let mut vk_allocator_create_info =
+      vk_mem::AllocatorCreateInfo::new(&instance, device, physical_device);
 
-    let vk_allocator_create_desc = vulkan::AllocatorCreateDesc {
-      instance: instance.clone(),
-      device: device.clone(),
-      physical_device,
-      debug_settings: AllocatorDebugSettings::default(),
-      buffer_device_address: true,
-      allocation_sizes: AllocationSizes::new(4 * 1024 * 1024, 4 * 1024 * 1024),
-    };
+    vk_allocator_create_info.flags = vk_mem::AllocatorCreateFlags::EXTERNALLY_SYNCHRONIZED
+      | vk_mem::AllocatorCreateFlags::KHR_DEDICATED_ALLOCATION
+      | vk_mem::AllocatorCreateFlags::EXT_MEMORY_BUDGET
+      | vk_mem::AllocatorCreateFlags::BUFFER_DEVICE_ADDRESS
+      | vk_mem::AllocatorCreateFlags::EXT_MEMORY_PRIORITY;
 
-    let mut vk_allocator = vulkan::Allocator::new(&vk_allocator_create_desc).unwrap();
+    vk_allocator_create_info.preferred_large_heap_block_size = 2 * 1024 * 1024; // 2 MiB
+    vk_allocator_create_info.vulkan_api_version = vk::API_VERSION_1_3;
 
-    let stream_buffer = StreamBuffer::new(
-      vk_device.clone(),
-      &mut vk_allocator,
-      &pageable_device_local_memory_device,
-    );
+    let vk_allocator =
+      unsafe { Rc::new(vk_mem::Allocator::new(vk_allocator_create_info).unwrap()) };
+
+    let stream_buffer = StreamBuffer::new(vk_device.clone(), vk_allocator.clone());
 
     let (image_avail_semaphores, (render_finished_semaphores, in_flight_fences)): (
       Vec<_>,

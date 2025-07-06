@@ -29,6 +29,7 @@ x86_64-pc-windows-msvc = { triplet = "x64-windows-static-md" }
 flut_macro = { path = "flut_macro" }
 mimalloc = { version = "0.1", default-features = false }
 rustc-hash = { version = "2.1", default-features = false, features = ["std"] }
+vk-mem = { version = "0.4" }
 
 [dependencies.ash]
 version = "0.38"
@@ -39,11 +40,6 @@ features = ["loaded", "std"]
 version = "0.4"
 default-features = false
 features = ["now", "std"]
-
-[dependencies.gpu-allocator]
-version = "0.27"
-default-features = false
-features = ["vulkan"]
 
 [dependencies.sdl2]
 version = "0.37"
