@@ -21,6 +21,7 @@ impl GraphicsPipeline<Creating> {
     vk_device: Rc<Device>,
     vert_shader_code: &[u8],
     frag_shader_code: &[u8],
+    push_const_ranges: &[vk::PushConstantRange],
   ) -> Self {
     let device = vk_device.get();
 
@@ -63,7 +64,11 @@ impl GraphicsPipeline<Creating> {
         .unwrap()
     };
 
-    let layout_create_info = vk::PipelineLayoutCreateInfo::default();
+    let layout_create_info = vk::PipelineLayoutCreateInfo {
+      push_constant_range_count: push_const_ranges.len() as _,
+      p_push_constant_ranges: push_const_ranges.as_ptr(),
+      ..Default::default()
+    };
 
     let layout = unsafe {
       device
@@ -224,7 +229,15 @@ impl GraphicsPipeline<Created> {
       _state: Creating,
     }
   }
+}
 
+impl<State> GraphicsPipeline<State> {
+  pub(super) const fn get_layout(&self) -> vk::PipelineLayout {
+    self.layout
+  }
+}
+
+impl<State> GraphicsPipeline<State> {
   pub(super) fn drop(self) {
     let device = self.device.get();
 

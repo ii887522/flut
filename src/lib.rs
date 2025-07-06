@@ -1,7 +1,10 @@
 #![deny(clippy::all, elided_lifetimes_in_paths)]
 #![allow(clippy::needless_lifetimes, clippy::too_many_arguments)]
 
+mod models;
 mod vk;
+
+use std::{mem, slice};
 
 use flut_macro::warn;
 use sdl2::{event::Event, image::LoadSurface, surface::Surface};
@@ -42,15 +45,18 @@ pub fn run_app(title: &str, size: (u32, u32), favicon_path: &str) {
       }
     }
 
-    let Ok(renderer) = renderer_result else {
-      continue;
+    renderer_result = match renderer_result {
+      Ok(renderer) => renderer.render(),
+      Err(renderer) => renderer.finish(),
     };
-
-    renderer_result = renderer.render();
   }
 
   match renderer_result {
     Ok(renderer) => renderer.drop(),
     Err(renderer) => renderer.drop(),
   }
+}
+
+const fn as_bytes<T>(item: &T) -> &[u8] {
+  unsafe { slice::from_raw_parts(item as *const _ as *const _, mem::size_of::<T>()) }
 }

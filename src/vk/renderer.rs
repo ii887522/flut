@@ -1,7 +1,9 @@
-use super::{Device, GraphicsPipeline, graphics_pipeline};
+use super::{Device, GraphicsPipeline, StreamBuffer, graphics_pipeline};
+use crate::models::RectPushConst;
 use ash::vk::{self, Handle};
+use gpu_allocator::{AllocationSizes, AllocatorDebugSettings, vulkan};
 use sdl2::video::Window;
-use std::{ffi::CString, iter, rc::Rc};
+use std::{ffi::CString, iter, mem, rc::Rc};
 
 // Settings
 const SWAPCHAIN_IMAGE_FORMAT: vk::Format = vk::Format::B8G8R8A8_UNORM;
@@ -36,6 +38,8 @@ pub(crate) struct Renderer<State> {
   graphics_command_buffers: Box<[vk::CommandBuffer]>,
   swapchain_device: ash::khr::swapchain::Device,
   render_pass: vk::RenderPass,
+  vk_allocator: vulkan::Allocator,
+  stream_buffer: StreamBuffer,
   image_avail_semaphores: Box<[vk::Semaphore]>,
   render_finished_semaphores: Box<[vk::Semaphore]>,
   in_flight_fences: Box<[vk::Fence]>,
@@ -357,6 +361,11 @@ impl Renderer<Creating> {
       vk_device.clone(),
       include_bytes!("../../target/spv/rect.vert.spv"),
       include_bytes!("../../target/spv/rect.frag.spv"),
+      &[vk::PushConstantRange {
+        stage_flags: vk::ShaderStageFlags::VERTEX,
+        size: mem::size_of::<RectPushConst>() as _,
+        ..Default::default()
+      }],
     );
 
     let swapchain_device = ash::khr::swapchain::Device::new(&instance, device);
@@ -425,6 +434,26 @@ impl Renderer<Creating> {
         .unwrap()
     };
 
+    let pageable_device_local_memory_device =
+      ash::ext::pageable_device_local_memory::Device::new(&instance, device);
+
+    let vk_allocator_create_desc = vulkan::AllocatorCreateDesc {
+      instance: instance.clone(),
+      device: device.clone(),
+      physical_device,
+      debug_settings: AllocatorDebugSettings::default(),
+      buffer_device_address: true,
+      allocation_sizes: AllocationSizes::new(4 * 1024 * 1024, 4 * 1024 * 1024),
+    };
+
+    let mut vk_allocator = vulkan::Allocator::new(&vk_allocator_create_desc).unwrap();
+
+    let stream_buffer = StreamBuffer::new(
+      vk_device.clone(),
+      &mut vk_allocator,
+      &pageable_device_local_memory_device,
+    );
+
     let (image_avail_semaphores, (render_finished_semaphores, in_flight_fences)): (
       Vec<_>,
       (Vec<_>, Vec<_>),
@@ -469,6 +498,8 @@ impl Renderer<Creating> {
       graphics_command_buffers,
       swapchain_device,
       render_pass,
+      vk_allocator,
+      stream_buffer,
       image_avail_semaphores: image_avail_semaphores.into_boxed_slice(),
       render_finished_semaphores: render_finished_semaphores.into_boxed_slice(),
       in_flight_fences: in_flight_fences.into_boxed_slice(),
@@ -627,6 +658,8 @@ impl Renderer<Creating> {
       graphics_command_buffers: self.graphics_command_buffers,
       swapchain_device: self.swapchain_device,
       render_pass: self.render_pass,
+      vk_allocator: self.vk_allocator,
+      stream_buffer: self.stream_buffer,
       image_avail_semaphores: self.image_avail_semaphores,
       render_finished_semaphores: self.render_finished_semaphores,
       in_flight_fences: self.in_flight_fences,
@@ -646,6 +679,7 @@ impl Renderer<Creating> {
 
     unsafe {
       device.device_wait_idle().unwrap();
+      self.state.rect_pipeline.drop();
 
       self
         .in_flight_fences
@@ -662,6 +696,8 @@ impl Renderer<Creating> {
         .into_iter()
         .for_each(|semaphore| device.destroy_semaphore(semaphore, None));
 
+      drop(self.stream_buffer);
+      drop(self.vk_allocator);
       device.destroy_render_pass(self.render_pass, None);
 
       self
@@ -744,6 +780,14 @@ impl Renderer<Created> {
 
     let subpass_end_info = vk::SubpassEndInfo::default();
 
+    let rect_push_const = RectPushConst::new(
+      self.stream_buffer.get_addr(),
+      (
+        self.state.swapchain_image_extent.width,
+        self.state.swapchain_image_extent.height,
+      ),
+    );
+
     unsafe {
       device
         .reset_command_pool(graphics_command_pool, vk::CommandPoolResetFlags::empty())
@@ -765,11 +809,17 @@ impl Renderer<Created> {
         self.state.rect_pipeline.get(),
       );
 
+      device.cmd_push_constants(
+        graphics_command_buffer,
+        self.state.rect_pipeline.get_layout(),
+        vk::ShaderStageFlags::VERTEX,
+        0,
+        crate::as_bytes(&rect_push_const),
+      );
+
       device.cmd_draw(graphics_command_buffer, 6, 1, 0, 0);
       device.cmd_end_render_pass2(graphics_command_buffer, &subpass_end_info);
-
       device.end_command_buffer(graphics_command_buffer).unwrap();
-
       device.reset_fences(&[in_flight_fence]).unwrap();
     }
 
@@ -865,6 +915,8 @@ impl Renderer<Created> {
       graphics_command_buffers: self.graphics_command_buffers,
       swapchain_device: self.swapchain_device,
       render_pass: self.render_pass,
+      vk_allocator: self.vk_allocator,
+      stream_buffer: self.stream_buffer,
       image_avail_semaphores: self.image_avail_semaphores,
       render_finished_semaphores: self.render_finished_semaphores,
       in_flight_fences: self.in_flight_fences,
@@ -910,6 +962,8 @@ impl Renderer<Created> {
         .into_iter()
         .for_each(|semaphore| device.destroy_semaphore(semaphore, None));
 
+      drop(self.stream_buffer);
+      drop(self.vk_allocator);
       device.destroy_render_pass(self.render_pass, None);
 
       self
