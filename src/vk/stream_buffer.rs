@@ -11,11 +11,15 @@ pub(super) struct StreamBuffer {
 }
 
 impl StreamBuffer {
-  pub(super) fn new(vk_device: Rc<Device>, vk_allocator: Rc<vk_mem::Allocator>) -> Self {
+  pub(super) fn new(
+    vk_device: Rc<Device>,
+    vk_allocator: Rc<vk_mem::Allocator>,
+    max_bytes: usize,
+  ) -> Self {
     let device = vk_device.get();
 
     let buffer_create_info = vk::BufferCreateInfo {
-      size: 1024, // todo: Tweak the size which also means capacity in this context
+      size: (max_bytes * crate::consts::MAX_IN_FLIGHT_FRAME_COUNT) as _,
       usage: vk::BufferUsageFlags::STORAGE_BUFFER | vk::BufferUsageFlags::SHADER_DEVICE_ADDRESS,
       sharing_mode: vk::SharingMode::EXCLUSIVE,
       ..Default::default()

@@ -1,3 +1,5 @@
+mod batches;
+mod consts;
 mod device;
 mod graphics_pipeline;
 pub(super) mod renderer;
