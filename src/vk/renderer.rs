@@ -5,6 +5,7 @@ use crate::{
   vk::batches::{RectBatch, rect_batch},
 };
 use ash::vk::{self, Handle};
+use rustc_hash::{FxHashMap, FxHashSet};
 use sdl2::video::Window;
 use std::{ffi::CString, iter, mem, rc::Rc};
 
@@ -690,7 +691,7 @@ impl Renderer<Creating> {
         .into_iter()
         .for_each(|semaphore| device.destroy_semaphore(semaphore, None));
 
-      drop(self.instance_buffer);
+      self.instance_buffer.drop();
       drop(self.vk_allocator);
       device.destroy_render_pass(self.render_pass, None);
 
@@ -800,6 +801,7 @@ impl Renderer<Created> {
       device.reset_fences(&[in_flight_fence]).unwrap();
     };
 
+    self.instance_buffer = self.instance_buffer.next_sub_buf();
     let wait_dst_stage_mask = vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT;
 
     let queue_submit_infos = [vk::SubmitInfo {
@@ -939,7 +941,7 @@ impl Renderer<Created> {
         .into_iter()
         .for_each(|semaphore| device.destroy_semaphore(semaphore, None));
 
-      drop(self.instance_buffer);
+      self.instance_buffer.drop();
       drop(self.vk_allocator);
       device.destroy_render_pass(self.render_pass, None);
 
@@ -951,6 +953,50 @@ impl Renderer<Created> {
       device.destroy_device(None);
       self.surface_instance.destroy_surface(self.surface, None);
       self.instance.destroy_instance(None);
+    }
+  }
+}
+
+impl crate::Renderer for Result<Renderer<Created>, Renderer<Creating>> {
+  fn add_rect(&mut self, rect: Rect) -> u32 {
+    match self {
+      Ok(renderer) => renderer.state.rect_batch.add_rect(rect),
+      Err(renderer) => renderer.state.rect_batch.add_rect(rect),
+    }
+  }
+
+  fn add_rects(&mut self, rects: Vec<Rect>) -> Box<[u32]> {
+    match self {
+      Ok(renderer) => renderer.state.rect_batch.add_rects(rects),
+      Err(renderer) => renderer.state.rect_batch.add_rects(rects),
+    }
+  }
+
+  fn update_rect(&mut self, id: u32, rect: Rect) {
+    match self {
+      Ok(renderer) => renderer.state.rect_batch.update_rect(id, rect),
+      Err(renderer) => renderer.state.rect_batch.update_rect(id, rect),
+    }
+  }
+
+  fn update_rects(&mut self, rects: FxHashMap<u32, Rect>) {
+    match self {
+      Ok(renderer) => renderer.state.rect_batch.update_rects(rects),
+      Err(renderer) => renderer.state.rect_batch.update_rects(rects),
+    }
+  }
+
+  fn remove_rect(&mut self, id: u32) -> Rect {
+    match self {
+      Ok(renderer) => renderer.state.rect_batch.remove_rect(id),
+      Err(renderer) => renderer.state.rect_batch.remove_rect(id),
+    }
+  }
+
+  fn remove_rects(&mut self, ids: FxHashSet<u32>) -> Box<[(u32, Rect)]> {
+    match self {
+      Ok(renderer) => renderer.state.rect_batch.remove_rects(ids),
+      Err(renderer) => renderer.state.rect_batch.remove_rects(ids),
     }
   }
 }

@@ -1,13 +1,14 @@
 use crate::{
+  Write,
   collections::SparseSet,
   models::Rect,
-  vk::{Device, GraphicsPipeline, StreamBuffer, batches::Write, graphics_pipeline},
+  vk::{Device, GraphicsPipeline, StreamBuffer, graphics_pipeline},
+  write,
 };
 use ash::vk;
 use rayon::prelude::*;
 use rustc_hash::{FxHashMap, FxHashSet};
-use std::{collections::VecDeque, mem, rc::Rc};
-use voracious_radix_sort::RadixSort;
+use std::{collections::VecDeque, mem, ptr, rc::Rc};
 
 #[repr(C, align(8))]
 struct RectPushConst {
@@ -55,7 +56,7 @@ impl RectBatch<Creating> {
     Self {
       device: vk_device,
       rects: SparseSet::with_capacity(cap),
-      writes_queues: VecDeque::from_iter(vec![]),
+      writes_queues: VecDeque::from_iter([vec![]]),
       state: Creating { pipeline },
     }
   }
@@ -91,7 +92,25 @@ impl RectBatch<Created> {
     swapchain_image_extent: vk::Extent2D,
   ) {
     let writes = self.writes_queues.back_mut().unwrap();
-    writes.voracious_mt_sort(0);
+    write::coalesce(writes);
+
+    unsafe {
+      for writes in &self.writes_queues {
+        for write in writes {
+          ptr::copy_nonoverlapping(
+            self.rects.get_dense_ptr().add(write.get_from() as _),
+            instance_buffer.get_mapped_data() as *mut _,
+            write.get_size() as _,
+          );
+        }
+      }
+    }
+
+    if self.writes_queues.len() >= crate::consts::MAX_IN_FLIGHT_FRAME_COUNT {
+      self.writes_queues.pop_front().unwrap();
+    }
+
+    self.writes_queues.push_back(vec![]);
 
     let rect_push_const = RectPushConst::new(
       instance_buffer.get_addr(),

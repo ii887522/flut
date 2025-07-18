@@ -1,4 +1,4 @@
-use crate::vk;
+use crate::{Renderer, vk};
 use flut_macro::warn;
 use sdl2::{event::Event, image::LoadSurface, surface::Surface};
 use std::{borrow::Cow, iter, time::Instant};
@@ -36,9 +36,9 @@ pub trait App {
     Default::default()
   }
 
-  fn init(&mut self) {}
+  fn init(&mut self, _renderer: &mut dyn Renderer) {}
   fn process_event(&mut self, _event: Event) {}
-  fn update(&mut self, _dt: f32) {}
+  fn update(&mut self, _dt: f32, _renderer: &mut dyn Renderer) {}
 }
 
 pub fn run(mut app: impl App) {
@@ -68,7 +68,7 @@ pub fn run(mut app: impl App) {
   }
 
   let mut renderer_result = vk::Renderer::new(window.clone(), config.drawable_caps).finish();
-  app.init();
+  app.init(&mut renderer_result);
   window.show();
   let mut event_pump = sdl.event_pump().unwrap();
   let mut prev = Instant::now();
@@ -105,7 +105,7 @@ pub fn run(mut app: impl App) {
     )
     .skip(1)
     .map(|(prev_time, next_time, _)| prev_time - next_time)
-    .for_each(|dt| app.update(dt));
+    .for_each(|dt| app.update(dt, &mut renderer_result));
 
     renderer_result = match renderer_result {
       Ok(renderer) => renderer.render(),

@@ -6,23 +6,18 @@ use std::{
   sync::atomic::{AtomicU32, Ordering},
 };
 
-struct DenseItem<T> {
-  id: u32,
-  value: T,
-}
-
-struct DenseCell<T>(UnsafeCell<DenseItem<T>>);
+struct DenseCell<T>(UnsafeCell<T>);
 
 unsafe impl<T> Sync for DenseCell<T> {}
 
 impl<T> DenseCell<T> {
-  const fn new(id: u32, item: T) -> Self {
-    Self(UnsafeCell::new(DenseItem { id, value: item }))
+  const fn new(item: T) -> Self {
+    Self(UnsafeCell::new(item))
   }
 }
 
 impl<T> Deref for DenseCell<T> {
-  type Target = UnsafeCell<DenseItem<T>>;
+  type Target = UnsafeCell<T>;
 
   fn deref(&self) -> &Self::Target {
     &self.0
@@ -48,6 +43,7 @@ pub(crate) struct RemoveResp<T> {
 
 pub(crate) struct SparseSet<T> {
   dense: Vec<DenseCell<T>>,
+  dense_ids: Vec<AtomicU32>,
   sparse: Vec<AtomicU32>,
   free_ids: Vec<u32>,
 }
@@ -56,6 +52,7 @@ impl<T> SparseSet<T> {
   pub(crate) fn with_capacity(capacity: usize) -> Self {
     Self {
       dense: Vec::with_capacity(capacity),
+      dense_ids: Vec::with_capacity(capacity),
       sparse: Vec::with_capacity(capacity),
       free_ids: Vec::with_capacity(capacity),
     }
@@ -63,6 +60,10 @@ impl<T> SparseSet<T> {
 
   pub(crate) const fn len(&self) -> usize {
     self.dense.len()
+  }
+
+  pub(crate) fn get_dense_ptr(&self) -> *const T {
+    &self.dense[0] as *const _ as *const _
   }
 
   pub(crate) fn push(&mut self, item: T) -> u32 {
@@ -77,28 +78,24 @@ impl<T> SparseSet<T> {
       id as _
     };
 
-    self.dense.push(DenseCell::new(id, item));
+    self.dense.push(DenseCell::new(item));
+    self.dense_ids.push(AtomicU32::new(id));
     id
   }
 
   pub(crate) fn update(&mut self, id: u32, item: T) -> UpdateResp {
     let dense_index = *self.sparse[id as usize].get_mut();
-    self.dense[dense_index as usize].get_mut().value = item;
+    *self.dense[dense_index as usize].get_mut() = item;
     UpdateResp { id, dense_index }
   }
 
   pub(crate) fn remove(&mut self, id: u32) -> RemoveResp<T> {
     let dense_index = *self.sparse[id as usize].get_mut();
-
-    let item = self
-      .dense
-      .swap_remove(dense_index as _)
-      .0
-      .into_inner()
-      .value;
+    let item = self.dense.swap_remove(dense_index as _).0.into_inner();
+    let id = *self.dense_ids.swap_remove(dense_index as _).get_mut();
 
     if dense_index < self.dense.len() as _ {
-      *self.sparse[self.dense[dense_index as usize].get_mut().id as usize].get_mut() =
+      *self.sparse[*self.dense_ids[dense_index as usize].get_mut() as usize].get_mut() =
         dense_index as _;
     }
 
@@ -143,12 +140,13 @@ impl<T: Send> SparseSet<T> {
         .map(|index| (sparse_index_count + index) as u32),
     );
 
-    self.dense.par_extend(
-      ids
-        .par_iter()
-        .zip(items.into_par_iter())
-        .map(|(&id, item)| DenseCell::new(id, item)),
-    );
+    self
+      .dense
+      .par_extend(items.into_par_iter().map(|item| DenseCell::new(item)));
+
+    self
+      .dense_ids
+      .par_extend(ids.par_iter().map(|&id| AtomicU32::new(id)));
 
     ids.into_boxed_slice()
   }
@@ -158,7 +156,7 @@ impl<T: Send> SparseSet<T> {
       .into_par_iter()
       .map(|(id, item)| unsafe {
         let dense_index = self.sparse[id as usize].load(Ordering::Relaxed);
-        (*self.dense[dense_index as usize].get()).value = item;
+        *self.dense[dense_index as usize].get() = item;
         UpdateResp { id, dense_index }
       })
       .collect()
@@ -175,12 +173,13 @@ impl<T: Send + Copy> SparseSet<T> {
     let resps = dense_indices
       .par_iter()
       .map(|&dense_index| unsafe {
-        let dense_item = self.dense[dense_index as usize].get();
+        let dense_item = *self.dense[dense_index as usize].get();
+        let dense_id = self.dense_ids[dense_index as usize].load(Ordering::Relaxed);
 
         RemoveResp {
-          id: (*dense_item).id,
+          id: dense_id,
           dense_index,
-          item: (*dense_item).value,
+          item: dense_item,
         }
       })
       .collect::<Box<_>>();
@@ -200,6 +199,19 @@ impl<T: Send + Copy> SparseSet<T> {
       })
       .collect::<Box<_>>();
 
+    let src_dense_ids = self
+      .dense_ids
+      .par_drain(dense_start_index..)
+      .enumerate()
+      .filter_map(|(index, dense_id)| {
+        if dense_indices.contains(&((dense_start_index + index) as _)) {
+          None
+        } else {
+          Some(dense_id)
+        }
+      })
+      .collect::<Box<_>>();
+
     let dst_dense_indices = dense_indices
       .into_par_iter()
       .filter(|&dense_index| dense_index < dense_start_index as _)
@@ -207,17 +219,20 @@ impl<T: Send + Copy> SparseSet<T> {
 
     src_dense_cells
       .into_par_iter()
+      .zip(src_dense_ids.into_par_iter())
       .zip(dst_dense_indices.into_par_iter())
-      .for_each(|(dense_cell, &dense_index)| unsafe {
-        let dst_item = self.dense[dense_index as usize].get();
-        let src_item = dense_cell.get();
-        (*dst_item).id = (*src_item).id;
-        (*dst_item).value = (*src_item).value;
-        self.sparse[(*dst_item).id as usize].store(dense_index, Ordering::Relaxed);
-      });
+      .for_each(
+        |((src_dense_cell, src_dense_id), &dst_dense_index)| unsafe {
+          *self.dense[dst_dense_index as usize].get() = *src_dense_cell.get();
+          let src_dense_id = src_dense_id.load(Ordering::Relaxed);
+          self.dense_ids[dst_dense_index as usize].store(src_dense_id, Ordering::Relaxed);
+          self.sparse[src_dense_id as usize].store(dst_dense_index, Ordering::Relaxed);
+        },
+      );
 
     self.dense.truncate(dense_start_index);
-    self.free_ids.par_extend(ids.into_par_iter());
+    self.dense_ids.truncate(dense_start_index);
+    self.free_ids.par_extend(ids);
     resps
   }
 }
