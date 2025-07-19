@@ -4,7 +4,7 @@ description = "A simple cross platform GUI framework written in Rust suitable fo
 version = "0.1.0"
 edition = "2024"
 publish = false
-repository = "https://github.com/ii887522/flut2"
+repository = "https://github.com/ii887522/flut"
 rust-version = "1.88"
 
 [profile.dev]
