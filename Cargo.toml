@@ -4,7 +4,7 @@ description = "A simple cross platform GUI framework written in Rust suitable fo
 version = "0.1.0"
 edition = "2024"
 publish = false
-repository = "https://github.com/ii887522/flut2"
+repository = "https://github.com/ii887522/flut"
 rust-version = "1.88"
 
 [profile.dev]
@@ -28,7 +28,9 @@ x86_64-pc-windows-msvc = { triplet = "x64-windows-static-md" }
 [dependencies]
 flut_macro = { path = "flut_macro" }
 mimalloc = { version = "0.1", default-features = false }
+rayon = { version = "1.10", default-features = false }
 rustc-hash = { version = "2.1", default-features = false, features = ["std"] }
+vk-mem = { version = "0.4" }
 
 [dependencies.ash]
 version = "0.38"
@@ -39,11 +41,6 @@ features = ["loaded", "std"]
 version = "0.4"
 default-features = false
 features = ["now", "std"]
-
-[dependencies.gpu-allocator]
-version = "0.27"
-default-features = false
-features = ["vulkan"]
 
 [dependencies.sdl2]
 version = "0.37"
@@ -56,6 +53,11 @@ features = [
   "static-link",
   "use-vcpkg",
 ]
+
+[dependencies.voracious_radix_sort]
+version = "1.2"
+default-features = false
+features = ["voracious_multithread"]
 
 [build-dependencies]
 shaderc = { version = "0.9", default-features = false }

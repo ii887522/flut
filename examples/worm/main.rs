@@ -2,13 +2,33 @@
 #![allow(clippy::needless_lifetimes, clippy::too_many_arguments)]
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-extern crate ash;
-
+use flut::{App, Renderer, app, models::Rect};
 use mimalloc::MiMalloc;
+use sdl2::event::Event;
 
 #[global_allocator]
 static GLOBAL: MiMalloc = MiMalloc;
 
 fn main() {
-  flut::run_app("Worm", (900, 900), "assets/worm/favicon.png");
+  app::run(WormGame);
+}
+
+struct WormGame;
+
+impl App for WormGame {
+  fn get_config(&self) -> app::Config {
+    app::Config {
+      title: "Worm".into(),
+      size: (900, 900),
+      favicon_path: "assets/worm/favicon.png".into(),
+      ..Default::default()
+    }
+  }
+
+  fn init(&mut self, renderer: &mut dyn Renderer) {
+    renderer.add_rect(Rect::new((100.0, 200.0), (200.0, 100.0), (255, 255, 0)));
+  }
+
+  fn process_event(&mut self, _event: Event) {}
+  fn update(&mut self, _dt: f32, _renderer: &mut dyn Renderer) {}
 }

@@ -1,14 +1,16 @@
-use super::{Device, GraphicsPipeline, graphics_pipeline};
+use super::{Device, StreamBuffer};
+use crate::{
+  app::DrawableCaps,
+  models::Rect,
+  vk::batches::{RectBatch, rect_batch},
+};
 use ash::vk::{self, Handle};
+use rustc_hash::{FxHashMap, FxHashSet};
 use sdl2::video::Window;
-use std::{ffi::CString, iter, rc::Rc};
-
-// Settings
-const SWAPCHAIN_IMAGE_FORMAT: vk::Format = vk::Format::B8G8R8A8_UNORM;
-const MAX_IN_FLIGHT_FRAME_COUNT: usize = 3;
+use std::{ffi::CString, iter, mem, rc::Rc};
 
 pub(crate) struct Creating {
-  rect_pipeline: GraphicsPipeline<graphics_pipeline::Creating>,
+  rect_batch: RectBatch<rect_batch::Creating>,
 }
 
 pub(crate) struct Created {
@@ -16,7 +18,7 @@ pub(crate) struct Created {
   swapchain: vk::SwapchainKHR,
   swapchain_image_views: Box<[vk::ImageView]>,
   swapchain_framebuffers: Box<[vk::Framebuffer]>,
-  rect_pipeline: GraphicsPipeline<graphics_pipeline::Created>,
+  rect_batch: RectBatch<rect_batch::Created>,
   frame_index: usize,
 }
 
@@ -36,6 +38,8 @@ pub(crate) struct Renderer<State> {
   graphics_command_buffers: Box<[vk::CommandBuffer]>,
   swapchain_device: ash::khr::swapchain::Device,
   render_pass: vk::RenderPass,
+  vk_allocator: Rc<vk_mem::Allocator>,
+  instance_buffer: StreamBuffer,
   image_avail_semaphores: Box<[vk::Semaphore]>,
   render_finished_semaphores: Box<[vk::Semaphore]>,
   in_flight_fences: Box<[vk::Fence]>,
@@ -43,14 +47,14 @@ pub(crate) struct Renderer<State> {
 }
 
 impl Renderer<Creating> {
-  pub(crate) fn new(window: Window) -> Self {
+  pub(crate) fn new(window: Window, drawable_caps: DrawableCaps) -> Self {
     let entry = unsafe { ash::Entry::load().unwrap() };
     let app_name = CString::new(window.title()).unwrap();
 
     let app_info = vk::ApplicationInfo {
       p_application_name: app_name.as_ptr(),
       application_version: vk::make_api_version(0, 0, 1, 0),
-      api_version: vk::make_api_version(0, 1, 3, 0),
+      api_version: vk::API_VERSION_1_3,
       ..Default::default()
     };
 
@@ -327,7 +331,7 @@ impl Renderer<Creating> {
       ..Default::default()
     };
 
-    let graphics_command_pools = (0..MAX_IN_FLIGHT_FRAME_COUNT)
+    let graphics_command_pools = (0..crate::consts::MAX_IN_FLIGHT_FRAME_COUNT)
       .map(|_| unsafe {
         device
           .create_command_pool(&graphics_command_pool_create_info, None)
@@ -353,16 +357,11 @@ impl Renderer<Creating> {
       })
       .collect::<Box<_>>();
 
-    let rect_pipeline = GraphicsPipeline::new(
-      vk_device.clone(),
-      include_bytes!("../../target/spv/rect.vert.spv"),
-      include_bytes!("../../target/spv/rect.frag.spv"),
-    );
-
+    let rect_batch = RectBatch::new(vk_device.clone(), drawable_caps.rect_count);
     let swapchain_device = ash::khr::swapchain::Device::new(&instance, device);
 
     let attachment_descs = [vk::AttachmentDescription2 {
-      format: SWAPCHAIN_IMAGE_FORMAT,
+      format: super::consts::SWAPCHAIN_IMAGE_FORMAT,
       samples: vk::SampleCountFlags::TYPE_1,
       load_op: vk::AttachmentLoadOp::CLEAR,
       store_op: vk::AttachmentStoreOp::STORE,
@@ -425,10 +424,35 @@ impl Renderer<Creating> {
         .unwrap()
     };
 
+    let mut vk_allocator_create_info =
+      vk_mem::AllocatorCreateInfo::new(&instance, device, physical_device);
+
+    vk_allocator_create_info.flags = vk_mem::AllocatorCreateFlags::EXTERNALLY_SYNCHRONIZED
+      | vk_mem::AllocatorCreateFlags::KHR_DEDICATED_ALLOCATION
+      | vk_mem::AllocatorCreateFlags::EXT_MEMORY_BUDGET
+      | vk_mem::AllocatorCreateFlags::BUFFER_DEVICE_ADDRESS
+      | vk_mem::AllocatorCreateFlags::EXT_MEMORY_PRIORITY;
+
+    let instance_buffer_max_bytes = drawable_caps.rect_count * mem::size_of::<Rect>();
+
+    vk_allocator_create_info.preferred_large_heap_block_size =
+      (instance_buffer_max_bytes * crate::consts::MAX_IN_FLIGHT_FRAME_COUNT * 8) as _;
+
+    vk_allocator_create_info.vulkan_api_version = vk::API_VERSION_1_3;
+
+    let vk_allocator =
+      unsafe { Rc::new(vk_mem::Allocator::new(vk_allocator_create_info).unwrap()) };
+
+    let instance_buffer = StreamBuffer::new(
+      vk_device.clone(),
+      vk_allocator.clone(),
+      instance_buffer_max_bytes,
+    );
+
     let (image_avail_semaphores, (render_finished_semaphores, in_flight_fences)): (
       Vec<_>,
       (Vec<_>, Vec<_>),
-    ) = (0..MAX_IN_FLIGHT_FRAME_COUNT)
+    ) = (0..crate::consts::MAX_IN_FLIGHT_FRAME_COUNT)
       .map(|_| {
         let semaphore_create_info = vk::SemaphoreCreateInfo::default();
 
@@ -469,10 +493,12 @@ impl Renderer<Creating> {
       graphics_command_buffers,
       swapchain_device,
       render_pass,
+      vk_allocator,
+      instance_buffer,
       image_avail_semaphores: image_avail_semaphores.into_boxed_slice(),
       render_finished_semaphores: render_finished_semaphores.into_boxed_slice(),
       in_flight_fences: in_flight_fences.into_boxed_slice(),
-      state: Creating { rect_pipeline },
+      state: Creating { rect_batch },
     }
   }
 
@@ -529,7 +555,7 @@ impl Renderer<Creating> {
     let swapchain_create_info = vk::SwapchainCreateInfoKHR {
       surface: self.surface,
       min_image_count: swapchain_min_image_count,
-      image_format: SWAPCHAIN_IMAGE_FORMAT,
+      image_format: super::consts::SWAPCHAIN_IMAGE_FORMAT,
       image_extent: swapchain_image_extent,
       image_array_layers: 1,
       image_usage: vk::ImageUsageFlags::COLOR_ATTACHMENT,
@@ -565,7 +591,7 @@ impl Renderer<Creating> {
         let image_view_create_info = vk::ImageViewCreateInfo {
           image,
           view_type: vk::ImageViewType::TYPE_2D,
-          format: SWAPCHAIN_IMAGE_FORMAT,
+          format: super::consts::SWAPCHAIN_IMAGE_FORMAT,
           components: vk::ComponentMapping::default(),
           subresource_range: vk::ImageSubresourceRange {
             aspect_mask: vk::ImageAspectFlags::COLOR,
@@ -606,9 +632,9 @@ impl Renderer<Creating> {
       })
       .collect::<Box<_>>();
 
-    let rect_pipeline = self
+    let rect_batch = self
       .state
-      .rect_pipeline
+      .rect_batch
       .finish(self.render_pass, swapchain_image_extent);
 
     Ok(Renderer {
@@ -627,6 +653,8 @@ impl Renderer<Creating> {
       graphics_command_buffers: self.graphics_command_buffers,
       swapchain_device: self.swapchain_device,
       render_pass: self.render_pass,
+      vk_allocator: self.vk_allocator,
+      instance_buffer: self.instance_buffer,
       image_avail_semaphores: self.image_avail_semaphores,
       render_finished_semaphores: self.render_finished_semaphores,
       in_flight_fences: self.in_flight_fences,
@@ -635,7 +663,7 @@ impl Renderer<Creating> {
         swapchain,
         swapchain_image_views,
         swapchain_framebuffers,
-        rect_pipeline,
+        rect_batch,
         frame_index: 0,
       },
     })
@@ -646,6 +674,7 @@ impl Renderer<Creating> {
 
     unsafe {
       device.device_wait_idle().unwrap();
+      self.state.rect_batch.drop();
 
       self
         .in_flight_fences
@@ -662,6 +691,8 @@ impl Renderer<Creating> {
         .into_iter()
         .for_each(|semaphore| device.destroy_semaphore(semaphore, None));
 
+      self.instance_buffer.drop();
+      drop(self.vk_allocator);
       device.destroy_render_pass(self.render_pass, None);
 
       self
@@ -678,7 +709,7 @@ impl Renderer<Creating> {
 
 impl Renderer<Created> {
   #[allow(clippy::result_large_err)]
-  pub(crate) fn render(self) -> Result<Self, Renderer<Creating>> {
+  pub(crate) fn render(mut self) -> Result<Self, Renderer<Creating>> {
     let image_avail_semaphore = self.image_avail_semaphores[self.state.frame_index];
     let render_finished_semaphore = self.render_finished_semaphores[self.state.frame_index];
     let in_flight_fence = self.in_flight_fences[self.state.frame_index];
@@ -759,20 +790,18 @@ impl Renderer<Created> {
         &subpass_begin_info,
       );
 
-      device.cmd_bind_pipeline(
+      self.state.rect_batch.record_draw_commands(
         graphics_command_buffer,
-        vk::PipelineBindPoint::GRAPHICS,
-        self.state.rect_pipeline.get(),
+        &self.instance_buffer,
+        self.state.swapchain_image_extent,
       );
 
-      device.cmd_draw(graphics_command_buffer, 6, 1, 0, 0);
       device.cmd_end_render_pass2(graphics_command_buffer, &subpass_end_info);
-
       device.end_command_buffer(graphics_command_buffer).unwrap();
-
       device.reset_fences(&[in_flight_fence]).unwrap();
-    }
+    };
 
+    self.instance_buffer = self.instance_buffer.next_sub_buf();
     let wait_dst_stage_mask = vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT;
 
     let queue_submit_infos = [vk::SubmitInfo {
@@ -814,7 +843,7 @@ impl Renderer<Created> {
       }
     }
 
-    let frame_index = (self.state.frame_index + 1) % MAX_IN_FLIGHT_FRAME_COUNT;
+    let frame_index = (self.state.frame_index + 1) % crate::consts::MAX_IN_FLIGHT_FRAME_COUNT;
 
     Ok(Self {
       state: Created {
@@ -826,7 +855,7 @@ impl Renderer<Created> {
   }
 
   fn on_swapchain_suboptimal(self) -> Renderer<Creating> {
-    let rect_pipeline = self.state.rect_pipeline.on_swapchain_suboptimal();
+    let rect_batch = self.state.rect_batch.on_swapchain_suboptimal();
     let device = self.device.get();
 
     unsafe {
@@ -865,10 +894,12 @@ impl Renderer<Created> {
       graphics_command_buffers: self.graphics_command_buffers,
       swapchain_device: self.swapchain_device,
       render_pass: self.render_pass,
+      vk_allocator: self.vk_allocator,
+      instance_buffer: self.instance_buffer,
       image_avail_semaphores: self.image_avail_semaphores,
       render_finished_semaphores: self.render_finished_semaphores,
       in_flight_fences: self.in_flight_fences,
-      state: Creating { rect_pipeline },
+      state: Creating { rect_batch },
     }
   }
 
@@ -877,7 +908,7 @@ impl Renderer<Created> {
 
     unsafe {
       device.device_wait_idle().unwrap();
-      self.state.rect_pipeline.drop();
+      self.state.rect_batch.drop();
 
       self
         .state
@@ -910,6 +941,8 @@ impl Renderer<Created> {
         .into_iter()
         .for_each(|semaphore| device.destroy_semaphore(semaphore, None));
 
+      self.instance_buffer.drop();
+      drop(self.vk_allocator);
       device.destroy_render_pass(self.render_pass, None);
 
       self
@@ -920,6 +953,50 @@ impl Renderer<Created> {
       device.destroy_device(None);
       self.surface_instance.destroy_surface(self.surface, None);
       self.instance.destroy_instance(None);
+    }
+  }
+}
+
+impl crate::Renderer for Result<Renderer<Created>, Renderer<Creating>> {
+  fn add_rect(&mut self, rect: Rect) -> u32 {
+    match self {
+      Ok(renderer) => renderer.state.rect_batch.add_rect(rect),
+      Err(renderer) => renderer.state.rect_batch.add_rect(rect),
+    }
+  }
+
+  fn add_rects(&mut self, rects: Vec<Rect>) -> Box<[u32]> {
+    match self {
+      Ok(renderer) => renderer.state.rect_batch.add_rects(rects),
+      Err(renderer) => renderer.state.rect_batch.add_rects(rects),
+    }
+  }
+
+  fn update_rect(&mut self, id: u32, rect: Rect) {
+    match self {
+      Ok(renderer) => renderer.state.rect_batch.update_rect(id, rect),
+      Err(renderer) => renderer.state.rect_batch.update_rect(id, rect),
+    }
+  }
+
+  fn update_rects(&mut self, rects: FxHashMap<u32, Rect>) {
+    match self {
+      Ok(renderer) => renderer.state.rect_batch.update_rects(rects),
+      Err(renderer) => renderer.state.rect_batch.update_rects(rects),
+    }
+  }
+
+  fn remove_rect(&mut self, id: u32) -> Rect {
+    match self {
+      Ok(renderer) => renderer.state.rect_batch.remove_rect(id),
+      Err(renderer) => renderer.state.rect_batch.remove_rect(id),
+    }
+  }
+
+  fn remove_rects(&mut self, ids: FxHashSet<u32>) -> Box<[(u32, Rect)]> {
+    match self {
+      Ok(renderer) => renderer.state.rect_batch.remove_rects(ids),
+      Err(renderer) => renderer.state.rect_batch.remove_rects(ids),
     }
   }
 }
