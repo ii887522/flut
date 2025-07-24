@@ -3,12 +3,11 @@ use crate::{
   collections::SparseSet,
   models::Rect,
   vk::{Device, GraphicsPipeline, StreamBuffer, graphics_pipeline},
-  write,
 };
 use ash::vk;
 use rayon::prelude::*;
 use rustc_hash::{FxHashMap, FxHashSet};
-use std::{collections::VecDeque, mem, ptr, rc::Rc};
+use std::{collections::VecDeque, mem, rc::Rc};
 
 #[repr(C, align(8))]
 struct RectPushConst {
@@ -91,26 +90,11 @@ impl RectBatch<Created> {
     instance_buffer: &StreamBuffer,
     swapchain_image_extent: vk::Extent2D,
   ) {
-    let writes = self.writes_queues.back_mut().unwrap();
-    write::coalesce(writes);
-
-    unsafe {
-      for writes in &self.writes_queues {
-        for write in writes {
-          ptr::copy_nonoverlapping(
-            self.rects.get_dense_ptr().add(write.get_from() as _),
-            instance_buffer.get_mapped_data() as *mut _,
-            write.get_size() as _,
-          );
-        }
-      }
-    }
-
-    if self.writes_queues.len() >= crate::consts::MAX_IN_FLIGHT_FRAME_COUNT {
-      self.writes_queues.pop_front().unwrap();
-    }
-
-    self.writes_queues.push_back(vec![]);
+    crate::flush_writes(
+      &mut self.writes_queues,
+      self.rects.get_dense_ptr(),
+      instance_buffer.get_mapped_data(),
+    );
 
     let rect_push_const = RectPushConst::new(
       instance_buffer.get_addr(),
@@ -157,43 +141,61 @@ impl RectBatch<Created> {
 impl<State> RectBatch<State> {
   pub(crate) fn add_rect(&mut self, rect: Rect) -> u32 {
     let writes = self.writes_queues.back_mut().unwrap();
-    writes.push(Write::new(self.rects.len() as _, 1));
+
+    writes.push(Write {
+      from: self.rects.len() as _,
+      size: 1,
+    });
+
     self.rects.push(rect)
   }
 
   pub(crate) fn add_rects(&mut self, rects: Vec<Rect>) -> Box<[u32]> {
     let writes = self.writes_queues.back_mut().unwrap();
-    writes.push(Write::new(self.rects.len() as _, rects.len() as _));
+
+    writes.push(Write {
+      from: self.rects.len() as _,
+      size: rects.len() as _,
+    });
+
     self.rects.par_extend(rects)
   }
 
   pub(crate) fn update_rect(&mut self, id: u32, rect: Rect) {
     let update_resp = self.rects.update(id, rect);
     let writes = self.writes_queues.back_mut().unwrap();
-    writes.push(Write::new(update_resp.dense_index, 1));
+
+    writes.push(Write {
+      from: update_resp.dense_index,
+      size: 1,
+    });
   }
 
   pub(crate) fn update_rects(&mut self, rects: FxHashMap<u32, Rect>) {
     let update_resps = self.rects.par_update(rects);
     let writes = self.writes_queues.back_mut().unwrap();
 
-    writes.par_extend(
-      update_resps
-        .into_par_iter()
-        .map(|update_resp| Write::new(update_resp.dense_index, 1)),
-    );
+    writes.par_extend(update_resps.into_par_iter().map(|update_resp| Write {
+      from: update_resp.dense_index,
+      size: 1,
+    }));
   }
 
-  pub(crate) fn remove_rect(&mut self, id: u32) -> Rect {
-    let remove_resp = self.rects.remove(id);
+  pub(crate) fn remove_rect(&mut self, id: u32) -> Option<Rect> {
+    let remove_resp = self.rects.remove(id)?;
 
     if remove_resp.dense_index >= self.rects.len() as _ {
-      return remove_resp.item;
+      return Some(remove_resp.item);
     }
 
     let writes = self.writes_queues.back_mut().unwrap();
-    writes.push(Write::new(remove_resp.dense_index, 1));
-    remove_resp.item
+
+    writes.push(Write {
+      from: remove_resp.dense_index,
+      size: 1,
+    });
+
+    Some(remove_resp.item)
   }
 
   pub(crate) fn remove_rects(&mut self, ids: FxHashSet<u32>) -> Box<[(u32, Rect)]> {
@@ -208,7 +210,10 @@ impl<State> RectBatch<State> {
 
     writes.par_extend(remove_resps.into_par_iter().filter_map(|remove_resp| {
       if remove_resp.dense_index < self.rects.len() as _ {
-        Some(Write::new(remove_resp.dense_index, 1))
+        Some(Write {
+          from: remove_resp.dense_index,
+          size: 1,
+        })
       } else {
         None
       }
