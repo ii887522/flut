@@ -2,7 +2,7 @@
 pub(super) const APP_SIZE: (u32, u32) = (880, 880);
 pub(super) const CELL_SIZE: (u32, u32) = (16, 16);
 pub(super) const GAP_SIZE: (u32, u32) = (2, 2);
-pub(super) const UPDATES_PER_SECOND: f32 = 15.0;
+pub(super) const UPDATES_PER_SECOND: f32 = 30.0;
 
 // Computed
 pub(super) const GRID_SIZE: (u32, u32) = (

@@ -80,6 +80,10 @@ impl<T> SparseSet<T> {
     self.dense.as_ptr() as *const _
   }
 
+  pub const fn get_dense_ids(&self) -> &[u32] {
+    unsafe { slice::from_raw_parts(self.dense_ids.as_ptr() as *const _, self.dense_ids.len()) }
+  }
+
   pub fn push(&mut self, item: T) -> u32 {
     let dense_item_count = self.dense.len();
 

@@ -35,7 +35,9 @@ fn coalesce(writes: &mut Vec<Write>) {
     .fold(Vec::new, |mut writes: Vec<Write>, &write| {
       if let Some(last_write) = writes.last_mut() {
         if write.from <= last_write.from + last_write.size {
-          last_write.size = write.from + write.size - last_write.from
+          last_write.size = last_write
+            .size
+            .max(write.from + write.size - last_write.from);
         } else {
           writes.push(write);
         }
@@ -48,7 +50,10 @@ fn coalesce(writes: &mut Vec<Write>) {
     .reduce(Vec::new, |mut writes_a, writes_b| {
       if let Some((last_write_a, first_write_b)) = writes_a.last_mut().zip(writes_b.first()) {
         if first_write_b.from <= last_write_a.from + last_write_a.size {
-          last_write_a.size = first_write_b.from + first_write_b.size - last_write_a.from;
+          last_write_a.size = last_write_a
+            .size
+            .max(first_write_b.from + first_write_b.size - last_write_a.from);
+
           writes_a.par_extend(writes_b.into_par_iter().skip(1));
         } else {
           writes_a.par_extend(writes_b);
