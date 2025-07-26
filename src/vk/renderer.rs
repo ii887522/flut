@@ -986,7 +986,7 @@ impl crate::Renderer for Result<Renderer<Created>, Renderer<Creating>> {
     }
   }
 
-  fn remove_rect(&mut self, id: u32) -> Rect {
+  fn remove_rect(&mut self, id: u32) -> Option<Rect> {
     match self {
       Ok(renderer) => renderer.state.rect_batch.remove_rect(id),
       Err(renderer) => renderer.state.rect_batch.remove_rect(id),
