@@ -2,6 +2,7 @@ use crate::models::Rect;
 use rustc_hash::{FxHashMap, FxHashSet};
 
 pub trait Renderer {
+  fn set_cam_position(&mut self, cam_position: (f32, f32));
   fn add_rect(&mut self, rect: Rect) -> u32;
   fn add_rects(&mut self, rects: Vec<Rect>) -> Box<[u32]>;
   fn update_rect(&mut self, id: u32, rect: Rect);

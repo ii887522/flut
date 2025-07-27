@@ -12,13 +12,19 @@ use std::{collections::VecDeque, mem, rc::Rc};
 #[repr(C, align(8))]
 struct RectPushConst {
   rect_buf_addr: vk::DeviceAddress,
+  cam_position: (f32, f32),
   cam_size: (f32, f32),
 }
 
 impl RectPushConst {
-  const fn new(rect_buf_addr: vk::DeviceAddress, cam_size: (u32, u32)) -> Self {
+  const fn new(
+    rect_buf_addr: vk::DeviceAddress,
+    cam_position: (f32, f32),
+    cam_size: (u32, u32),
+  ) -> Self {
     Self {
       rect_buf_addr,
+      cam_position,
       cam_size: (cam_size.0 as _, cam_size.1 as _),
     }
   }
@@ -36,6 +42,7 @@ pub(crate) struct RectBatch<State> {
   device: Rc<Device>,
   rects: SparseSet<Rect>,
   writes_queues: VecDeque<Vec<Write>>,
+  cam_position: (f32, f32),
   state: State,
 }
 
@@ -56,6 +63,7 @@ impl RectBatch<Creating> {
       device: vk_device,
       rects: SparseSet::with_capacity(cap),
       writes_queues: VecDeque::from_iter([vec![]]),
+      cam_position: (0.0, 0.0),
       state: Creating { pipeline },
     }
   }
@@ -74,6 +82,7 @@ impl RectBatch<Creating> {
       device: self.device,
       rects: self.rects,
       writes_queues: self.writes_queues,
+      cam_position: self.cam_position,
       state: Created { pipeline },
     }
   }
@@ -98,6 +107,7 @@ impl RectBatch<Created> {
 
     let rect_push_const = RectPushConst::new(
       instance_buffer.get_addr(),
+      self.cam_position,
       (swapchain_image_extent.width, swapchain_image_extent.height),
     );
 
@@ -129,6 +139,7 @@ impl RectBatch<Created> {
       device: self.device,
       rects: self.rects,
       writes_queues: self.writes_queues,
+      cam_position: self.cam_position,
       state: Creating { pipeline },
     }
   }
@@ -139,6 +150,10 @@ impl RectBatch<Created> {
 }
 
 impl<State> RectBatch<State> {
+  pub(crate) fn set_cam_position(&mut self, cam_position: (f32, f32)) {
+    self.cam_position = cam_position;
+  }
+
   pub(crate) fn add_rect(&mut self, rect: Rect) -> u32 {
     let writes = self.writes_queues.back_mut().unwrap();
 
