@@ -2,9 +2,11 @@
 #![allow(clippy::needless_lifetimes, clippy::too_many_arguments)]
 
 pub mod app;
+mod audio;
 pub mod clock;
 pub mod collections;
 mod consts;
+pub mod context;
 pub mod models;
 pub mod renderer;
 mod vk;
@@ -12,6 +14,7 @@ mod vk;
 use crate::models::Write;
 pub use app::App;
 pub use clock::Clock;
+pub use context::Context;
 use rayon::prelude::*;
 pub use renderer::Renderer;
 use std::ffi::c_void;

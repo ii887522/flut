@@ -1,7 +1,7 @@
-use crate::{Renderer, vk};
+use crate::{Context, audio, vk};
 use flut_macro::warn;
 use sdl2::{event::Event, image::LoadSurface, surface::Surface};
-use std::{borrow::Cow, iter, time::Instant};
+use std::{borrow::Cow, iter, sync::mpsc, thread, time::Instant};
 
 pub struct DrawableCaps {
   pub rect_count: usize,
@@ -36,13 +36,15 @@ pub trait App {
     Default::default()
   }
 
-  fn init(&mut self, _renderer: &mut dyn Renderer) {}
+  fn init(&mut self, _context: Context<'_>) {}
   fn process_event(&mut self, _event: Event) {}
-  fn update(&mut self, _dt: f32, _renderer: &mut dyn Renderer) {}
+  fn update(&mut self, _dt: f32, _context: Context<'_>) {}
 }
 
 pub fn run(mut app: impl App) {
   let sdl = sdl2::init().unwrap();
+  let (audio_tx, audio_rx) = mpsc::channel();
+  let audio_thread = thread::spawn(|| audio::run(audio_rx));
 
   // Prevent SDL from creating an OpenGL context by itself
   sdl2::hint::set("SDL_VIDEO_EXTERNAL_CONTEXT", "1");
@@ -68,7 +70,12 @@ pub fn run(mut app: impl App) {
   }
 
   let mut renderer_result = vk::Renderer::new(window.clone(), config.drawable_caps).finish();
-  app.init(&mut renderer_result);
+
+  app.init(Context {
+    renderer: &mut renderer_result,
+    audio_tx: audio_tx.clone(),
+  });
+
   window.show();
   let mut event_pump = sdl.event_pump().unwrap();
   let mut prev = Instant::now();
@@ -105,7 +112,15 @@ pub fn run(mut app: impl App) {
     )
     .skip(1)
     .map(|(prev_time, next_time, _)| prev_time - next_time)
-    .for_each(|dt| app.update(dt, &mut renderer_result));
+    .for_each(|dt| {
+      app.update(
+        dt,
+        Context {
+          renderer: &mut renderer_result,
+          audio_tx: audio_tx.clone(),
+        },
+      )
+    });
 
     renderer_result = match renderer_result {
       Ok(renderer) => renderer.render(),
@@ -117,4 +132,7 @@ pub fn run(mut app: impl App) {
     Ok(renderer) => renderer.drop(),
     Err(renderer) => renderer.drop(),
   }
+
+  drop(audio_tx);
+  audio_thread.join().unwrap();
 }

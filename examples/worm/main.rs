@@ -6,7 +6,11 @@ mod consts;
 mod models;
 
 use crate::models::{Air, Direction, Food, Wall, Worm};
-use flut::{App, Clock, Renderer, app, collections::SparseSet, models::Rect};
+use flut::{
+  App, Clock, Context, app,
+  collections::SparseSet,
+  models::{AudioReq, Rect},
+};
 use mimalloc::MiMalloc;
 use rayon::{iter::Either, prelude::*};
 use sdl2::{event::Event, keyboard::Keycode};
@@ -72,7 +76,7 @@ impl WormGame {
     }
   }
 
-  fn move_worm(&mut self, renderer: &mut dyn Renderer) -> bool {
+  fn move_worm(&mut self, context: &mut Context<'_>) -> bool {
     let worm_head = *self.worms.back().unwrap();
     let worm_head_next_position = worm_head.calc_next_position();
 
@@ -96,8 +100,15 @@ impl WormGame {
 
     self.worms.push_back(new_worm_head);
     self.airs.push_by_id(worm_tail.position, new_air);
-    renderer.update_rect(worm_tail.drawable_id, Rect::from(new_worm_head));
-    renderer.update_rect(air.drawable_id, Rect::from(new_air));
+
+    context
+      .renderer
+      .update_rect(worm_tail.drawable_id, Rect::from(new_worm_head));
+
+    context
+      .renderer
+      .update_rect(air.drawable_id, Rect::from(new_air));
+
     true
   }
 
@@ -107,7 +118,12 @@ impl WormGame {
     worm_head.calc_next_position() == food.position
   }
 
-  fn grow_worm(&mut self, renderer: &mut dyn Renderer) {
+  fn grow_worm(&mut self, context: &mut Context<'_>) {
+    context
+      .audio_tx
+      .send(AudioReq::PlaySound("assets/worm/audios/eat.mp3".into()))
+      .unwrap();
+
     let worm_head = self.worms.back().unwrap();
     let food = self.food.unwrap();
 
@@ -118,10 +134,13 @@ impl WormGame {
     };
 
     self.worms.push_back(new_worm_head);
-    renderer.update_rect(food.drawable_id, Rect::from(new_worm_head));
+
+    context
+      .renderer
+      .update_rect(food.drawable_id, Rect::from(new_worm_head));
   }
 
-  fn spawn_food(&mut self, renderer: &mut dyn Renderer) {
+  fn spawn_food(&mut self, context: &mut Context<'_>) {
     let Some(&rand_air_position) = fastrand::choice(self.airs.get_dense_ids()) else {
       return;
     };
@@ -134,7 +153,20 @@ impl WormGame {
     };
 
     self.food = Some(food);
-    renderer.update_rect(remove_air_resp.item.drawable_id, Rect::from(food));
+
+    context
+      .renderer
+      .update_rect(remove_air_resp.item.drawable_id, Rect::from(food));
+  }
+
+  fn kill_worm(&mut self, context: &mut Context<'_>) {
+    context
+      .audio_tx
+      .send(AudioReq::PlaySound("assets/worm/audios/dead.mp3".into()))
+      .unwrap();
+
+    context.audio_tx.send(AudioReq::HaltMusic).unwrap();
+    self.worm_dead = true;
   }
 }
 
@@ -148,8 +180,13 @@ impl App for WormGame {
     }
   }
 
-  fn init(&mut self, renderer: &mut dyn Renderer) {
-    let rect_ids = renderer.add_rects(
+  fn init(&mut self, mut context: Context<'_>) {
+    context
+      .audio_tx
+      .send(AudioReq::PlayMusic("assets/worm/audios/moving.mp3".into()))
+      .unwrap();
+
+    let rect_ids = context.renderer.add_rects(
       self
         .walls
         .par_iter()
@@ -181,7 +218,7 @@ impl App for WormGame {
       .zip(air_ids.par_iter())
       .for_each(|(air, &id)| air.drawable_id = id);
 
-    self.spawn_food(renderer);
+    self.spawn_food(&mut context);
   }
 
   fn process_event(&mut self, event: Event) {
@@ -216,7 +253,7 @@ impl App for WormGame {
     }
   }
 
-  fn update(&mut self, dt: f32, renderer: &mut dyn Renderer) {
+  fn update(&mut self, dt: f32, mut context: Context<'_>) {
     if !self.clock.update(dt) || self.worm_dead {
       return;
     }
@@ -226,16 +263,16 @@ impl App for WormGame {
       worm_head.direction = next_worm_direction;
     }
 
-    if self.move_worm(renderer) {
+    if self.move_worm(&mut context) {
       return;
     }
 
     if self.will_eat_food() {
-      self.grow_worm(renderer);
-      self.spawn_food(renderer);
+      self.grow_worm(&mut context);
+      self.spawn_food(&mut context);
     } else {
-      // Hit wall or itself, then dead
-      self.worm_dead = true;
+      // Hit wall or itself
+      self.kill_worm(&mut context);
     }
   }
 }
