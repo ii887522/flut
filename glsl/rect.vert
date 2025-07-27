@@ -23,6 +23,7 @@ layout(buffer_reference, std430, buffer_reference_align = 8) readonly buffer Rec
 
 layout(push_constant, std430) uniform PushConst {
   RectBuffer rectBuffer;
+  vec2 camPosition;
   vec2 camSize;
 } pushConst;
 
@@ -33,8 +34,8 @@ void main() {
   const Rect rect = pushConst.rectBuffer.rects[gl_VertexIndex / POSITIONS.length()];
 
   gl_Position = vec4(
-    (position.x * rect.size.x + rect.position.x) / pushConst.camSize.x * 2.0 - 1.0,
-    (position.y * rect.size.y + rect.position.y) / pushConst.camSize.y * 2.0 - 1.0,
+    (position.x * rect.size.x + rect.position.x - pushConst.camPosition.x) / pushConst.camSize.x * 2.0 - 1.0,
+    (position.y * rect.size.y + rect.position.y - pushConst.camPosition.y) / pushConst.camSize.y * 2.0 - 1.0,
     0.0,
     1.0
   );

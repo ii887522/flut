@@ -7,7 +7,9 @@ mod models;
 
 use crate::models::{Air, Direction, Food, Wall, Worm};
 use flut::{
-  App, Clock, Context, app,
+  App, Clock, Context,
+  animations::Shake,
+  app,
   collections::SparseSet,
   models::{AudioReq, Rect},
 };
@@ -30,6 +32,7 @@ struct WormGame {
   food: Option<Food>,
   worm_dead: bool,
   clock: Clock,
+  shake: Option<Shake>,
   next_worm_direction: Option<Direction>,
 }
 
@@ -72,6 +75,7 @@ impl WormGame {
       food: None,
       worm_dead: false,
       clock: Clock::new(1.0 / consts::UPDATES_PER_SECOND),
+      shake: None,
       next_worm_direction: None,
     }
   }
@@ -159,7 +163,7 @@ impl WormGame {
       .update_rect(remove_air_resp.item.drawable_id, Rect::from(food));
   }
 
-  fn kill_worm(&mut self, context: &mut Context<'_>) {
+  fn kill_worm(&mut self, context: &Context<'_>) {
     context
       .audio_tx
       .send(AudioReq::PlaySound("assets/worm/audios/dead.mp3".into()))
@@ -167,6 +171,7 @@ impl WormGame {
 
     context.audio_tx.send(AudioReq::HaltMusic).unwrap();
     self.worm_dead = true;
+    self.shake = Some(Shake::new(1.0 / consts::SHAKE_PER_SECOND, 0.5, 50.0));
   }
 }
 
@@ -254,6 +259,10 @@ impl App for WormGame {
   }
 
   fn update(&mut self, dt: f32, mut context: Context<'_>) {
+    if let Some(shake) = self.shake.take() {
+      self.shake = shake.update(dt, &mut context);
+    }
+
     if !self.clock.update(dt) || self.worm_dead {
       return;
     }
@@ -272,7 +281,7 @@ impl App for WormGame {
       self.spawn_food(&mut context);
     } else {
       // Hit wall or itself
-      self.kill_worm(&mut context);
+      self.kill_worm(&context);
     }
   }
 }

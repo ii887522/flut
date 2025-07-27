@@ -958,6 +958,13 @@ impl Renderer<Created> {
 }
 
 impl crate::Renderer for Result<Renderer<Created>, Renderer<Creating>> {
+  fn set_cam_position(&mut self, cam_position: (f32, f32)) {
+    match self {
+      Ok(renderer) => renderer.state.rect_batch.set_cam_position(cam_position),
+      Err(renderer) => renderer.state.rect_batch.set_cam_position(cam_position),
+    }
+  }
+
   fn add_rect(&mut self, rect: Rect) -> u32 {
     match self {
       Ok(renderer) => renderer.state.rect_batch.add_rect(rect),
