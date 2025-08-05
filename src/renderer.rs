@@ -1,4 +1,4 @@
-use crate::models::Rect;
+use crate::models::{Rect, Text};
 use rustc_hash::{FxHashMap, FxHashSet};
 
 pub trait Renderer {
@@ -9,4 +9,6 @@ pub trait Renderer {
   fn update_rects(&mut self, rects: FxHashMap<u32, Rect>);
   fn remove_rect(&mut self, id: u32) -> Option<Rect>;
   fn remove_rects(&mut self, ids: FxHashSet<u32>) -> Box<[(u32, Rect)]>;
+  fn add_text(&mut self, text: Text) -> u32;
+  fn remove_text(&mut self, id: u32) -> Option<Text>;
 }

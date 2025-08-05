@@ -21,6 +21,7 @@ impl GraphicsPipeline<Creating> {
     vk_device: Rc<Device>,
     vert_shader_code: &[u8],
     frag_shader_code: &[u8],
+    descriptor_set_layouts: &[vk::DescriptorSetLayout],
     push_const_ranges: &[vk::PushConstantRange],
   ) -> Self {
     let device = vk_device.get();
@@ -65,6 +66,8 @@ impl GraphicsPipeline<Creating> {
     };
 
     let layout_create_info = vk::PipelineLayoutCreateInfo {
+      set_layout_count: descriptor_set_layouts.len() as _,
+      p_set_layouts: descriptor_set_layouts.as_ptr(),
       push_constant_range_count: push_const_ranges.len() as _,
       p_push_constant_ranges: push_const_ranges.as_ptr(),
       ..Default::default()
@@ -162,8 +165,14 @@ impl GraphicsPipeline<Creating> {
     let depth_stencil_state_create_info = vk::PipelineDepthStencilStateCreateInfo::default();
 
     let color_blend_attachment_states = [vk::PipelineColorBlendAttachmentState {
+      blend_enable: vk::TRUE,
+      src_color_blend_factor: vk::BlendFactor::SRC_ALPHA,
+      dst_color_blend_factor: vk::BlendFactor::ONE_MINUS_SRC_ALPHA,
+      color_blend_op: vk::BlendOp::ADD,
+      src_alpha_blend_factor: vk::BlendFactor::ONE,
+      dst_alpha_blend_factor: vk::BlendFactor::ZERO,
+      alpha_blend_op: vk::BlendOp::ADD,
       color_write_mask: vk::ColorComponentFlags::RGBA,
-      ..Default::default()
     }];
 
     let color_blend_state_create_info = vk::PipelineColorBlendStateCreateInfo {

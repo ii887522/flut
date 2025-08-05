@@ -97,8 +97,9 @@ impl Device {
     let physical_device_features = vk::PhysicalDeviceFeatures2 {
       features: vk::PhysicalDeviceFeatures {
         fragment_stores_and_atomics: vk::TRUE,
-        vertex_pipeline_stores_and_atomics: vk::TRUE,
+        sampler_anisotropy: vk::TRUE,
         shader_int64: vk::TRUE,
+        vertex_pipeline_stores_and_atomics: vk::TRUE,
         ..Default::default()
       },
       p_next: &physical_device_pageable_device_local_memory_features as *const _ as *mut _,

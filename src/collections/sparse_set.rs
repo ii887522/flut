@@ -43,6 +43,7 @@ pub struct RemoveResp<T> {
   pub item: T,
 }
 
+#[derive(Default)]
 pub struct SparseSet<T> {
   dense: Vec<DenseCell<T>>,
   dense_ids: Vec<AtomicU32>,
@@ -51,6 +52,15 @@ pub struct SparseSet<T> {
 }
 
 impl<T> SparseSet<T> {
+  pub const fn new() -> Self {
+    Self {
+      dense: vec![],
+      dense_ids: vec![],
+      sparse: vec![],
+      free_ids: BTreeSet::new(),
+    }
+  }
+
   pub fn with_capacity(capacity: usize) -> Self {
     Self {
       dense: Vec::with_capacity(capacity),

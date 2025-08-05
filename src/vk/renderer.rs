@@ -1,12 +1,17 @@
 use super::{Device, StreamBuffer};
 use crate::{
   app::DrawableCaps,
-  models::Rect,
-  vk::batches::{RectBatch, rect_batch},
+  models::{GlyphMetrics, Rect, Text},
+  vk::{
+    StaticImage,
+    batches::{RectBatch, rect_batch},
+    static_image,
+  },
 };
 use ash::vk::{self, Handle};
-use rustc_hash::{FxHashMap, FxHashSet};
-use sdl2::video::Window;
+use rayon::prelude::*;
+use rustc_hash::{FxBuildHasher, FxHashMap, FxHashSet};
+use sdl2::{pixels::Color, ttf::Sdl2TtfContext, video::Window};
 use std::{ffi::CString, iter, mem, rc::Rc};
 
 pub(crate) struct Creating {
@@ -36,9 +41,11 @@ pub(crate) struct Renderer<State> {
   present_queue: vk::Queue,
   graphics_command_pools: Box<[vk::CommandPool]>,
   graphics_command_buffers: Box<[vk::CommandBuffer]>,
+  descriptor_pool: vk::DescriptorPool,
   swapchain_device: ash::khr::swapchain::Device,
   render_pass: vk::RenderPass,
   vk_allocator: Rc<vk_mem::Allocator>,
+  glyph_atlas: StaticImage<static_image::Created>,
   instance_buffer: StreamBuffer,
   image_avail_semaphores: Box<[vk::Semaphore]>,
   render_finished_semaphores: Box<[vk::Semaphore]>,
@@ -47,7 +54,12 @@ pub(crate) struct Renderer<State> {
 }
 
 impl Renderer<Creating> {
-  pub(crate) fn new(window: Window, drawable_caps: DrawableCaps) -> Self {
+  pub(crate) fn new(
+    ttf: Sdl2TtfContext,
+    font_path: &str,
+    window: Window,
+    drawable_caps: DrawableCaps,
+  ) -> Self {
     let entry = unsafe { ash::Entry::load().unwrap() };
     let app_name = CString::new(window.title()).unwrap();
 
@@ -203,7 +215,12 @@ impl Renderer<Creating> {
         .unwrap(),
     );
 
-    let (graphics_queue_family_index, present_queue_family_index, physical_device) = unsafe {
+    let (
+      graphics_queue_family_index,
+      present_queue_family_index,
+      transfer_queue_family_index,
+      physical_device,
+    ) = unsafe {
       instance
         .enumerate_physical_devices()
         .unwrap()
@@ -219,6 +236,23 @@ impl Renderer<Creating> {
             physical_device,
             queue_family_props_list.as_mut_slice(),
           );
+
+          let (transfer_queue_family_index, _) = queue_family_props_list
+            .iter()
+            .enumerate()
+            .filter(|&(_, queue_family_props)| {
+              queue_family_props
+                .queue_family_properties
+                .queue_flags
+                .contains(vk::QueueFlags::TRANSFER)
+            })
+            .min_by_key(|&(_, queue_family_props)| {
+              queue_family_props
+                .queue_family_properties
+                .queue_flags
+                .as_raw()
+                .count_ones()
+            })?;
 
           if let Some((queue_family_index, _)) = queue_family_props_list
             .iter()
@@ -243,6 +277,7 @@ impl Renderer<Creating> {
             return Some((
               queue_family_index as _,
               queue_family_index as _,
+              transfer_queue_family_index as _,
               physical_device,
             ));
           }
@@ -283,10 +318,11 @@ impl Renderer<Creating> {
           Some((
             graphics_queue_family_index as _,
             present_queue_family_index as _,
+            transfer_queue_family_index as _,
             physical_device,
           ))
         })
-        .max_by_key(|&(_, _, physical_device)| {
+        .max_by_key(|&(_, _, _, physical_device)| {
           let mut physical_device_props = vk::PhysicalDeviceProperties2::default();
           instance.get_physical_device_properties2(physical_device, &mut physical_device_props);
 
@@ -322,8 +358,15 @@ impl Renderer<Creating> {
       ..Default::default()
     };
 
+    let transfer_queue_info = vk::DeviceQueueInfo2 {
+      queue_family_index: transfer_queue_family_index,
+      queue_index: 0,
+      ..Default::default()
+    };
+
     let graphics_queue = unsafe { device.get_device_queue2(&graphics_queue_info) };
     let present_queue = unsafe { device.get_device_queue2(&present_queue_info) };
+    let transfer_queue = unsafe { device.get_device_queue2(&transfer_queue_info) };
 
     let graphics_command_pool_create_info = vk::CommandPoolCreateInfo {
       flags: vk::CommandPoolCreateFlags::TRANSIENT,
@@ -357,7 +400,49 @@ impl Renderer<Creating> {
       })
       .collect::<Box<_>>();
 
-    let rect_batch = RectBatch::new(vk_device.clone(), drawable_caps.rect_count);
+    let transfer_command_pool_create_info = vk::CommandPoolCreateInfo {
+      flags: vk::CommandPoolCreateFlags::TRANSIENT,
+      queue_family_index: transfer_queue_family_index,
+      ..Default::default()
+    };
+
+    let transfer_command_pool = unsafe {
+      device
+        .create_command_pool(&transfer_command_pool_create_info, None)
+        .unwrap()
+    };
+
+    let transfer_command_buffer_alloc_info = vk::CommandBufferAllocateInfo {
+      command_pool: transfer_command_pool,
+      level: vk::CommandBufferLevel::PRIMARY,
+      command_buffer_count: 1,
+      ..Default::default()
+    };
+
+    let transfer_command_buffer = unsafe {
+      device
+        .allocate_command_buffers(&transfer_command_buffer_alloc_info)
+        .unwrap()[0]
+    };
+
+    let descriptor_pool_sizes = [vk::DescriptorPoolSize {
+      ty: vk::DescriptorType::COMBINED_IMAGE_SAMPLER,
+      descriptor_count: 1,
+    }];
+
+    let descriptor_pool_create_info = vk::DescriptorPoolCreateInfo {
+      max_sets: 1,
+      pool_size_count: descriptor_pool_sizes.len() as _,
+      p_pool_sizes: descriptor_pool_sizes.as_ptr(),
+      ..Default::default()
+    };
+
+    let descriptor_pool = unsafe {
+      device
+        .create_descriptor_pool(&descriptor_pool_create_info, None)
+        .unwrap()
+    };
+
     let swapchain_device = ash::khr::swapchain::Device::new(&instance, device);
 
     let attachment_descs = [vk::AttachmentDescription2 {
@@ -443,10 +528,170 @@ impl Renderer<Creating> {
     let vk_allocator =
       unsafe { Rc::new(vk_mem::Allocator::new(vk_allocator_create_info).unwrap()) };
 
+    let font = ttf.load_font(font_path, crate::consts::FONT_SIZE).unwrap();
+
+    let mut pixels =
+      Vec::with_capacity(((crate::consts::FONT_SIZE << 2) * (crate::consts::FONT_SIZE << 2)) as _);
+
+    let mut regions = Vec::with_capacity(11);
+    let char_to_glyph_metrics = FxHashMap::with_capacity_and_hasher(10, FxBuildHasher);
+
+    // Insert white dot at the top-left corner into the glyph atlas, the purpose of this white dot is to render
+    // plain rectangles
+    pixels.push(255);
+
+    regions.push(vk::BufferImageCopy2 {
+      buffer_offset: 0,
+      buffer_row_length: 1,
+      buffer_image_height: 1,
+      image_subresource: vk::ImageSubresourceLayers {
+        aspect_mask: vk::ImageAspectFlags::COLOR,
+        mip_level: 0,
+        base_array_layer: 0,
+        layer_count: 1,
+      },
+      image_offset: vk::Offset3D { x: 0, y: 0, z: 0 },
+      image_extent: vk::Extent3D {
+        width: 1,
+        height: 1,
+        depth: 1,
+      },
+      ..Default::default()
+    });
+
+    let (pixels, regions, char_to_glyph_metrics, _, _) = ('0'..='9').fold(
+      (
+        pixels,
+        regions,
+        char_to_glyph_metrics,
+        (1 + crate::consts::GLYPH_GAP, 0),
+        0,
+      ),
+      |(mut pixels, mut regions, mut char_to_glyph_metrics, glyph_position, max_glyph_height),
+       ch| {
+        let glyph = font
+          .render_char(ch)
+          .shaded(Color::WHITE, Color::BLACK)
+          .unwrap();
+
+        let (glyph_position, max_glyph_height) =
+          if glyph_position.0 + glyph.width() <= crate::consts::GLYPH_ATLAS_SIZE.0 {
+            (glyph_position, max_glyph_height)
+          } else {
+            (
+              (
+                0,
+                glyph_position.1 + max_glyph_height + crate::consts::GLYPH_GAP,
+              ),
+              0,
+            )
+          };
+
+        let region = vk::BufferImageCopy2 {
+          buffer_offset: pixels.len() as _,
+          buffer_row_length: glyph.pitch(),
+          buffer_image_height: glyph.height(),
+          image_subresource: vk::ImageSubresourceLayers {
+            aspect_mask: vk::ImageAspectFlags::COLOR,
+            mip_level: 0,
+            base_array_layer: 0,
+            layer_count: 1,
+          },
+          image_offset: vk::Offset3D {
+            x: glyph_position.0 as _,
+            y: glyph_position.1 as _,
+            z: 0,
+          },
+          image_extent: vk::Extent3D {
+            width: glyph.width(),
+            height: glyph.height(),
+            depth: 1,
+          },
+          ..Default::default()
+        };
+
+        let glyph_metrics = font.find_glyph_metrics(ch).unwrap();
+
+        let glyph_metrics = GlyphMetrics {
+          position: (glyph_position.0 as _, glyph_position.1 as _),
+          size: (glyph.width() as _, glyph.height() as _),
+          advance: glyph_metrics.advance,
+        };
+
+        pixels.par_extend(glyph.without_lock().unwrap());
+        regions.push(region);
+        char_to_glyph_metrics.insert(ch, glyph_metrics);
+
+        let glyph_position = (
+          glyph_position.0 + glyph.width() + crate::consts::GLYPH_GAP,
+          glyph_position.1,
+        );
+
+        let max_glyph_height = max_glyph_height.max(glyph.height());
+
+        (
+          pixels,
+          regions,
+          char_to_glyph_metrics,
+          glyph_position,
+          max_glyph_height,
+        )
+      },
+    );
+
+    let transfer_command_buffer_begin_info = vk::CommandBufferBeginInfo {
+      flags: vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT,
+      ..Default::default()
+    };
+
+    unsafe {
+      device
+        .begin_command_buffer(transfer_command_buffer, &transfer_command_buffer_begin_info)
+        .unwrap();
+    }
+
+    let glyph_atlas = StaticImage::new(
+      vk_device.clone(),
+      vk_allocator.clone(),
+      &pixels,
+      &regions,
+      vk::Format::R8_UNORM,
+      crate::consts::GLYPH_ATLAS_SIZE,
+      transfer_command_buffer,
+      transfer_queue_family_index,
+      graphics_queue_family_index,
+    );
+
+    let transfer_queue_submit_info = vk::SubmitInfo {
+      command_buffer_count: 1,
+      p_command_buffers: &transfer_command_buffer,
+      ..Default::default()
+    };
+
+    unsafe {
+      device.end_command_buffer(transfer_command_buffer).unwrap();
+
+      device
+        .queue_submit(
+          transfer_queue,
+          &[transfer_queue_submit_info],
+          vk::Fence::null(),
+        )
+        .unwrap();
+    }
+
     let instance_buffer = StreamBuffer::new(
       vk_device.clone(),
       vk_allocator.clone(),
       instance_buffer_max_bytes,
+    );
+
+    let rect_batch = RectBatch::new(
+      vk_device.clone(),
+      descriptor_pool,
+      glyph_atlas.get_view(),
+      char_to_glyph_metrics,
+      drawable_caps.rect_count,
     );
 
     let (image_avail_semaphores, (render_finished_semaphores, in_flight_fences)): (
@@ -477,6 +722,13 @@ impl Renderer<Creating> {
       })
       .unzip();
 
+    unsafe {
+      device.queue_wait_idle(transfer_queue).unwrap();
+      device.destroy_command_pool(transfer_command_pool, None);
+    }
+
+    let glyph_atlas = glyph_atlas.finish();
+
     Self {
       window,
       entry,
@@ -491,9 +743,11 @@ impl Renderer<Creating> {
       present_queue,
       graphics_command_pools,
       graphics_command_buffers,
+      descriptor_pool,
       swapchain_device,
       render_pass,
       vk_allocator,
+      glyph_atlas,
       instance_buffer,
       image_avail_semaphores: image_avail_semaphores.into_boxed_slice(),
       render_finished_semaphores: render_finished_semaphores.into_boxed_slice(),
@@ -651,9 +905,11 @@ impl Renderer<Creating> {
       present_queue: self.present_queue,
       graphics_command_pools: self.graphics_command_pools,
       graphics_command_buffers: self.graphics_command_buffers,
+      descriptor_pool: self.descriptor_pool,
       swapchain_device: self.swapchain_device,
       render_pass: self.render_pass,
       vk_allocator: self.vk_allocator,
+      glyph_atlas: self.glyph_atlas,
       instance_buffer: self.instance_buffer,
       image_avail_semaphores: self.image_avail_semaphores,
       render_finished_semaphores: self.render_finished_semaphores,
@@ -692,8 +948,10 @@ impl Renderer<Creating> {
         .for_each(|semaphore| device.destroy_semaphore(semaphore, None));
 
       self.instance_buffer.drop();
+      self.glyph_atlas.drop();
       drop(self.vk_allocator);
       device.destroy_render_pass(self.render_pass, None);
+      device.destroy_descriptor_pool(self.descriptor_pool, None);
 
       self
         .graphics_command_pools
@@ -892,9 +1150,11 @@ impl Renderer<Created> {
       present_queue: self.present_queue,
       graphics_command_pools: self.graphics_command_pools,
       graphics_command_buffers: self.graphics_command_buffers,
+      descriptor_pool: self.descriptor_pool,
       swapchain_device: self.swapchain_device,
       render_pass: self.render_pass,
       vk_allocator: self.vk_allocator,
+      glyph_atlas: self.glyph_atlas,
       instance_buffer: self.instance_buffer,
       image_avail_semaphores: self.image_avail_semaphores,
       render_finished_semaphores: self.render_finished_semaphores,
@@ -942,8 +1202,10 @@ impl Renderer<Created> {
         .for_each(|semaphore| device.destroy_semaphore(semaphore, None));
 
       self.instance_buffer.drop();
+      self.glyph_atlas.drop();
       drop(self.vk_allocator);
       device.destroy_render_pass(self.render_pass, None);
+      device.destroy_descriptor_pool(self.descriptor_pool, None);
 
       self
         .graphics_command_pools
@@ -1004,6 +1266,20 @@ impl crate::Renderer for Result<Renderer<Created>, Renderer<Creating>> {
     match self {
       Ok(renderer) => renderer.state.rect_batch.remove_rects(ids),
       Err(renderer) => renderer.state.rect_batch.remove_rects(ids),
+    }
+  }
+
+  fn add_text(&mut self, text: Text) -> u32 {
+    match self {
+      Ok(renderer) => renderer.state.rect_batch.add_text(text),
+      Err(renderer) => renderer.state.rect_batch.add_text(text),
+    }
+  }
+
+  fn remove_text(&mut self, id: u32) -> Option<Text> {
+    match self {
+      Ok(renderer) => renderer.state.rect_batch.remove_text(id),
+      Err(renderer) => renderer.state.rect_batch.remove_text(id),
     }
   }
 }
