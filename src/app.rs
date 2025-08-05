@@ -1,6 +1,6 @@
 use crate::{Context, audio, vk};
 use flut_macro::warn;
-use sdl2::{event::Event, image::LoadSurface, surface::Surface};
+use sdl2::{event::Event, image::LoadSurface, surface::Surface, ttf};
 use std::{borrow::Cow, iter, sync::mpsc, thread, time::Instant};
 
 pub struct DrawableCaps {
@@ -17,6 +17,7 @@ pub struct Config {
   pub title: Cow<'static, str>,
   pub size: (u32, u32),
   pub favicon_path: Cow<'static, str>,
+  pub font_path: Cow<'static, str>,
   pub drawable_caps: DrawableCaps,
 }
 
@@ -26,6 +27,7 @@ impl Default for Config {
       title: "".into(),
       size: (800, 600),
       favicon_path: "".into(),
+      font_path: "".into(),
       drawable_caps: DrawableCaps::default(),
     }
   }
@@ -53,6 +55,7 @@ pub fn run(mut app: impl App) {
   sdl2::hint::set("SDL_WINDOWS_DPI_AWARENESS", "permonitorv2");
 
   let vid_subsys = sdl.video().unwrap();
+  let ttf = ttf::init().unwrap();
   let config = app.get_config();
 
   let mut window = vid_subsys
@@ -69,7 +72,8 @@ pub fn run(mut app: impl App) {
     Err(err) => warn!("{err}"),
   }
 
-  let mut renderer_result = vk::Renderer::new(window.clone(), config.drawable_caps).finish();
+  let mut renderer_result =
+    vk::Renderer::new(ttf, &config.font_path, window.clone(), config.drawable_caps).finish();
 
   app.init(Context {
     renderer: &mut renderer_result,

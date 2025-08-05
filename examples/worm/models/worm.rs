@@ -21,13 +21,14 @@ impl Worm {
 
 impl From<Worm> for Rect {
   fn from(worm: Worm) -> Self {
-    Self::new(
-      (
+    Self::new()
+      .position((
         (worm.position % consts::GRID_SIZE.0 * (consts::CELL_SIZE.0 + consts::GAP_SIZE.0)) as _,
-        (worm.position / consts::GRID_SIZE.0 * (consts::CELL_SIZE.1 + consts::GAP_SIZE.1)) as _,
-      ),
-      (consts::CELL_SIZE.0 as _, consts::CELL_SIZE.1 as _),
-      (243, 125, 121, 255),
-    )
+        (worm.position / consts::GRID_SIZE.0 * (consts::CELL_SIZE.1 + consts::GAP_SIZE.1)
+          + consts::HEADER_HEIGHT) as _,
+      ))
+      .size((consts::CELL_SIZE.0 as _, consts::CELL_SIZE.1 as _))
+      .color((243, 125, 121, 255))
+      .call()
   }
 }

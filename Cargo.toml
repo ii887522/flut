@@ -29,6 +29,7 @@ x86_64-pc-windows-msvc = { triplet = "x64-windows-static-md" }
 fastrand = { version = "2.3" }
 flut_macro = { path = "flut_macro" }
 mimalloc = { version = "0.1", default-features = false }
+optarg2chain = { version = "0.1", default-features = false }
 rayon = { version = "1.10", default-features = false }
 rustc-hash = { version = "2.1", default-features = false, features = ["std"] }
 vk-mem = { version = "0.4" }

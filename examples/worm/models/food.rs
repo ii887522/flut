@@ -9,13 +9,14 @@ pub(crate) struct Food {
 
 impl From<Food> for Rect {
   fn from(food: Food) -> Self {
-    Self::new(
-      (
+    Self::new()
+      .position((
         (food.position % consts::GRID_SIZE.0 * (consts::CELL_SIZE.0 + consts::GAP_SIZE.0)) as _,
-        (food.position / consts::GRID_SIZE.0 * (consts::CELL_SIZE.1 + consts::GAP_SIZE.1)) as _,
-      ),
-      (consts::CELL_SIZE.0 as _, consts::CELL_SIZE.1 as _),
-      (0, 255, 0, 255),
-    )
+        (food.position / consts::GRID_SIZE.0 * (consts::CELL_SIZE.1 + consts::GAP_SIZE.1)
+          + consts::HEADER_HEIGHT) as _,
+      ))
+      .size((consts::CELL_SIZE.0 as _, consts::CELL_SIZE.1 as _))
+      .color((0, 255, 0, 255))
+      .call()
   }
 }

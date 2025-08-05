@@ -29,8 +29,8 @@ impl StreamBuffer {
     };
 
     let alloc_create_info = vk_mem::AllocationCreateInfo {
-      flags: vk_mem::AllocationCreateFlags::MAPPED
-        | vk_mem::AllocationCreateFlags::HOST_ACCESS_SEQUENTIAL_WRITE,
+      flags: vk_mem::AllocationCreateFlags::HOST_ACCESS_SEQUENTIAL_WRITE
+        | vk_mem::AllocationCreateFlags::MAPPED,
       usage: vk_mem::MemoryUsage::AutoPreferDevice,
       priority: 1.0,
       ..Default::default()

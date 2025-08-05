@@ -9,13 +9,14 @@ pub(crate) struct Air {
 
 impl From<Air> for Rect {
   fn from(air: Air) -> Self {
-    Self::new(
-      (
+    Self::new()
+      .position((
         (air.position % consts::GRID_SIZE.0 * (consts::CELL_SIZE.0 + consts::GAP_SIZE.0)) as _,
-        (air.position / consts::GRID_SIZE.0 * (consts::CELL_SIZE.1 + consts::GAP_SIZE.1)) as _,
-      ),
-      (consts::CELL_SIZE.0 as _, consts::CELL_SIZE.1 as _),
-      (48, 48, 48, 255),
-    )
+        (air.position / consts::GRID_SIZE.0 * (consts::CELL_SIZE.1 + consts::GAP_SIZE.1)
+          + consts::HEADER_HEIGHT) as _,
+      ))
+      .size((consts::CELL_SIZE.0 as _, consts::CELL_SIZE.1 as _))
+      .color((48, 48, 48, 255))
+      .call()
   }
 }

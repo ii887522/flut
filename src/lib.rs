@@ -31,6 +31,15 @@ const fn pack_color(color: (u8, u8, u8, u8)) -> u32 {
   ((color.0 as u32) << 24) | ((color.1 as u32) << 16) | ((color.2 as u32) << 8) | (color.3 as u32)
 }
 
+const fn unpack_color(color: u32) -> (u8, u8, u8, u8) {
+  (
+    ((color >> 24) & 0xFF) as u8,
+    ((color >> 16) & 0xFF) as u8,
+    ((color >> 8) & 0xFF) as u8,
+    (color & 0xFF) as u8,
+  )
+}
+
 fn coalesce(writes: &mut Vec<Write>) {
   writes.voracious_mt_sort(0);
 

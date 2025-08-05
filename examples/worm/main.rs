@@ -2,16 +2,19 @@
 #![allow(clippy::needless_lifetimes, clippy::too_many_arguments)]
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+//! A Snake-like game implementation where the player controls a worm that grows by eating food
+//! while avoiding walls and itself.
+
 mod consts;
 mod models;
 
-use crate::models::{Air, Direction, Food, Wall, Worm};
+use crate::models::{Air, Direction, Food, Score, Wall, Worm};
 use flut::{
   App, Clock, Context,
   animations::Shake,
   app,
   collections::SparseSet,
-  models::{AudioReq, Rect},
+  models::{AudioReq, Rect, Text},
 };
 use mimalloc::MiMalloc;
 use rayon::{iter::Either, prelude::*};
@@ -26,13 +29,23 @@ fn main() {
 }
 
 struct WormGame {
+  /// Empty cells that can be moved into or contain food
   airs: SparseSet<Air>,
+  /// The game boundaries and obstacles
   walls: Box<[Wall]>,
-  worms: VecDeque<Worm>, // Front is tail, back is head
+  /// The worm body segments, stored front (tail) to back (head) for efficient movement
+  worms: VecDeque<Worm>,
+  /// The current food item on the game board
   food: Option<Food>,
+  /// The player's current score
+  score: Score,
+  /// Whether the worm has collided with a wall or itself
   worm_dead: bool,
+  /// Controls the game update rate
   clock: Clock,
+  /// Current screen shake animation, if any
   shake: Option<Shake>,
+  /// The next direction the worm should turn, if any
   next_worm_direction: Option<Direction>,
 }
 
@@ -68,11 +81,17 @@ impl WormGame {
         }
       });
 
+    let score = Score {
+      score: 0,
+      drawable_id: u32::MAX,
+    };
+
     Self {
       airs: SparseSet::from_par_iter(airs),
       walls: walls.into_boxed_slice(),
       worms: VecDeque::from_iter(worms),
       food: None,
+      score,
       worm_dead: false,
       clock: Clock::new(1.0 / consts::UPDATES_PER_SECOND),
       shake: None,
@@ -163,6 +182,17 @@ impl WormGame {
       .update_rect(remove_air_resp.item.drawable_id, Rect::from(food));
   }
 
+  fn add_score(&mut self, context: &mut Context<'_>) {
+    self.score.score += 1;
+
+    context
+      .renderer
+      .remove_text(self.score.drawable_id)
+      .unwrap();
+
+    self.score.drawable_id = context.renderer.add_text(Text::from(self.score));
+  }
+
   fn kill_worm(&mut self, context: &Context<'_>) {
     context
       .audio_tx
@@ -181,6 +211,7 @@ impl App for WormGame {
       title: "Worm".into(),
       size: consts::APP_SIZE,
       favicon_path: "assets/worm/favicon.png".into(),
+      font_path: "assets/worm/fonts/arial.ttf".into(),
       ..Default::default()
     }
   }
@@ -223,6 +254,7 @@ impl App for WormGame {
       .zip(air_ids.par_iter())
       .for_each(|(air, &id)| air.drawable_id = id);
 
+    self.score.drawable_id = context.renderer.add_text(Text::from(self.score));
     self.spawn_food(&mut context);
   }
 
@@ -279,6 +311,7 @@ impl App for WormGame {
     if self.will_eat_food() {
       self.grow_worm(&mut context);
       self.spawn_food(&mut context);
+      self.add_score(&mut context);
     } else {
       // Hit wall or itself
       self.kill_worm(&context);
