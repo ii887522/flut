@@ -78,6 +78,7 @@ pub fn run(mut app: impl App) {
   app.init(Context {
     renderer: &mut renderer_result,
     audio_tx: audio_tx.clone(),
+    app_size: config.size,
   });
 
   window.show();
@@ -122,6 +123,7 @@ pub fn run(mut app: impl App) {
         Context {
           renderer: &mut renderer_result,
           audio_tx: audio_tx.clone(),
+          app_size: config.size,
         },
       )
     });

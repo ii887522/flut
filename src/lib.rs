@@ -11,6 +11,7 @@ pub mod context;
 pub mod models;
 pub mod renderer;
 mod vk;
+pub mod widgets;
 
 use crate::models::Write;
 pub use app::App;

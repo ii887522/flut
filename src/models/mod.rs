@@ -1,5 +1,7 @@
 pub mod anchor;
 pub mod audio_req;
+pub(super) mod container;
+pub(super) mod glass;
 pub(super) mod glyph_metrics;
 pub mod rect;
 pub mod text;
@@ -8,6 +10,8 @@ pub(super) mod write;
 
 pub use anchor::Anchor;
 pub use audio_req::AudioReq;
+pub(super) use container::Container;
+pub(super) use glass::Glass;
 pub(super) use glyph_metrics::GlyphMetrics;
 pub use rect::Rect;
 pub use text::Text;

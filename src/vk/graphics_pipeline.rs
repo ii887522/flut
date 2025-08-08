@@ -244,9 +244,7 @@ impl<State> GraphicsPipeline<State> {
   pub(super) const fn get_layout(&self) -> vk::PipelineLayout {
     self.layout
   }
-}
 
-impl<State> GraphicsPipeline<State> {
   pub(super) fn drop(self) {
     let device = self.device.get();
 
