@@ -1,9 +1,9 @@
 use super::{Device, StreamBuffer};
 use crate::{
   app::DrawableCaps,
-  models::{GlyphMetrics, Rect, Text},
+  models::{GlyphMetrics, Icon, Rect, Text},
   vk::{
-    StaticImage,
+    DynamicImage, StaticImage,
     batches::{RectBatch, rect_batch},
     static_image,
   },
@@ -14,16 +14,16 @@ use rustc_hash::{FxBuildHasher, FxHashMap, FxHashSet};
 use sdl2::{pixels::Color, ttf::Sdl2TtfContext, video::Window};
 use std::{ffi::CString, iter, mem, rc::Rc};
 
-pub(crate) struct Creating {
-  rect_batch: RectBatch<rect_batch::Creating>,
+pub(crate) struct Creating<'ttf> {
+  rect_batch: RectBatch<'ttf, rect_batch::Creating>,
 }
 
-pub(crate) struct Created {
+pub(crate) struct Created<'ttf> {
   swapchain_image_extent: vk::Extent2D,
   swapchain: vk::SwapchainKHR,
   swapchain_image_views: Box<[vk::ImageView]>,
   swapchain_framebuffers: Box<[vk::Framebuffer]>,
-  rect_batch: RectBatch<rect_batch::Created>,
+  rect_batch: RectBatch<'ttf, rect_batch::Created>,
   frame_index: usize,
 }
 
@@ -36,11 +36,15 @@ pub(crate) struct Renderer<State> {
   physical_device: vk::PhysicalDevice,
   graphics_queue_family_index: u32,
   present_queue_family_index: u32,
+  transfer_queue_family_index: u32,
   device: Rc<Device>,
   graphics_queue: vk::Queue,
   present_queue: vk::Queue,
+  transfer_queue: vk::Queue,
   graphics_command_pools: Box<[vk::CommandPool]>,
   graphics_command_buffers: Box<[vk::CommandBuffer]>,
+  transfer_command_pools: Box<[vk::CommandPool]>,
+  transfer_command_buffers: Box<[vk::CommandBuffer]>,
   descriptor_pool: vk::DescriptorPool,
   swapchain_device: ash::khr::swapchain::Device,
   render_pass: vk::RenderPass,
@@ -53,10 +57,11 @@ pub(crate) struct Renderer<State> {
   state: State,
 }
 
-impl Renderer<Creating> {
+impl<'ttf> Renderer<Creating<'ttf>> {
   pub(crate) fn new(
-    ttf: Sdl2TtfContext,
+    ttf: &'ttf Sdl2TtfContext,
     font_path: &str,
+    icon_font_path: &str,
     window: Window,
     drawable_caps: DrawableCaps,
   ) -> Self {
@@ -406,32 +411,39 @@ impl Renderer<Creating> {
       ..Default::default()
     };
 
-    let transfer_command_pool = unsafe {
-      device
-        .create_command_pool(&transfer_command_pool_create_info, None)
-        .unwrap()
-    };
+    let transfer_command_pools = (0..crate::consts::SUB_DYNAMIC_BUFFER_COUNT)
+      .map(|_| unsafe {
+        device
+          .create_command_pool(&transfer_command_pool_create_info, None)
+          .unwrap()
+      })
+      .collect::<Box<_>>();
 
-    let transfer_command_buffer_alloc_info = vk::CommandBufferAllocateInfo {
-      command_pool: transfer_command_pool,
-      level: vk::CommandBufferLevel::PRIMARY,
-      command_buffer_count: 1,
-      ..Default::default()
-    };
+    let transfer_command_buffers = transfer_command_pools
+      .iter()
+      .map(|&command_pool| {
+        let transfer_command_buffer_alloc_info = vk::CommandBufferAllocateInfo {
+          command_pool,
+          level: vk::CommandBufferLevel::PRIMARY,
+          command_buffer_count: 1,
+          ..Default::default()
+        };
 
-    let transfer_command_buffer = unsafe {
-      device
-        .allocate_command_buffers(&transfer_command_buffer_alloc_info)
-        .unwrap()[0]
-    };
+        unsafe {
+          device
+            .allocate_command_buffers(&transfer_command_buffer_alloc_info)
+            .unwrap()[0]
+        }
+      })
+      .collect::<Box<_>>();
 
     let descriptor_pool_sizes = [vk::DescriptorPoolSize {
       ty: vk::DescriptorType::COMBINED_IMAGE_SAMPLER,
-      descriptor_count: 1,
+      descriptor_count: 4,
     }];
 
     let descriptor_pool_create_info = vk::DescriptorPoolCreateInfo {
-      max_sets: 1,
+      max_sets: 2,
       pool_size_count: descriptor_pool_sizes.len() as _,
       p_pool_sizes: descriptor_pool_sizes.as_ptr(),
       ..Default::default()
@@ -530,6 +542,10 @@ impl Renderer<Creating> {
 
     let font = ttf.load_font(font_path, crate::consts::FONT_SIZE).unwrap();
 
+    let icon_font = ttf
+      .load_font(icon_font_path, crate::consts::FONT_SIZE)
+      .unwrap();
+
     let mut pixels =
       Vec::with_capacity(((crate::consts::FONT_SIZE << 2) * (crate::consts::FONT_SIZE << 2)) as _);
 
@@ -613,7 +629,7 @@ impl Renderer<Creating> {
         let glyph_metrics = font.find_glyph_metrics(ch).unwrap();
 
         let glyph_metrics = GlyphMetrics {
-          position: (glyph_position.0 as _, glyph_position.1 as _),
+          position: (glyph_position.0 as _, glyph_position.1 as _, 0.0),
           size: (glyph.width() as _, glyph.height() as _),
           advance: glyph_metrics.advance,
         };
@@ -644,6 +660,8 @@ impl Renderer<Creating> {
       ..Default::default()
     };
 
+    let transfer_command_buffer = transfer_command_buffers[0];
+
     unsafe {
       device
         .begin_command_buffer(transfer_command_buffer, &transfer_command_buffer_begin_info)
@@ -660,6 +678,15 @@ impl Renderer<Creating> {
       transfer_command_buffer,
       transfer_queue_family_index,
       graphics_queue_family_index,
+    );
+
+    let icon_atlas = DynamicImage::new(
+      vk_device.clone(),
+      vk_allocator.clone(),
+      vk::Format::R8_UNORM,
+      crate::consts::ICON_ATLAS_SIZE,
+      (crate::consts::ICON_ATLAS_SIZE.0 * crate::consts::ICON_ATLAS_SIZE.1) as _,
+      transfer_command_buffer,
     );
 
     let transfer_queue_submit_info = vk::SubmitInfo {
@@ -690,6 +717,8 @@ impl Renderer<Creating> {
       vk_device.clone(),
       descriptor_pool,
       glyph_atlas.get_view(),
+      icon_atlas,
+      icon_font,
       char_to_glyph_metrics,
       drawable_caps.rect_count,
     );
@@ -724,7 +753,6 @@ impl Renderer<Creating> {
 
     unsafe {
       device.queue_wait_idle(transfer_queue).unwrap();
-      device.destroy_command_pool(transfer_command_pool, None);
     }
 
     let glyph_atlas = glyph_atlas.finish();
@@ -738,11 +766,15 @@ impl Renderer<Creating> {
       physical_device,
       graphics_queue_family_index,
       present_queue_family_index,
+      transfer_queue_family_index,
       device: vk_device,
       graphics_queue,
       present_queue,
+      transfer_queue,
       graphics_command_pools,
       graphics_command_buffers,
+      transfer_command_pools,
+      transfer_command_buffers,
       descriptor_pool,
       swapchain_device,
       render_pass,
@@ -757,7 +789,7 @@ impl Renderer<Creating> {
   }
 
   #[allow(clippy::result_large_err)]
-  pub(crate) fn finish(self) -> Result<Renderer<Created>, Self> {
+  pub(crate) fn finish(self) -> Result<Renderer<Created<'ttf>>, Self> {
     let surface_caps = unsafe {
       self
         .surface_instance
@@ -900,11 +932,15 @@ impl Renderer<Creating> {
       physical_device: self.physical_device,
       graphics_queue_family_index: self.graphics_queue_family_index,
       present_queue_family_index: self.present_queue_family_index,
+      transfer_queue_family_index: self.transfer_queue_family_index,
       device: self.device,
       graphics_queue: self.graphics_queue,
       present_queue: self.present_queue,
+      transfer_queue: self.transfer_queue,
       graphics_command_pools: self.graphics_command_pools,
       graphics_command_buffers: self.graphics_command_buffers,
+      transfer_command_pools: self.transfer_command_pools,
+      transfer_command_buffers: self.transfer_command_buffers,
       descriptor_pool: self.descriptor_pool,
       swapchain_device: self.swapchain_device,
       render_pass: self.render_pass,
@@ -954,6 +990,11 @@ impl Renderer<Creating> {
       device.destroy_descriptor_pool(self.descriptor_pool, None);
 
       self
+        .transfer_command_pools
+        .into_iter()
+        .for_each(|command_pool| device.destroy_command_pool(command_pool, None));
+
+      self
         .graphics_command_pools
         .into_iter()
         .for_each(|command_pool| device.destroy_command_pool(command_pool, None));
@@ -965,21 +1006,40 @@ impl Renderer<Creating> {
   }
 }
 
-impl Renderer<Created> {
+impl<'ttf> Renderer<Created<'ttf>> {
   #[allow(clippy::result_large_err)]
-  pub(crate) fn render(mut self) -> Result<Self, Renderer<Creating>> {
+  pub(crate) fn render(mut self) -> Result<Self, Renderer<Creating<'ttf>>> {
+    let device = self.device.get();
     let image_avail_semaphore = self.image_avail_semaphores[self.state.frame_index];
     let render_finished_semaphore = self.render_finished_semaphores[self.state.frame_index];
     let in_flight_fence = self.in_flight_fences[self.state.frame_index];
     let graphics_command_pool = self.graphics_command_pools[self.state.frame_index];
     let graphics_command_buffer = self.graphics_command_buffers[self.state.frame_index];
-    let device = self.device.get();
+
+    let mut render_wait_semaphores = vec![image_avail_semaphore];
+    let mut render_wait_dst_stage_masks = vec![vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT];
+
+    if let Some(flush_icon_finished_semaphore) = self.state.rect_batch.flush_icons(
+      self.transfer_queue,
+      &self.transfer_command_pools,
+      &self.transfer_command_buffers,
+      self.transfer_queue_family_index,
+      self.graphics_queue_family_index,
+    ) {
+      render_wait_semaphores.push(flush_icon_finished_semaphore);
+      render_wait_dst_stage_masks.push(vk::PipelineStageFlags::FRAGMENT_SHADER);
+    }
 
     unsafe {
       device
         .wait_for_fences(&[in_flight_fence], true, u64::MAX)
         .unwrap();
     }
+
+    self
+      .state
+      .rect_batch
+      .on_render_finished_semaphore_signaled(render_finished_semaphore);
 
     let acquire_next_image_info = vk::AcquireNextImageInfoKHR {
       swapchain: self.state.swapchain,
@@ -1052,6 +1112,7 @@ impl Renderer<Created> {
         graphics_command_buffer,
         &self.instance_buffer,
         self.state.swapchain_image_extent,
+        render_finished_semaphore,
       );
 
       device.cmd_end_render_pass2(graphics_command_buffer, &subpass_end_info);
@@ -1060,12 +1121,11 @@ impl Renderer<Created> {
     };
 
     self.instance_buffer = self.instance_buffer.next_sub_buf();
-    let wait_dst_stage_mask = vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT;
 
     let queue_submit_infos = [vk::SubmitInfo {
-      wait_semaphore_count: 1,
-      p_wait_semaphores: &image_avail_semaphore,
-      p_wait_dst_stage_mask: &wait_dst_stage_mask,
+      wait_semaphore_count: render_wait_semaphores.len() as _,
+      p_wait_semaphores: render_wait_semaphores.as_ptr(),
+      p_wait_dst_stage_mask: render_wait_dst_stage_masks.as_ptr(),
       command_buffer_count: 1,
       p_command_buffers: &graphics_command_buffer,
       signal_semaphore_count: 1,
@@ -1112,7 +1172,7 @@ impl Renderer<Created> {
     })
   }
 
-  fn on_swapchain_suboptimal(self) -> Renderer<Creating> {
+  fn on_swapchain_suboptimal(self) -> Renderer<Creating<'ttf>> {
     let rect_batch = self.state.rect_batch.on_swapchain_suboptimal();
     let device = self.device.get();
 
@@ -1145,11 +1205,15 @@ impl Renderer<Created> {
       physical_device: self.physical_device,
       graphics_queue_family_index: self.graphics_queue_family_index,
       present_queue_family_index: self.present_queue_family_index,
+      transfer_queue_family_index: self.transfer_queue_family_index,
       device: self.device,
       graphics_queue: self.graphics_queue,
       present_queue: self.present_queue,
+      transfer_queue: self.transfer_queue,
       graphics_command_pools: self.graphics_command_pools,
       graphics_command_buffers: self.graphics_command_buffers,
+      transfer_command_pools: self.transfer_command_pools,
+      transfer_command_buffers: self.transfer_command_buffers,
       descriptor_pool: self.descriptor_pool,
       swapchain_device: self.swapchain_device,
       render_pass: self.render_pass,
@@ -1208,6 +1272,11 @@ impl Renderer<Created> {
       device.destroy_descriptor_pool(self.descriptor_pool, None);
 
       self
+        .transfer_command_pools
+        .into_iter()
+        .for_each(|command_pool| device.destroy_command_pool(command_pool, None));
+
+      self
         .graphics_command_pools
         .into_iter()
         .for_each(|command_pool| device.destroy_command_pool(command_pool, None));
@@ -1219,7 +1288,7 @@ impl Renderer<Created> {
   }
 }
 
-impl crate::Renderer for Result<Renderer<Created>, Renderer<Creating>> {
+impl crate::Renderer for Result<Renderer<Created<'_>>, Renderer<Creating<'_>>> {
   fn set_cam_position(&mut self, cam_position: (f32, f32)) {
     match self {
       Ok(renderer) => renderer.state.rect_batch.set_cam_position(cam_position),
@@ -1280,6 +1349,27 @@ impl crate::Renderer for Result<Renderer<Created>, Renderer<Creating>> {
     match self {
       Ok(renderer) => renderer.state.rect_batch.remove_text(id),
       Err(renderer) => renderer.state.rect_batch.remove_text(id),
+    }
+  }
+
+  fn add_icon(&mut self, icon: Icon) -> u32 {
+    match self {
+      Ok(renderer) => renderer.state.rect_batch.add_icon(icon),
+      Err(renderer) => renderer.state.rect_batch.add_icon(icon),
+    }
+  }
+
+  fn update_icon(&mut self, id: u32, icon: Icon) {
+    match self {
+      Ok(renderer) => renderer.state.rect_batch.update_icon(id, icon),
+      Err(renderer) => renderer.state.rect_batch.update_icon(id, icon),
+    }
+  }
+
+  fn remove_icon(&mut self, id: u32) -> Option<Icon> {
+    match self {
+      Ok(renderer) => renderer.state.rect_batch.remove_icon(id),
+      Err(renderer) => renderer.state.rect_batch.remove_icon(id),
     }
   }
 }

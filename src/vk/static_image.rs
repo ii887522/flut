@@ -14,8 +14,8 @@ pub(super) struct StaticImage<State> {
   device: Rc<Device>,
   vk_allocator: Rc<vk_mem::Allocator>,
   image: vk::Image,
-  view: vk::ImageView,
   vk_alloc: vk_mem::Allocation,
+  view: vk::ImageView,
   state: State,
 }
 

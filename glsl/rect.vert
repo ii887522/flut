@@ -11,12 +11,12 @@ const vec2 POSITIONS[] = vec2[](
 );
 
 struct Rect {
+  vec3 texPosition;
+  uint color;
+  vec2 texSize;
   vec2 position;
   vec2 size;
-  vec2 texPosition;
-  vec2 texSize;
-  uint color;
-  float pad;
+  vec2 pad;
 };
 
 layout(buffer_reference, std430, buffer_reference_align = 8) readonly buffer RectBuffer {
@@ -27,11 +27,10 @@ layout(push_constant, std430) uniform PushConst {
   RectBuffer rectBuffer;
   vec2 camPosition;
   vec2 camSize;
-  vec2 atlasSize;
 } pushConst;
 
 layout(location = 0) out vec4 color;
-layout(location = 1) out vec2 texCoord;
+layout(location = 1) out vec3 texCoord;
 
 void main() {
   const vec2 position = POSITIONS[gl_VertexIndex % POSITIONS.length()];
@@ -51,8 +50,9 @@ void main() {
     (rect.color & 0xFF) / 255.0
   );
 
-  texCoord = vec2(
-    (position.x * rect.texSize.x + rect.texPosition.x) / pushConst.atlasSize.x,
-    (position.y * rect.texSize.y + rect.texPosition.y) / pushConst.atlasSize.y
+  texCoord = vec3(
+    position.x * rect.texSize.x + rect.texPosition.x,
+    position.y * rect.texSize.y + rect.texPosition.y,
+    rect.texPosition.z
   );
 }

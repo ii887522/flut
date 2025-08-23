@@ -238,6 +238,7 @@ impl App for WormGame {
       size: consts::APP_SIZE,
       favicon_path: "assets/worm/favicon.png".into(),
       font_path: "assets/worm/fonts/arial.ttf".into(),
+      icon_font_path: "assets/fonts/MaterialSymbolsOutlined-Regular.ttf".into(),
       ..Default::default()
     }
   }

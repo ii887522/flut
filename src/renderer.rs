@@ -1,4 +1,4 @@
-use crate::models::{Rect, Text};
+use crate::models::{Icon, Rect, Text};
 use rustc_hash::{FxHashMap, FxHashSet};
 
 pub trait Renderer {
@@ -11,4 +11,7 @@ pub trait Renderer {
   fn remove_rects(&mut self, ids: FxHashSet<u32>) -> Box<[(u32, Rect)]>;
   fn add_text(&mut self, text: Text) -> u32;
   fn remove_text(&mut self, id: u32) -> Option<Text>;
+  fn add_icon(&mut self, icon: Icon) -> u32;
+  fn update_icon(&mut self, id: u32, icon: Icon);
+  fn remove_icon(&mut self, id: u32) -> Option<Icon>;
 }

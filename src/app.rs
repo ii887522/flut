@@ -18,6 +18,7 @@ pub struct Config {
   pub size: (u32, u32),
   pub favicon_path: Cow<'static, str>,
   pub font_path: Cow<'static, str>,
+  pub icon_font_path: Cow<'static, str>,
   pub drawable_caps: DrawableCaps,
 }
 
@@ -28,6 +29,7 @@ impl Default for Config {
       size: (800, 600),
       favicon_path: "".into(),
       font_path: "".into(),
+      icon_font_path: "".into(),
       drawable_caps: DrawableCaps::default(),
     }
   }
@@ -72,8 +74,14 @@ pub fn run(mut app: impl App) {
     Err(err) => warn!("{err}"),
   }
 
-  let mut renderer_result =
-    vk::Renderer::new(ttf, &config.font_path, window.clone(), config.drawable_caps).finish();
+  let mut renderer_result = vk::Renderer::new(
+    &ttf,
+    &config.font_path,
+    &config.icon_font_path,
+    window.clone(),
+    config.drawable_caps,
+  )
+  .finish();
 
   app.init(Context {
     renderer: &mut renderer_result,

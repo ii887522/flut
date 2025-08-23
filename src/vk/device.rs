@@ -60,39 +60,23 @@ impl Device {
       instance.get_physical_device_features2(physical_device, &mut physical_device_features)
     };
 
-    let physical_device_8bit_storage_features = vk::PhysicalDevice8BitStorageFeatures {
-      uniform_and_storage_buffer8_bit_access: vk::TRUE,
-      p_next: &physical_device_pipeline_creation_cache_control_features as *const _ as *mut _,
-      ..Default::default()
-    };
-
-    let physical_device_buffer_device_address_features =
-      vk::PhysicalDeviceBufferDeviceAddressFeatures {
-        buffer_device_address: vk::TRUE,
-        p_next: &physical_device_8bit_storage_features as *const _ as *mut _,
-        ..Default::default()
-      };
-
-    let physical_device_vulkan_memory_model_features =
-      vk::PhysicalDeviceVulkanMemoryModelFeatures {
-        vulkan_memory_model: vk::TRUE,
-        vulkan_memory_model_device_scope: vk::TRUE,
-        p_next: &physical_device_buffer_device_address_features as *const _ as *mut _,
-        ..Default::default()
-      };
-
-    let physical_device_timeline_semaphore_features = vk::PhysicalDeviceTimelineSemaphoreFeatures {
-      timeline_semaphore: vk::TRUE,
-      p_next: &physical_device_vulkan_memory_model_features as *const _ as *mut _,
-      ..Default::default()
-    };
-
     let physical_device_pageable_device_local_memory_features =
       vk::PhysicalDevicePageableDeviceLocalMemoryFeaturesEXT {
         pageable_device_local_memory: vk::TRUE,
-        p_next: &physical_device_timeline_semaphore_features as *const _ as *mut _,
+        p_next: &physical_device_pipeline_creation_cache_control_features as *const _ as *mut _,
         ..Default::default()
       };
+
+    let physical_device_vulkan_12_features = vk::PhysicalDeviceVulkan12Features {
+      runtime_descriptor_array: vk::TRUE,
+      timeline_semaphore: vk::TRUE,
+      vulkan_memory_model: vk::TRUE,
+      vulkan_memory_model_device_scope: vk::TRUE,
+      buffer_device_address: vk::TRUE,
+      uniform_and_storage_buffer8_bit_access: vk::TRUE,
+      p_next: &physical_device_pageable_device_local_memory_features as *const _ as *mut _,
+      ..Default::default()
+    };
 
     let physical_device_features = vk::PhysicalDeviceFeatures2 {
       features: vk::PhysicalDeviceFeatures {
@@ -102,7 +86,7 @@ impl Device {
         vertex_pipeline_stores_and_atomics: vk::TRUE,
         ..Default::default()
       },
-      p_next: &physical_device_pageable_device_local_memory_features as *const _ as *mut _,
+      p_next: &physical_device_vulkan_12_features as *const _ as *mut _,
       ..Default::default()
     };
 

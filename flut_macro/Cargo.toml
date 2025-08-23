@@ -21,6 +21,7 @@ proc-macro = true
 
 [dependencies]
 quote = { version = "1.0", default-features = false }
+rustc-hash = { version = "2.1", default-features = false, features = ["std"] }
 
 [dependencies.syn]
 version = "2.0"

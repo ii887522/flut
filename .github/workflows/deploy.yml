@@ -25,6 +25,7 @@ jobs:
           name: worm
           path: |
             assets/
+            !assets/fonts/*.codepoints
             worm.exe
           if-no-files-found: error
           overwrite: true
