@@ -1,0 +1,7 @@
+[build]
+rustflags = [
+  "-Clink-arg=-fuse-ld=lld",
+  "-Clink-arg=/DEFAULTLIB:MSVCRTD",
+  "-Clink-arg=/NODEFAULTLIB:MSVCRT",
+  "-Ctarget-cpu=native",
+]

@@ -1,0 +1,39 @@
+[package]
+name = "flut"
+description = "A simple cross platform GUI framework written in Rust suitable for 2D game and app development"
+version = "0.1.0"
+edition = "2024"
+publish = false
+repository = "https://github.com/ii887522/flut"
+rust-version = "1.90"
+
+[profile.dev]
+split-debuginfo = "packed"
+
+[profile.release]
+codegen-units = 1
+lto = true
+panic = "abort"
+split-debuginfo = "packed"
+strip = true
+
+[dependencies.mimalloc]
+version = "0.1"
+default-features = false
+features = ["v3"]
+
+[dependencies.rustc-hash]
+version = "2.1"
+default-features = false
+features = ["std"]
+
+[dependencies.sdl3]
+version = "0.16"
+default-features = false
+features = [
+  "build-from-source-static",
+  "image",
+  "raw-window-handle",
+  "static-link",
+  "ttf",
+]
