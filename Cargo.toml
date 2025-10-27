@@ -17,6 +17,15 @@ panic = "abort"
 split-debuginfo = "packed"
 strip = true
 
+[dependencies]
+optarg2chain = { version = "0.1", default-features = false }
+vk-mem = { version = "0.5", default-features = false }
+
+[dependencies.ash]
+version = "0.38"
+default-features = false
+features = ["loaded", "std"]
+
 [dependencies.mimalloc]
 version = "0.1"
 default-features = false
