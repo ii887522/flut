@@ -1,8 +1,12 @@
+use crate::{
+  pipelines::{Rect, RectPipeline},
+  rect_manager::{RectId, RectManager},
+};
 use ash::vk::{self, Handle};
 use optarg2chain::optarg_fn;
 use rustc_hash::FxHashSet;
 use sdl3::{event::Event, image::LoadSurface, surface::Surface};
-use std::{borrow::Cow, ffi::CString, iter};
+use std::{borrow::Cow, ffi::CString, iter, ptr};
 
 #[optarg_fn(RunBuilder, call)]
 pub fn run(
@@ -298,6 +302,11 @@ pub fn run(
       })
       .unwrap();
 
+  let queue_family_indices = [
+    graphics_queue_family_index as _,
+    present_queue_family_index as _,
+  ];
+
   let queue_priorities = [1.0];
 
   let queue_create_infos =
@@ -374,6 +383,18 @@ pub fn run(
       .unwrap()
   };
 
+  let mut allocator_create_info =
+    vk_mem::AllocatorCreateInfo::new(&vk_inst, &vk_device, vk_physical_device);
+
+  allocator_create_info.flags = vk_mem::AllocatorCreateFlags::EXTERNALLY_SYNCHRONIZED
+    | vk_mem::AllocatorCreateFlags::KHR_DEDICATED_ALLOCATION
+    | vk_mem::AllocatorCreateFlags::BUFFER_DEVICE_ADDRESS;
+
+  allocator_create_info.preferred_large_heap_block_size = 1024 * 1024; // 1 MB
+  allocator_create_info.vulkan_api_version = vk::API_VERSION_1_3;
+
+  let allocator = unsafe { vk_mem::Allocator::new(allocator_create_info).unwrap() };
+
   let graphics_queue_info = vk::DeviceQueueInfo2 {
     queue_family_index: graphics_queue_family_index as _,
     queue_index: 0,
@@ -389,6 +410,194 @@ pub fn run(
   let graphics_queue = unsafe { vk_device.get_device_queue2(&graphics_queue_info) };
   let present_queue = unsafe { vk_device.get_device_queue2(&present_queue_info) };
 
+  let swapchain_device = ash::khr::swapchain::Device::new(&vk_inst, &vk_device);
+
+  let vk_surface_caps = unsafe {
+    surface_inst
+      .get_physical_device_surface_capabilities(vk_physical_device, vk_surface)
+      .unwrap()
+  };
+
+  let vk_surface_format = unsafe {
+    surface_inst
+      .get_physical_device_surface_formats(vk_physical_device, vk_surface)
+      .unwrap()[0]
+  };
+
+  let swapchain_image_extent = if vk_surface_caps.current_extent.width != u32::MAX {
+    vk_surface_caps.current_extent
+  } else {
+    vk::Extent2D {
+      width: size.0.clamp(
+        vk_surface_caps.min_image_extent.width,
+        vk_surface_caps.max_image_extent.width,
+      ),
+      height: size.1.clamp(
+        vk_surface_caps.min_image_extent.height,
+        vk_surface_caps.max_image_extent.height,
+      ),
+    }
+  };
+
+  let swapchain_image_count = vk_surface_caps.min_image_count + 1;
+
+  let swapchain_image_count = if vk_surface_caps.max_image_count > 0 {
+    swapchain_image_count.min(vk_surface_caps.max_image_count)
+  } else {
+    swapchain_image_count
+  };
+
+  let (
+    swapchain_image_sharing_mode,
+    swapchain_queue_family_index_count,
+    swapchain_queue_family_indices,
+  ) = if graphics_queue_family_index == present_queue_family_index {
+    (vk::SharingMode::EXCLUSIVE, 0, ptr::null())
+  } else {
+    (
+      vk::SharingMode::CONCURRENT,
+      queue_family_indices.len() as _,
+      queue_family_indices.as_ptr(),
+    )
+  };
+
+  let swapchain_create_info = vk::SwapchainCreateInfoKHR {
+    surface: vk_surface,
+    min_image_count: swapchain_image_count,
+    image_format: vk_surface_format.format,
+    image_color_space: vk_surface_format.color_space,
+    image_extent: swapchain_image_extent,
+    image_array_layers: 1,
+    image_usage: vk::ImageUsageFlags::COLOR_ATTACHMENT,
+    image_sharing_mode: swapchain_image_sharing_mode,
+    queue_family_index_count: swapchain_queue_family_index_count,
+    p_queue_family_indices: swapchain_queue_family_indices,
+    pre_transform: vk_surface_caps.current_transform,
+    composite_alpha: vk::CompositeAlphaFlagsKHR::OPAQUE,
+    present_mode: vk::PresentModeKHR::FIFO,
+    clipped: vk::TRUE,
+    ..Default::default()
+  };
+
+  let swapchain = unsafe {
+    swapchain_device
+      .create_swapchain(&swapchain_create_info, None)
+      .unwrap()
+  };
+
+  let swapchain_images = unsafe { swapchain_device.get_swapchain_images(swapchain).unwrap() };
+
+  let swapchain_image_views = swapchain_images
+    .iter()
+    .map(|&image| {
+      let image_view_create_info = vk::ImageViewCreateInfo {
+        image,
+        view_type: vk::ImageViewType::TYPE_2D,
+        format: vk_surface_format.format,
+        subresource_range: vk::ImageSubresourceRange {
+          aspect_mask: vk::ImageAspectFlags::COLOR,
+          base_mip_level: 0,
+          level_count: 1,
+          base_array_layer: 0,
+          layer_count: 1,
+        },
+        ..Default::default()
+      };
+
+      unsafe {
+        vk_device
+          .create_image_view(&image_view_create_info, None)
+          .unwrap()
+      }
+    })
+    .collect::<Box<_>>();
+
+  let attachment_descs = [vk::AttachmentDescription2 {
+    format: vk_surface_format.format,
+    samples: vk::SampleCountFlags::TYPE_1,
+    load_op: vk::AttachmentLoadOp::CLEAR,
+    store_op: vk::AttachmentStoreOp::STORE,
+    stencil_load_op: vk::AttachmentLoadOp::DONT_CARE,
+    stencil_store_op: vk::AttachmentStoreOp::DONT_CARE,
+    initial_layout: vk::ImageLayout::UNDEFINED,
+    final_layout: vk::ImageLayout::PRESENT_SRC_KHR,
+    ..Default::default()
+  }];
+
+  let color_attachment_refs = [vk::AttachmentReference2 {
+    attachment: 0,
+    layout: vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
+    ..Default::default()
+  }];
+
+  let subpass_descs = [vk::SubpassDescription2 {
+    pipeline_bind_point: vk::PipelineBindPoint::GRAPHICS,
+    color_attachment_count: color_attachment_refs.len() as _,
+    p_color_attachments: color_attachment_refs.as_ptr(),
+    ..Default::default()
+  }];
+
+  let render_pass_create_info = vk::RenderPassCreateInfo2 {
+    attachment_count: attachment_descs.len() as _,
+    p_attachments: attachment_descs.as_ptr(),
+    subpass_count: subpass_descs.len() as _,
+    p_subpasses: subpass_descs.as_ptr(),
+    ..Default::default()
+  };
+
+  let render_pass = unsafe {
+    vk_device
+      .create_render_pass2(&render_pass_create_info, None)
+      .unwrap()
+  };
+
+  let framebuffers = swapchain_image_views
+    .iter()
+    .map(|&image_view| {
+      let framebuffer_create_info = vk::FramebufferCreateInfo {
+        render_pass,
+        attachment_count: 1,
+        p_attachments: &image_view,
+        width: swapchain_image_extent.width,
+        height: swapchain_image_extent.height,
+        layers: 1,
+        ..Default::default()
+      };
+
+      unsafe {
+        vk_device
+          .create_framebuffer(&framebuffer_create_info, None)
+          .unwrap()
+      }
+    })
+    .collect::<Box<_>>();
+
+  let graphics_command_pool_create_info = vk::CommandPoolCreateInfo {
+    queue_family_index: graphics_queue_family_index as _,
+    ..Default::default()
+  };
+
+  let graphics_command_pool = unsafe {
+    vk_device
+      .create_command_pool(&graphics_command_pool_create_info, None)
+      .unwrap()
+  };
+
+  let graphics_command_buffer_alloc_info = vk::CommandBufferAllocateInfo {
+    command_pool: graphics_command_pool,
+    level: vk::CommandBufferLevel::PRIMARY,
+    command_buffer_count: swapchain_images.len() as _,
+    ..Default::default()
+  };
+
+  let graphics_command_buffers = unsafe {
+    vk_device
+      .allocate_command_buffers(&graphics_command_buffer_alloc_info)
+      .unwrap()
+  };
+
+  let rect_pipeline = RectPipeline::new(&vk_device, render_pass, swapchain_image_extent);
+
   let mut event_pump = sdl.event_pump().unwrap();
 
   'running: loop {
@@ -400,6 +609,21 @@ pub fn run(
   }
 
   unsafe {
+    rect_pipeline.drop(&vk_device);
+    vk_device.destroy_command_pool(graphics_command_pool, None);
+
+    framebuffers
+      .iter()
+      .for_each(|&framebuffer| vk_device.destroy_framebuffer(framebuffer, None));
+
+    vk_device.destroy_render_pass(render_pass, None);
+
+    swapchain_image_views
+      .iter()
+      .for_each(|&image_view| vk_device.destroy_image_view(image_view, None));
+
+    swapchain_device.destroy_swapchain(swapchain, None);
+    drop(allocator);
     vk_device.destroy_device(None);
     surface_inst.destroy_surface(vk_surface, None);
     vk_inst.destroy_instance(None);

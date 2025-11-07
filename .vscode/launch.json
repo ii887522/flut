@@ -6,13 +6,7 @@
       "type": "lldb",
       "request": "launch",
       "cargo": {
-        "args": [
-          "run",
-          "--config",
-          ".cargo/config.dev.toml",
-          "--example",
-          "worm"
-        ]
+        "args": ["run", "--example", "worm"]
       },
       "args": []
     }

@@ -2,3 +2,6 @@
 #![allow(clippy::needless_lifetimes, clippy::too_many_arguments)]
 
 pub mod app;
+pub mod collections;
+mod pipelines;
+mod rect_manager;

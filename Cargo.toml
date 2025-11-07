@@ -8,6 +8,7 @@ repository = "https://github.com/ii887522/flut"
 rust-version = "1.90"
 
 [profile.dev]
+opt-level = 1
 split-debuginfo = "packed"
 
 [profile.release]
@@ -19,7 +20,8 @@ strip = true
 
 [dependencies]
 optarg2chain = { version = "0.1", default-features = false }
-vk-mem = { version = "0.5", default-features = false }
+rayon = { version = "1.11", default-features = false }
+vk-mem = { version = "0.5" }
 
 [dependencies.ash]
 version = "0.38"
@@ -46,3 +48,6 @@ features = [
   "static-link",
   "ttf",
 ]
+
+[build-dependencies]
+shaderc = { version = "0.10", default-features = false }
