@@ -1,4 +1,4 @@
-use ash::vk;
+use ash::vk::{self, Handle};
 use std::{ffi::CString, mem};
 
 const VERT_SHADER_CODE: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/spv/rect.vert.spv"));
@@ -6,9 +6,9 @@ const FRAG_SHADER_CODE: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/spv/re
 
 #[repr(C)]
 #[derive(Clone, Copy)]
-struct RectPushConsts {
-  rect_buffer: vk::DeviceAddress,
-  cam_size: (f32, f32),
+pub(crate) struct RectPushConsts {
+  pub(crate) rect_buffer: vk::DeviceAddress,
+  pub(crate) cam_size: (f32, f32),
 }
 
 #[repr(C)]
@@ -19,17 +19,19 @@ pub(crate) struct Rect {
   pub(crate) color: (f32, f32, f32, f32),
 }
 
-pub(crate) struct RectPipeline {
+pub(crate) struct Creating;
+pub(crate) struct Created;
+
+pub(crate) struct RectPipeline<State> {
+  vert_shader_module: vk::ShaderModule,
+  frag_shader_module: vk::ShaderModule,
   layout: vk::PipelineLayout,
   pipeline: vk::Pipeline,
+  state: State,
 }
 
-impl RectPipeline {
-  pub(crate) fn new(
-    device: &ash::Device,
-    render_pass: vk::RenderPass,
-    swapchain_image_extent: vk::Extent2D,
-  ) -> Self {
+impl RectPipeline<Creating> {
+  pub(crate) fn new(device: &ash::Device) -> Self {
     let vert_shader_module_create_info = vk::ShaderModuleCreateInfo {
       code_size: VERT_SHADER_CODE.len(),
       p_code: VERT_SHADER_CODE.as_ptr() as *const _,
@@ -72,18 +74,34 @@ impl RectPipeline {
         .unwrap()
     };
 
+    Self {
+      vert_shader_module,
+      frag_shader_module,
+      layout,
+      pipeline: vk::Pipeline::null(),
+      state: Creating,
+    }
+  }
+
+  pub(crate) fn finish(
+    self,
+    device: &ash::Device,
+    render_pass: vk::RenderPass,
+    cache: vk::PipelineCache,
+    swapchain_image_extent: vk::Extent2D,
+  ) -> RectPipeline<Created> {
     let main_fn_name = CString::new("main").unwrap();
 
     let shader_stage_create_infos = [
       vk::PipelineShaderStageCreateInfo {
         stage: vk::ShaderStageFlags::VERTEX,
-        module: vert_shader_module,
+        module: self.vert_shader_module,
         p_name: main_fn_name.as_ptr(),
         ..Default::default()
       },
       vk::PipelineShaderStageCreateInfo {
         stage: vk::ShaderStageFlags::FRAGMENT,
-        module: frag_shader_module,
+        module: self.frag_shader_module,
         p_name: main_fn_name.as_ptr(),
         ..Default::default()
       },
@@ -149,8 +167,14 @@ impl RectPipeline {
       ..Default::default()
     };
 
+    let flags = if self.pipeline.is_null() {
+      vk::PipelineCreateFlags::ALLOW_DERIVATIVES
+    } else {
+      vk::PipelineCreateFlags::ALLOW_DERIVATIVES | vk::PipelineCreateFlags::DERIVATIVE
+    };
+
     let pipeline_create_info = vk::GraphicsPipelineCreateInfo {
-      flags: vk::PipelineCreateFlags::ALLOW_DERIVATIVES,
+      flags,
       stage_count: shader_stage_create_infos.len() as _,
       p_stages: shader_stage_create_infos.as_ptr(),
       p_vertex_input_state: &vertex_input_state_create_info,
@@ -159,26 +183,44 @@ impl RectPipeline {
       p_rasterization_state: &rasterization_state_create_info,
       p_multisample_state: &multisample_state,
       p_color_blend_state: &color_blend_state_create_info,
-      layout,
+      layout: self.layout,
       render_pass,
       subpass: 0,
+      base_pipeline_handle: self.pipeline,
+      base_pipeline_index: -1,
       ..Default::default()
     };
 
     let pipeline = unsafe {
       device
-        .create_graphics_pipelines(vk::PipelineCache::null(), &[pipeline_create_info], None)
+        .create_graphics_pipelines(cache, &[pipeline_create_info], None)
         .unwrap()[0]
     };
 
     unsafe {
-      device.destroy_shader_module(frag_shader_module, None);
-      device.destroy_shader_module(vert_shader_module, None);
+      device.destroy_pipeline(self.pipeline, None);
     }
 
-    Self { layout, pipeline }
+    RectPipeline {
+      vert_shader_module: self.vert_shader_module,
+      frag_shader_module: self.frag_shader_module,
+      layout: self.layout,
+      pipeline,
+      state: Created,
+    }
   }
 
+  pub(crate) fn drop(self, device: &ash::Device) {
+    unsafe {
+      device.destroy_pipeline(self.pipeline, None);
+      device.destroy_pipeline_layout(self.layout, None);
+      device.destroy_shader_module(self.frag_shader_module, None);
+      device.destroy_shader_module(self.vert_shader_module, None);
+    }
+  }
+}
+
+impl RectPipeline<Created> {
   pub(crate) const fn get_pipeline(&self) -> vk::Pipeline {
     self.pipeline
   }
@@ -187,10 +229,22 @@ impl RectPipeline {
     self.layout
   }
 
+  pub(crate) fn on_swapchain_suboptimal(self) -> RectPipeline<Creating> {
+    RectPipeline {
+      vert_shader_module: self.vert_shader_module,
+      frag_shader_module: self.frag_shader_module,
+      layout: self.layout,
+      pipeline: self.pipeline,
+      state: Creating,
+    }
+  }
+
   pub(crate) fn drop(self, device: &ash::Device) {
     unsafe {
       device.destroy_pipeline(self.pipeline, None);
       device.destroy_pipeline_layout(self.layout, None);
+      device.destroy_shader_module(self.frag_shader_module, None);
+      device.destroy_shader_module(self.vert_shader_module, None);
     }
   }
 }

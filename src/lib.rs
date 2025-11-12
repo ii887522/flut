@@ -4,4 +4,4 @@
 pub mod app;
 pub mod collections;
 mod pipelines;
-mod rect_manager;
+mod renderer;

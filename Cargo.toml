@@ -5,7 +5,7 @@ version = "0.1.0"
 edition = "2024"
 publish = false
 repository = "https://github.com/ii887522/flut"
-rust-version = "1.90"
+rust-version = "1.91"
 
 [profile.dev]
 opt-level = 1

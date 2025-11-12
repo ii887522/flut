@@ -9,6 +9,7 @@ use std::{
 
 const MIN_SEQ_LEN: usize = 1024;
 
+#[derive(Clone, Copy)]
 pub struct Id(u32);
 
 struct DenseCell<T>(UnsafeCell<T>);
@@ -88,7 +89,7 @@ impl<T> SparseSet<T> {
     Id(id)
   }
 
-  pub fn update(&mut self, id: &Id, item: T) {
+  pub fn update(&mut self, id: Id, item: T) {
     self.dense[*self.sparse[id.0 as usize].get_mut() as usize] = DenseCell::new(item);
   }
 
@@ -166,7 +167,7 @@ impl<T: Send> SparseSet<T> {
       .collect()
   }
 
-  pub fn bulk_update(&mut self, updates: Box<[(&Id, T)]>) {
+  pub fn bulk_update(&mut self, updates: Box<[(Id, T)]>) {
     updates
       .into_par_iter()
       .with_min_len(MIN_SEQ_LEN)

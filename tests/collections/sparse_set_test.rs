@@ -52,7 +52,7 @@ fn test_add_id_uniqueness() {
 fn test_update() {
   let mut collection = SparseSet::new();
   let id = collection.add(42);
-  collection.update(&id, 84);
+  collection.update(id, 84);
   assert_eq!(collection.get_items(), &[84]);
 }
 
@@ -179,7 +179,7 @@ fn test_bulk_update() {
   let id1 = collection.add(item1);
   let id2 = collection.add(item2);
 
-  let updates = vec![(&id1, (10.0, 10.0, 1.5)), (&id2, (60.0, 60.0, 2.5))].into_boxed_slice();
+  let updates = vec![(id1, (10.0, 10.0, 1.5)), (id2, (60.0, 60.0, 2.5))].into_boxed_slice();
 
   collection.bulk_update(updates);
 
@@ -266,7 +266,7 @@ fn test_empty_bulk_operations() {
   assert_eq!(collection.get_items().len(), 0);
 
   // Test empty bulk_update
-  let updates: Box<[(&Id, i32)]> = vec![].into_boxed_slice();
+  let updates: Box<[(Id, i32)]> = vec![].into_boxed_slice();
   collection.bulk_update(updates); // Should not panic
   assert_eq!(collection.get_items().len(), 0);
 
@@ -282,7 +282,7 @@ fn test_sparse_set_with_different_types() {
   let id = string_collection.add("Hello".to_string());
   assert_eq!(string_collection.get_items(), &["Hello"]);
 
-  string_collection.update(&id, "World".to_string());
+  string_collection.update(id, "World".to_string());
   assert_eq!(string_collection.get_items(), &["World"]);
 
   string_collection.remove(id);
@@ -301,7 +301,7 @@ fn test_sparse_set_with_different_types() {
   let id = point_collection.add(point);
   assert_eq!(point_collection.get_items(), &[Point { x: 1.0, y: 2.0 }]);
 
-  point_collection.update(&id, Point { x: 3.0, y: 4.0 });
+  point_collection.update(id, Point { x: 3.0, y: 4.0 });
   assert_eq!(point_collection.get_items(), &[Point { x: 3.0, y: 4.0 }]);
 }
 
@@ -332,10 +332,10 @@ fn test_large_collection_performance() {
   assert_eq!(collection.get_items().len(), 10000);
 
   // Update all items
-  let updates: Box<[(&Id, i32)]> = ids
+  let updates: Box<[(Id, i32)]> = ids
     .iter()
     .enumerate()
-    .map(|(i, id)| (id, i as i32 * 2))
+    .map(|(i, &id)| (id, i as i32 * 2))
     .collect();
 
   collection.bulk_update(updates);
