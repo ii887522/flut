@@ -49,5 +49,10 @@ features = [
   "ttf",
 ]
 
+[dependencies.voracious_radix_sort]
+version = "1.2"
+default-features = false
+features = ["voracious_multithread"]
+
 [build-dependencies]
 shaderc = { version = "0.10", default-features = false }

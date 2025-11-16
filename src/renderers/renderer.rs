@@ -1,38 +1,41 @@
-use crate::pipelines::{
-  RectPipeline,
-  rect_pipeline::{self, RectPushConsts},
+use crate::{
+  app::ModelCapacities,
+  pipelines::rect_pipeline::{Rect, RectPushConsts},
+  renderers::{MAX_IN_FLIGHT_FRAME_COUNT, ModelRenderer, model_renderer},
 };
 use ash::vk::{self, Handle};
 use rustc_hash::FxHashSet;
 use sdl3::video::Window;
-use std::{ffi::CString, iter, mem, ptr, slice};
+use std::{
+  ffi::{CString, c_void},
+  iter, ptr,
+};
+use vk_mem::Alloc;
 
-const MAX_IN_FLIGHT_FRAME_COUNT: usize = 2;
-
-pub(super) enum AnyRenderer {
+pub(crate) enum AnyRenderer {
   Creating(Renderer<Creating>),
   Created(Renderer<Created>),
 }
 
-pub(super) enum FinishError {
+pub(crate) enum FinishError {
   WindowMinimized(Box<Renderer<Creating>>),
 }
 
-pub(super) struct Creating {
-  rect_pipeline: RectPipeline<rect_pipeline::Creating>,
+pub(crate) struct Creating {
+  rect_renderer: ModelRenderer<model_renderer::Creating<Rect>>,
 }
 
-pub(super) struct Created {
+pub(crate) struct Created {
   swapchain_image_extent: vk::Extent2D,
   swapchain: vk::SwapchainKHR,
   _swapchain_images: Vec<vk::Image>,
   swapchain_image_views: Box<[vk::ImageView]>,
   framebuffers: Box<[vk::Framebuffer]>,
-  rect_pipeline: RectPipeline<rect_pipeline::Created>,
+  rect_renderer: ModelRenderer<model_renderer::Created<Rect>>,
   frame_index: usize,
 }
 
-pub(super) struct Renderer<State> {
+pub(crate) struct Renderer<State> {
   ash_entry: ash::Entry,
   vk_inst: ash::Instance,
   vk_surface: vk::SurfaceKHR,
@@ -41,9 +44,13 @@ pub(super) struct Renderer<State> {
   graphics_queue_family_index: u32,
   present_queue_family_index: u32,
   vk_device: ash::Device,
-  vk_allocator: vk_mem::Allocator,
   graphics_queue: vk::Queue,
   present_queue: vk::Queue,
+  vk_allocator: vk_mem::Allocator,
+  model_buffer: vk::Buffer,
+  model_buffer_alloc: vk_mem::Allocation,
+  model_buffer_addr: vk::DeviceAddress,
+  model_buffer_data: *mut c_void,
   swapchain_device: ash::khr::swapchain::Device,
   vk_surface_format: vk::SurfaceFormatKHR,
   render_pass: vk::RenderPass,
@@ -57,7 +64,7 @@ pub(super) struct Renderer<State> {
 }
 
 impl Renderer<Creating> {
-  pub(super) fn new(window: Window) -> Self {
+  pub(crate) fn new(window: Window, model_capacities: ModelCapacities) -> Self {
     let ash_entry = unsafe { ash::Entry::load().unwrap() };
     let app_name = CString::new(window.title()).unwrap();
 
@@ -406,18 +413,6 @@ impl Renderer<Creating> {
         .unwrap()
     };
 
-    let mut vk_allocator_create_info =
-      vk_mem::AllocatorCreateInfo::new(&vk_inst, &vk_device, vk_physical_device);
-
-    vk_allocator_create_info.flags = vk_mem::AllocatorCreateFlags::EXTERNALLY_SYNCHRONIZED
-      | vk_mem::AllocatorCreateFlags::KHR_DEDICATED_ALLOCATION
-      | vk_mem::AllocatorCreateFlags::BUFFER_DEVICE_ADDRESS;
-
-    vk_allocator_create_info.preferred_large_heap_block_size = 1024 * 1024; // 1 MB
-    vk_allocator_create_info.vulkan_api_version = vk::API_VERSION_1_3;
-
-    let vk_allocator = unsafe { vk_mem::Allocator::new(vk_allocator_create_info).unwrap() };
-
     let graphics_queue_info = vk::DeviceQueueInfo2 {
       queue_family_index: graphics_queue_family_index,
       queue_index: 0,
@@ -432,6 +427,50 @@ impl Renderer<Creating> {
 
     let graphics_queue = unsafe { vk_device.get_device_queue2(&graphics_queue_info) };
     let present_queue = unsafe { vk_device.get_device_queue2(&present_queue_info) };
+
+    let mut vk_allocator_create_info =
+      vk_mem::AllocatorCreateInfo::new(&vk_inst, &vk_device, vk_physical_device);
+
+    vk_allocator_create_info.flags = vk_mem::AllocatorCreateFlags::EXTERNALLY_SYNCHRONIZED
+      | vk_mem::AllocatorCreateFlags::KHR_DEDICATED_ALLOCATION
+      | vk_mem::AllocatorCreateFlags::BUFFER_DEVICE_ADDRESS
+      | vk_mem::AllocatorCreateFlags::EXT_MEMORY_PRIORITY;
+
+    vk_allocator_create_info.preferred_large_heap_block_size = 1024 * 1024; // 1 MB
+    vk_allocator_create_info.vulkan_api_version = vk::API_VERSION_1_3;
+
+    let vk_allocator = unsafe { vk_mem::Allocator::new(vk_allocator_create_info).unwrap() };
+
+    let model_buffer_create_info = vk::BufferCreateInfo {
+      size: (MAX_IN_FLIGHT_FRAME_COUNT * model_capacities.get()) as _,
+      usage: vk::BufferUsageFlags::STORAGE_BUFFER | vk::BufferUsageFlags::SHADER_DEVICE_ADDRESS,
+      sharing_mode: vk::SharingMode::EXCLUSIVE,
+      ..Default::default()
+    };
+
+    let model_buffer_alloc_create_info = vk_mem::AllocationCreateInfo {
+      flags: vk_mem::AllocationCreateFlags::HOST_ACCESS_SEQUENTIAL_WRITE
+        | vk_mem::AllocationCreateFlags::MAPPED,
+      usage: vk_mem::MemoryUsage::AutoPreferDevice,
+      ..Default::default()
+    };
+
+    let (model_buffer, model_buffer_alloc) = unsafe {
+      vk_allocator
+        .create_buffer(&model_buffer_create_info, &model_buffer_alloc_create_info)
+        .unwrap()
+    };
+
+    let model_buffer_device_addr_info = vk::BufferDeviceAddressInfo {
+      buffer: model_buffer,
+      ..Default::default()
+    };
+
+    let model_buffer_addr =
+      unsafe { vk_device.get_buffer_device_address(&model_buffer_device_addr_info) };
+
+    let model_buffer_alloc_info = vk_allocator.get_allocation_info(&model_buffer_alloc);
+    let model_buffer_data = model_buffer_alloc_info.mapped_data;
 
     let swapchain_device = ash::khr::swapchain::Device::new(&vk_inst, &vk_device);
 
@@ -573,7 +612,7 @@ impl Renderer<Creating> {
         })
     };
 
-    let rect_pipeline = RectPipeline::new(&vk_device);
+    let rect_renderer = ModelRenderer::new(&vk_device, model_capacities.rect_capacity);
 
     Self {
       ash_entry,
@@ -584,9 +623,13 @@ impl Renderer<Creating> {
       graphics_queue_family_index,
       present_queue_family_index,
       vk_device,
-      vk_allocator,
       graphics_queue,
       present_queue,
+      vk_allocator,
+      model_buffer,
+      model_buffer_alloc,
+      model_buffer_addr,
+      model_buffer_data,
       swapchain_device,
       vk_surface_format,
       render_pass,
@@ -596,11 +639,11 @@ impl Renderer<Creating> {
       render_done_semaphores,
       in_flight_fences,
       pipeline_cache,
-      state: Creating { rect_pipeline },
+      state: Creating { rect_renderer },
     }
   }
 
-  pub(super) fn finish(self, window: Window) -> Result<Renderer<Created>, FinishError> {
+  pub(crate) fn finish(self, window: Window) -> Result<Renderer<Created>, FinishError> {
     let vk_surface_caps = unsafe {
       self
         .surface_inst
@@ -736,7 +779,7 @@ impl Renderer<Creating> {
       })
       .collect::<Box<_>>();
 
-    let rect_pipeline = self.state.rect_pipeline.finish(
+    let rect_renderer = self.state.rect_renderer.finish(
       &self.vk_device,
       self.render_pass,
       self.pipeline_cache,
@@ -752,9 +795,13 @@ impl Renderer<Creating> {
       graphics_queue_family_index: self.graphics_queue_family_index,
       present_queue_family_index: self.present_queue_family_index,
       vk_device: self.vk_device,
-      vk_allocator: self.vk_allocator,
       graphics_queue: self.graphics_queue,
       present_queue: self.present_queue,
+      vk_allocator: self.vk_allocator,
+      model_buffer: self.model_buffer,
+      model_buffer_alloc: self.model_buffer_alloc,
+      model_buffer_addr: self.model_buffer_addr,
+      model_buffer_data: self.model_buffer_data,
       swapchain_device: self.swapchain_device,
       vk_surface_format: self.vk_surface_format,
       render_pass: self.render_pass,
@@ -770,16 +817,23 @@ impl Renderer<Creating> {
         _swapchain_images: swapchain_images,
         swapchain_image_views,
         framebuffers,
-        rect_pipeline,
+        rect_renderer,
         frame_index: 0,
       },
     })
   }
 
-  pub(super) fn drop(self) {
+  #[inline]
+  pub(super) const fn get_rect_renderer(
+    &mut self,
+  ) -> &mut ModelRenderer<model_renderer::Creating<Rect>> {
+    &mut self.state.rect_renderer
+  }
+
+  pub(crate) fn drop(mut self) {
     unsafe {
       self.vk_device.device_wait_idle().unwrap();
-      self.state.rect_pipeline.drop(&self.vk_device);
+      self.state.rect_renderer.drop(&self.vk_device);
 
       self
         .vk_device
@@ -806,6 +860,11 @@ impl Renderer<Creating> {
         .for_each(|&command_pool| self.vk_device.destroy_command_pool(command_pool, None));
 
       self.vk_device.destroy_render_pass(self.render_pass, None);
+
+      self
+        .vk_allocator
+        .destroy_buffer(self.model_buffer, &mut self.model_buffer_alloc);
+
       drop(self.vk_allocator);
       self.vk_device.destroy_device(None);
       self.surface_inst.destroy_surface(self.vk_surface, None);
@@ -815,7 +874,14 @@ impl Renderer<Creating> {
 }
 
 impl Renderer<Created> {
-  pub(super) fn render(self) -> AnyRenderer {
+  #[inline]
+  pub(super) const fn get_rect_renderer(
+    &mut self,
+  ) -> &mut ModelRenderer<model_renderer::Created<Rect>> {
+    &mut self.state.rect_renderer
+  }
+
+  pub(crate) fn render(mut self) -> AnyRenderer {
     let graphics_command_pool = self.graphics_command_pools[self.state.frame_index];
     let graphics_command_buffer = self.graphics_command_buffers[self.state.frame_index];
     let image_avail_semaphore = self.image_avail_semaphores[self.state.frame_index];
@@ -846,6 +912,11 @@ impl Renderer<Created> {
         }
         Err(err) => panic!("{err}"),
       };
+
+      self.state.rect_renderer.flush_writes(
+        (self.model_buffer_data as *mut Rect)
+          .add(self.state.frame_index * self.state.rect_renderer.get_model_capacity()),
+      );
 
       self
         .vk_device
@@ -891,32 +962,20 @@ impl Renderer<Created> {
         &subpass_begin_info,
       );
 
-      self.vk_device.cmd_bind_pipeline(
-        graphics_command_buffer,
-        vk::PipelineBindPoint::GRAPHICS,
-        self.state.rect_pipeline.get_pipeline(),
-      );
-
       let rect_push_consts = RectPushConsts {
-        rect_buffer: 1,
+        rect_buffer: self.model_buffer_addr,
         cam_size: (
           self.state.swapchain_image_extent.width as _,
           self.state.swapchain_image_extent.height as _,
         ),
       };
 
-      self.vk_device.cmd_push_constants(
+      self.state.rect_renderer.record_draw_commands(
+        &self.vk_device,
         graphics_command_buffer,
-        self.state.rect_pipeline.get_pipeline_layout(),
-        vk::ShaderStageFlags::VERTEX,
-        0,
-        slice::from_raw_parts(
-          &rect_push_consts as *const _ as *const _,
-          mem::size_of::<RectPushConsts>(),
-        ),
+        &rect_push_consts,
       );
 
-      self.vk_device.cmd_draw(graphics_command_buffer, 6, 1, 0, 0);
       let subpass_end_info = vk::SubpassEndInfo::default();
 
       self
@@ -982,12 +1041,12 @@ impl Renderer<Created> {
     })
   }
 
-  pub(super) fn on_swapchain_suboptimal(self) -> Renderer<Creating> {
+  pub(crate) fn on_swapchain_suboptimal(self) -> Renderer<Creating> {
     unsafe {
       self.vk_device.device_wait_idle().unwrap();
     }
 
-    let rect_pipeline = self.state.rect_pipeline.on_swapchain_suboptimal();
+    let rect_renderer = self.state.rect_renderer.on_swapchain_suboptimal();
 
     unsafe {
       self
@@ -1016,9 +1075,13 @@ impl Renderer<Created> {
       graphics_queue_family_index: self.graphics_queue_family_index,
       present_queue_family_index: self.present_queue_family_index,
       vk_device: self.vk_device,
-      vk_allocator: self.vk_allocator,
       graphics_queue: self.graphics_queue,
       present_queue: self.present_queue,
+      vk_allocator: self.vk_allocator,
+      model_buffer: self.model_buffer,
+      model_buffer_alloc: self.model_buffer_alloc,
+      model_buffer_addr: self.model_buffer_addr,
+      model_buffer_data: self.model_buffer_data,
       swapchain_device: self.swapchain_device,
       vk_surface_format: self.vk_surface_format,
       render_pass: self.render_pass,
@@ -1028,14 +1091,14 @@ impl Renderer<Created> {
       render_done_semaphores: self.render_done_semaphores,
       in_flight_fences: self.in_flight_fences,
       pipeline_cache: self.pipeline_cache,
-      state: Creating { rect_pipeline },
+      state: Creating { rect_renderer },
     }
   }
 
-  pub(super) fn drop(self) {
+  pub(crate) fn drop(mut self) {
     unsafe {
       self.vk_device.device_wait_idle().unwrap();
-      self.state.rect_pipeline.drop(&self.vk_device);
+      self.state.rect_renderer.drop(&self.vk_device);
 
       self
         .state
@@ -1078,6 +1141,11 @@ impl Renderer<Created> {
         .for_each(|&command_pool| self.vk_device.destroy_command_pool(command_pool, None));
 
       self.vk_device.destroy_render_pass(self.render_pass, None);
+
+      self
+        .vk_allocator
+        .destroy_buffer(self.model_buffer, &mut self.model_buffer_alloc);
+
       drop(self.vk_allocator);
       self.vk_device.destroy_device(None);
       self.surface_inst.destroy_surface(self.vk_surface, None);
