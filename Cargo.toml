@@ -1,0 +1,58 @@
+[package]
+name = "flut"
+description = "A simple cross platform GUI framework written in Rust suitable for 2D game and app development"
+version = "0.1.0"
+edition = "2024"
+publish = false
+repository = "https://github.com/ii887522/flut"
+rust-version = "1.91"
+
+[profile.dev]
+opt-level = 1
+split-debuginfo = "packed"
+
+[profile.release]
+codegen-units = 1
+lto = true
+panic = "abort"
+split-debuginfo = "packed"
+strip = true
+
+[dependencies]
+optarg2chain = { version = "0.1", default-features = false }
+rayon = { version = "1.11", default-features = false }
+vk-mem = { version = "0.5" }
+
+[dependencies.ash]
+version = "0.38"
+default-features = false
+features = ["loaded", "std"]
+
+[dependencies.mimalloc]
+version = "0.1"
+default-features = false
+features = ["v3"]
+
+[dependencies.rustc-hash]
+version = "2.1"
+default-features = false
+features = ["std"]
+
+[dependencies.sdl3]
+version = "0.16"
+default-features = false
+features = [
+  "build-from-source-static",
+  "image",
+  "raw-window-handle",
+  "static-link",
+  "ttf",
+]
+
+[dependencies.voracious_radix_sort]
+version = "1.2"
+default-features = false
+features = ["voracious_multithread"]
+
+[build-dependencies]
+shaderc = { version = "0.10", default-features = false }

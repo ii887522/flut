@@ -10,20 +10,20 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v5
-      - uses: dtolnay/rust-toolchain@1.90
+      - uses: dtolnay/rust-toolchain@1.91
         with:
           components: clippy,rustfmt
       - uses: Swatinem/rust-cache@v2
       - run: cargo fmt --all -- --check
-      - run: cargo install cargo-vcpkg
-      - run: cargo vcpkg --verbose build
       - run: cargo clippy --all-targets --all-features
       - run: cargo build --example worm --release
       - run: copy target/release/examples/worm.exe worm.exe
       - uses: actions/upload-artifact@v4
         with:
           name: worm
-          path: worm.exe
+          path: |
+            assets/worm/
+            worm.exe
           if-no-files-found: error
           overwrite: true
           retention-days: 90
