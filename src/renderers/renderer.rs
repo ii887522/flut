@@ -87,8 +87,13 @@ impl Renderer<Creating> {
     let vk_ext_names = window.vulkan_instance_extensions().unwrap();
 
     let vk_ext_names = vk_ext_names
+      .into_iter()
+      .map(|ext_name| CString::new(ext_name).unwrap())
+      .collect::<Box<_>>();
+
+    let vk_ext_names = vk_ext_names
       .iter()
-      .map(|ext_name| ext_name.as_ptr() as *const _)
+      .map(|ext_name| ext_name.as_ptr())
       .chain(iter::once(vk::KHR_PORTABILITY_ENUMERATION_NAME.as_ptr()))
       .collect::<Box<_>>();
 

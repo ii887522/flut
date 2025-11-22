@@ -8,6 +8,7 @@ mod pipelines;
 pub mod renderers;
 
 pub use app::App;
+pub use sdl3::event::Event;
 
 use crate::models::Write;
 use voracious_radix_sort::RadixSort;

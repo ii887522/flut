@@ -12,8 +12,6 @@ pub trait App {
   fn update(&mut self, _dt: f32, _renderer: RendererRef<'_>) {}
 }
 
-impl App for () {}
-
 pub struct ModelCapacities {
   pub rect_capacity: usize,
 }

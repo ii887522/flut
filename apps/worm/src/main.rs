@@ -6,13 +6,16 @@ mod game;
 
 use flut::app;
 use game::Game;
+
+#[cfg(not(feature = "reload"))]
 use mimalloc::MiMalloc;
 
+#[cfg(not(feature = "reload"))]
 #[global_allocator]
 static GLOBAL: MiMalloc = MiMalloc;
 
 fn main() {
-  app::run(Game)
+  app::run(Game::new())
     .title("Worm")
     .size((1600, 900))
     .favicon_path("assets/worm/images/favicon.png")
