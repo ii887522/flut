@@ -4,7 +4,7 @@ fn main() {
   let profile = env::var("PROFILE").unwrap();
   let profile = if profile == "debug" { "dev" } else { "release" };
 
-  // Build dylib for hot reloading
+  // Build cdylib for hot reloading
   let status = Command::new("cargo")
     .current_dir("../..")
     .args([
@@ -14,7 +14,7 @@ fn main() {
       "--target-dir",
       "apps/worm/lib/target",
       "--crate-type",
-      "dylib",
+      "cdylib",
       "--features",
       "reload",
       "--profile",
@@ -24,10 +24,12 @@ fn main() {
     .unwrap();
 
   if !status.success() {
-    panic!("Failed to build worm_lib as dylib");
+    panic!("Failed to build worm_lib as cdylib");
   }
 
   // Tell cargo to rerun this build script if any library files change
   println!("cargo::rerun-if-changed=lib/src/");
   println!("cargo::rerun-if-changed=lib/Cargo.toml");
+  println!("cargo::rerun-if-changed=../../src/");
+  println!("cargo::rerun-if-changed=../../Cargo.toml");
 }

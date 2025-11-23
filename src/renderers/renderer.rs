@@ -488,9 +488,8 @@ impl Renderer<Creating> {
     let vk_surface_format = *vk_surface_formats
       .iter()
       .find(|&surface_format| {
-        surface_format.color_space == vk::ColorSpaceKHR::SRGB_NONLINEAR
-          && (surface_format.format == vk::Format::B8G8R8A8_SRGB
-            || surface_format.format == vk::Format::R8G8B8A8_SRGB)
+        surface_format.format == vk::Format::B8G8R8A8_UNORM
+          || surface_format.format == vk::Format::R8G8B8A8_UNORM
       })
       .unwrap_or(&vk_surface_formats[0]);
 

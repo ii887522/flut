@@ -26,7 +26,6 @@ pub(super) trait CreatedPipeline {
 
   fn get_pipeline(&self) -> vk::Pipeline;
   fn get_pipeline_layout(&self) -> vk::PipelineLayout;
-  fn get_model_vertex_count(&self) -> usize;
   fn on_swapchain_suboptimal(self) -> <Self::Model as Model>::CreatingPipeline;
   fn drop(self, device: &ash::Device);
 }

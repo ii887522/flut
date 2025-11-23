@@ -20,6 +20,16 @@ impl Model for Rect {
   type PushConsts = RectPushConsts;
   type CreatingPipeline = RectPipeline<Creating>;
   type CreatedPipeline = RectPipeline<Created>;
+
+  #[inline]
+  fn get_name() -> &'static str {
+    "rect"
+  }
+
+  #[inline]
+  fn get_vertex_count() -> usize {
+    6
+  }
 }
 
 impl From<models::Rect> for Rect {
@@ -253,11 +263,6 @@ impl CreatedPipeline for RectPipeline<Created> {
   #[inline]
   fn get_pipeline_layout(&self) -> vk::PipelineLayout {
     self.layout
-  }
-
-  #[inline]
-  fn get_model_vertex_count(&self) -> usize {
-    6
   }
 
   fn on_swapchain_suboptimal(self) -> RectPipeline<Creating> {

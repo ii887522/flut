@@ -15,3 +15,9 @@ crate-type = ["rlib"]
 
 [dependencies]
 flut = { path = "../../.." }
+rayon = { version = "1.11", default-features = false }
+
+[dependencies.fastrand]
+version = "2.3"
+default-features = false
+features = ["std"]
