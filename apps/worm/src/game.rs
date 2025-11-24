@@ -19,7 +19,7 @@ pub(super) struct Game(lib::Game);
 
 impl Game {
   #[inline]
-  pub(super) const fn new() -> Self {
+  pub(super) fn new() -> Self {
     Self(lib::Game::new())
   }
 }

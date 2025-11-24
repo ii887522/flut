@@ -1,5 +1,3 @@
-pub(super) mod air;
-pub(super) mod worm_cell;
+pub(super) mod direction;
 
-pub(super) use air::Air;
-pub(super) use worm_cell::WormCell;
+pub(super) use direction::Direction;
