@@ -455,11 +455,8 @@ impl Renderer<Creating> {
 
     vk_allocator_create_info.flags = vk_mem::AllocatorCreateFlags::EXTERNALLY_SYNCHRONIZED
       | vk_mem::AllocatorCreateFlags::KHR_DEDICATED_ALLOCATION
-      | vk_mem::AllocatorCreateFlags::BUFFER_DEVICE_ADDRESS;
-
-    if vk_device_ext_name_c_strs.contains(&vk::EXT_MEMORY_PRIORITY_NAME) {
-      vk_allocator_create_info.flags |= vk_mem::AllocatorCreateFlags::EXT_MEMORY_PRIORITY;
-    }
+      | vk_mem::AllocatorCreateFlags::BUFFER_DEVICE_ADDRESS
+      | vk_mem::AllocatorCreateFlags::EXT_MEMORY_PRIORITY;
 
     vk_allocator_create_info.preferred_large_heap_block_size =
       (MAX_IN_FLIGHT_FRAME_COUNT * total_model_capacity_size).max(1024 * 1024) as _; // 1 MB
