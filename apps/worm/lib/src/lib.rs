@@ -14,11 +14,11 @@ use std::collections::VecDeque;
 
 // General settings
 const MIN_SEQ_LEN: usize = 256;
-pub const WINDOW_SIZE: (u32, u32) = (1600, 900);
+pub const WINDOW_SIZE: (u32, u32) = (1280, 720);
 
 // Grid settings
-const GRID_SIZE: (f32, f32) = (880.0, 880.0);
-const GRID_CELL_SIZE: (f32, f32) = (16.0, 16.0);
+const GRID_SIZE: (f32, f32) = (684.0, 684.0);
+const GRID_CELL_SIZE: (f32, f32) = (12.0, 12.0);
 const GRID_CELL_MARGIN: (f32, f32) = (2.0, 2.0);
 
 // Computed grid settings

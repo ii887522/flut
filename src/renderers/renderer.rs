@@ -7,7 +7,7 @@ use ash::vk::{self, Handle};
 use rustc_hash::FxHashSet;
 use sdl3::video::Window;
 use std::{
-  ffi::{CString, c_void},
+  ffi::{CStr, CString, c_void},
   iter, ptr,
 };
 use vk_mem::Alloc;
@@ -361,20 +361,30 @@ impl Renderer<Creating> {
         .unwrap()
     };
 
-    let has_portability_subset = vk_ext_props.into_iter().any(|vk_ext_props| {
-      let vk_ext_name = vk_ext_props.extension_name_as_c_str().unwrap();
-      vk_ext_name == vk::KHR_PORTABILITY_SUBSET_NAME
-    });
-
-    let mut vk_device_ext_names = vec![
-      vk::KHR_SWAPCHAIN_NAME.as_ptr(),
-      vk::EXT_PAGEABLE_DEVICE_LOCAL_MEMORY_NAME.as_ptr(),
-      vk::EXT_MEMORY_PRIORITY_NAME.as_ptr(),
+    const REQ_VK_DEVICE_EXT_NAMES: &[&CStr] = &[
+      vk::KHR_SWAPCHAIN_NAME,
+      vk::EXT_PAGEABLE_DEVICE_LOCAL_MEMORY_NAME,
+      vk::EXT_MEMORY_PRIORITY_NAME,
+      vk::KHR_PORTABILITY_SUBSET_NAME,
     ];
 
-    if has_portability_subset {
-      vk_device_ext_names.push(vk::KHR_PORTABILITY_SUBSET_NAME.as_ptr());
-    }
+    let vk_device_ext_name_c_strs = vk_ext_props
+      .iter()
+      .filter_map(|vk_ext_props| {
+        let vk_ext_name = vk_ext_props.extension_name_as_c_str().unwrap();
+
+        if REQ_VK_DEVICE_EXT_NAMES.contains(&vk_ext_name) {
+          Some(vk_ext_name)
+        } else {
+          None
+        }
+      })
+      .collect::<Box<_>>();
+
+    let vk_device_ext_names = vk_device_ext_name_c_strs
+      .iter()
+      .map(|&ext_name_c_str| ext_name_c_str.as_ptr())
+      .collect::<Box<_>>();
 
     let vk_physical_device_pageable_device_local_memory_features =
       vk::PhysicalDevicePageableDeviceLocalMemoryFeaturesEXT {
@@ -384,11 +394,17 @@ impl Renderer<Creating> {
 
     let vk_physical_device_vulkan_12_features = vk::PhysicalDeviceVulkan12Features {
       buffer_device_address: vk::TRUE,
+      scalar_block_layout: vk::TRUE,
+      storage_buffer8_bit_access: vk::TRUE,
       timeline_semaphore: vk::TRUE,
       vulkan_memory_model: vk::TRUE,
       vulkan_memory_model_device_scope: vk::TRUE,
       uniform_and_storage_buffer8_bit_access: vk::TRUE,
-      p_next: &vk_physical_device_pageable_device_local_memory_features as *const _ as *mut _,
+      p_next: if vk_device_ext_name_c_strs.contains(&vk::EXT_PAGEABLE_DEVICE_LOCAL_MEMORY_NAME) {
+        &vk_physical_device_pageable_device_local_memory_features as *const _ as *mut _
+      } else {
+        ptr::null_mut()
+      },
       ..Default::default()
     };
 
@@ -432,22 +448,28 @@ impl Renderer<Creating> {
 
     let graphics_queue = unsafe { vk_device.get_device_queue2(&graphics_queue_info) };
     let present_queue = unsafe { vk_device.get_device_queue2(&present_queue_info) };
+    let total_model_capacity_size = model_capacities.calc_total_size();
 
     let mut vk_allocator_create_info =
       vk_mem::AllocatorCreateInfo::new(&vk_inst, &vk_device, vk_physical_device);
 
     vk_allocator_create_info.flags = vk_mem::AllocatorCreateFlags::EXTERNALLY_SYNCHRONIZED
       | vk_mem::AllocatorCreateFlags::KHR_DEDICATED_ALLOCATION
-      | vk_mem::AllocatorCreateFlags::BUFFER_DEVICE_ADDRESS
-      | vk_mem::AllocatorCreateFlags::EXT_MEMORY_PRIORITY;
+      | vk_mem::AllocatorCreateFlags::BUFFER_DEVICE_ADDRESS;
 
-    vk_allocator_create_info.preferred_large_heap_block_size = 1024 * 1024; // 1 MB
+    if vk_device_ext_name_c_strs.contains(&vk::EXT_MEMORY_PRIORITY_NAME) {
+      vk_allocator_create_info.flags |= vk_mem::AllocatorCreateFlags::EXT_MEMORY_PRIORITY;
+    }
+
+    vk_allocator_create_info.preferred_large_heap_block_size =
+      (MAX_IN_FLIGHT_FRAME_COUNT * total_model_capacity_size).max(1024 * 1024) as _; // 1 MB
+
     vk_allocator_create_info.vulkan_api_version = vk::API_VERSION_1_3;
 
     let vk_allocator = unsafe { vk_mem::Allocator::new(vk_allocator_create_info).unwrap() };
 
     let model_buffer_create_info = vk::BufferCreateInfo {
-      size: (MAX_IN_FLIGHT_FRAME_COUNT * model_capacities.get()) as _,
+      size: (MAX_IN_FLIGHT_FRAME_COUNT * total_model_capacity_size) as _,
       usage: vk::BufferUsageFlags::STORAGE_BUFFER | vk::BufferUsageFlags::SHADER_DEVICE_ADDRESS,
       sharing_mode: vk::SharingMode::EXCLUSIVE,
       ..Default::default()
@@ -885,7 +907,7 @@ impl Renderer<Created> {
     &mut self.state.rect_renderer
   }
 
-  pub(crate) fn render(mut self) -> AnyRenderer {
+  pub(crate) fn render(mut self, window: Window) -> AnyRenderer {
     let graphics_command_pool = self.graphics_command_pools[self.state.frame_index];
     let graphics_command_buffer = self.graphics_command_buffers[self.state.frame_index];
     let image_avail_semaphore = self.image_avail_semaphores[self.state.frame_index];
@@ -966,11 +988,13 @@ impl Renderer<Created> {
         &subpass_begin_info,
       );
 
+      let window_display_scale = window.display_scale();
+
       let rect_push_consts = RectPushConsts {
         rect_buffer: self.model_buffer_addr,
         cam_size: (
-          self.state.swapchain_image_extent.width as _,
-          self.state.swapchain_image_extent.height as _,
+          self.state.swapchain_image_extent.width as f32 / window_display_scale,
+          self.state.swapchain_image_extent.height as f32 / window_display_scale,
         ),
       };
 
