@@ -1,3 +1,4 @@
+#[derive(Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Direction {
   Up,
   Right,

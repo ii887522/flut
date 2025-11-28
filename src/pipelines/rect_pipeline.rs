@@ -121,6 +121,7 @@ impl CreatingPipeline for RectPipeline<Creating> {
     render_pass: vk::RenderPass,
     cache: vk::PipelineCache,
     swapchain_image_extent: vk::Extent2D,
+    msaa_samples: vk::SampleCountFlags,
   ) -> RectPipeline<Created> {
     let main_fn_name = CString::new("main").unwrap();
 
@@ -175,7 +176,7 @@ impl CreatingPipeline for RectPipeline<Creating> {
     };
 
     let multisample_state = vk::PipelineMultisampleStateCreateInfo {
-      rasterization_samples: vk::SampleCountFlags::TYPE_1,
+      rasterization_samples: msaa_samples,
       ..Default::default()
     };
 

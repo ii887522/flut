@@ -5,7 +5,7 @@ mod models;
 
 use crate::models::Direction;
 use flut::{
-  Event,
+  Event, Keycode,
   models::Rect,
   renderers::{RendererRef, renderer_ref},
 };
@@ -15,6 +15,7 @@ use std::collections::VecDeque;
 // General settings
 const MIN_SEQ_LEN: usize = 256;
 pub const WINDOW_SIZE: (u32, u32) = (1280, 720);
+const UPDATES_PER_SECOND: f32 = 30.0;
 
 // Grid settings
 const GRID_SIZE: (f32, f32) = (684.0, 684.0);
@@ -43,6 +44,8 @@ pub struct Game {
   air_positions: Vec<u16>,
   worm_positions: VecDeque<u16>, // Front is head, back is tail
   worm_direction: Direction,
+  input_worm_direction: Option<Direction>,
+  accum: f32,
 }
 
 impl Default for Game {
@@ -60,6 +63,8 @@ impl Game {
       air_positions: vec![],
       worm_positions: VecDeque::new(),
       worm_direction: Direction::rand(),
+      input_worm_direction: None,
+      accum: 0.0,
     }
   }
 }
@@ -122,12 +127,46 @@ pub extern "Rust" fn init(game: &mut Game, mut renderer: RendererRef<'_>) {
 }
 
 #[cfg_attr(feature = "reload", unsafe(no_mangle))]
-pub extern "Rust" fn process_event(_game: &mut Game, _event: Event) {
-  // todo
+pub extern "Rust" fn process_event(game: &mut Game, event: Event) {
+  match event {
+    Event::KeyDown {
+      keycode: Some(Keycode::W | Keycode::Up),
+      ..
+    } if game.worm_direction != Direction::Down => game.input_worm_direction = Some(Direction::Up),
+    Event::KeyDown {
+      keycode: Some(Keycode::D | Keycode::Right),
+      ..
+    } if game.worm_direction != Direction::Left => {
+      game.input_worm_direction = Some(Direction::Right)
+    }
+    Event::KeyDown {
+      keycode: Some(Keycode::S | Keycode::Down),
+      ..
+    } if game.worm_direction != Direction::Up => game.input_worm_direction = Some(Direction::Down),
+    Event::KeyDown {
+      keycode: Some(Keycode::A | Keycode::Left),
+      ..
+    } if game.worm_direction != Direction::Right => {
+      game.input_worm_direction = Some(Direction::Left)
+    }
+    _ => {}
+  }
 }
 
 #[cfg_attr(feature = "reload", unsafe(no_mangle))]
-pub extern "Rust" fn update(game: &mut Game, _dt: f32, mut renderer: RendererRef<'_>) {
+pub extern "Rust" fn update(game: &mut Game, dt: f32, mut renderer: RendererRef<'_>) {
+  game.accum += dt;
+
+  if game.accum < 1.0 / UPDATES_PER_SECOND {
+    return;
+  }
+
+  game.accum -= 1.0 / UPDATES_PER_SECOND;
+
+  if let Some(input_worm_direction) = game.input_worm_direction.take() {
+    game.worm_direction = input_worm_direction;
+  }
+
   let worm_head_position = *game.worm_positions.front().unwrap();
   let worm_tail_position = game.worm_positions.pop_back().unwrap();
 

@@ -16,6 +16,7 @@ pub(super) trait CreatingPipeline {
     render_pass: vk::RenderPass,
     cache: vk::PipelineCache,
     swapchain_image_extent: vk::Extent2D,
+    msaa_samples: vk::SampleCountFlags,
   ) -> <Self::Model as Model>::CreatedPipeline;
 
   fn drop(self, device: &ash::Device);

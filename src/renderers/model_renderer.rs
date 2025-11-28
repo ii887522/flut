@@ -55,16 +55,20 @@ impl<Model: pipelines::Model> ModelRenderer<Creating<Model>> {
     render_pass: vk::RenderPass,
     cache: vk::PipelineCache,
     swapchain_image_extent: vk::Extent2D,
+    msaa_samples: vk::SampleCountFlags,
   ) -> ModelRenderer<Created<Model>> {
     ModelRenderer {
       models: self.models,
       writes_queue: self.writes_queue,
       model_capacity: self.model_capacity,
       state: Created {
-        pipeline: self
-          .state
-          .pipeline
-          .finish(device, render_pass, cache, swapchain_image_extent),
+        pipeline: self.state.pipeline.finish(
+          device,
+          render_pass,
+          cache,
+          swapchain_image_extent,
+          msaa_samples,
+        ),
       },
     }
   }

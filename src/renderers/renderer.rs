@@ -30,6 +30,9 @@ pub(crate) struct Created {
   swapchain: vk::SwapchainKHR,
   _swapchain_images: Vec<vk::Image>,
   swapchain_image_views: Box<[vk::ImageView]>,
+  msaa_color_image: vk::Image,
+  msaa_color_image_alloc: Option<vk_mem::Allocation>,
+  msaa_color_image_view: vk::ImageView,
   framebuffers: Box<[vk::Framebuffer]>,
   rect_renderer: ModelRenderer<model_renderer::Created<Rect>>,
   frame_index: usize,
@@ -60,6 +63,7 @@ pub(crate) struct Renderer<State> {
   render_done_semaphores: Vec<vk::Semaphore>,
   in_flight_fences: Vec<vk::Fence>,
   pipeline_cache: vk::PipelineCache,
+  msaa_samples: vk::SampleCountFlags,
   state: State,
 }
 
@@ -266,81 +270,102 @@ impl Renderer<Creating> {
     let surface_inst = ash::khr::surface::Instance::new(&ash_entry, &vk_inst);
     let vk_physical_devices = unsafe { vk_inst.enumerate_physical_devices().unwrap() };
 
-    let (vk_physical_device, graphics_queue_family_index, present_queue_family_index) =
-      vk_physical_devices
-        .into_iter()
-        .filter_map(|vk_physical_device| {
-          let queue_family_props_count =
-            unsafe { vk_inst.get_physical_device_queue_family_properties2_len(vk_physical_device) };
+    let (
+      vk_physical_device,
+      vk_physical_device_props,
+      graphics_queue_family_index,
+      present_queue_family_index,
+    ) = vk_physical_devices
+      .into_iter()
+      .filter_map(|vk_physical_device| {
+        let queue_family_props_count =
+          unsafe { vk_inst.get_physical_device_queue_family_properties2_len(vk_physical_device) };
 
-          let mut queue_family_props =
-            vec![vk::QueueFamilyProperties2::default(); queue_family_props_count];
+        let mut queue_family_props =
+          vec![vk::QueueFamilyProperties2::default(); queue_family_props_count];
 
-          unsafe {
-            vk_inst.get_physical_device_queue_family_properties2(
-              vk_physical_device,
-              &mut queue_family_props,
-            );
-          }
+        unsafe {
+          vk_inst.get_physical_device_queue_family_properties2(
+            vk_physical_device,
+            &mut queue_family_props,
+          );
+        }
 
-          let graphics_queue_family_index = queue_family_props.iter().enumerate().find_map(
-            |(queue_family_index, queue_family_props)| {
-              if queue_family_props
-                .queue_family_properties
-                .queue_flags
-                .contains(vk::QueueFlags::GRAPHICS)
+        let graphics_queue_family_index = queue_family_props.iter().enumerate().find_map(
+          |(queue_family_index, queue_family_props)| {
+            if queue_family_props
+              .queue_family_properties
+              .queue_flags
+              .contains(vk::QueueFlags::GRAPHICS)
+            {
+              Some(queue_family_index as _)
+            } else {
+              None
+            }
+          },
+        );
+
+        let present_queue_family_index =
+          queue_family_props
+            .iter()
+            .enumerate()
+            .find_map(|(queue_family_index, _)| unsafe {
+              if surface_inst
+                .get_physical_device_surface_support(
+                  vk_physical_device,
+                  queue_family_index as _,
+                  vk_surface,
+                )
+                .unwrap()
               {
                 Some(queue_family_index as _)
               } else {
                 None
               }
-            },
-          );
+            });
 
-          let present_queue_family_index =
-            queue_family_props
-              .iter()
-              .enumerate()
-              .find_map(|(queue_family_index, _)| unsafe {
-                if surface_inst
-                  .get_physical_device_surface_support(
-                    vk_physical_device,
-                    queue_family_index as _,
-                    vk_surface,
-                  )
-                  .unwrap()
-                {
-                  Some(queue_family_index as _)
-                } else {
-                  None
-                }
-              });
+        let mut vk_physical_device_props = vk::PhysicalDeviceProperties2::default();
 
-          if let (Some(graphics_queue_family_index), Some(present_queue_family_index)) =
-            (graphics_queue_family_index, present_queue_family_index)
-          {
-            Some((
-              vk_physical_device,
-              graphics_queue_family_index,
-              present_queue_family_index,
-            ))
-          } else {
-            None
-          }
-        })
-        .max_by_key(|&(vk_physical_device, _, _)| {
-          let mut props = vk::PhysicalDeviceProperties2::default();
-          unsafe { vk_inst.get_physical_device_properties2(vk_physical_device, &mut props) };
+        unsafe {
+          vk_inst
+            .get_physical_device_properties2(vk_physical_device, &mut vk_physical_device_props);
+        }
 
-          match props.properties.device_type {
-            vk::PhysicalDeviceType::INTEGRATED_GPU => 4,
-            vk::PhysicalDeviceType::DISCRETE_GPU => 3,
-            vk::PhysicalDeviceType::VIRTUAL_GPU => 2,
-            vk::PhysicalDeviceType::CPU => 1,
-            _ => 0,
-          }
-        })
-        .unwrap();
+        if let (Some(graphics_queue_family_index), Some(present_queue_family_index)) =
+          (graphics_queue_family_index, present_queue_family_index)
+        {
+          Some((
+            vk_physical_device,
+            vk_physical_device_props,
+            graphics_queue_family_index,
+            present_queue_family_index,
+          ))
+        } else {
+          None
+        }
+      })
+      .max_by_key(|&(_, vk_physical_device_props, _, _)| {
+        match vk_physical_device_props.properties.device_type {
+          vk::PhysicalDeviceType::INTEGRATED_GPU => 4,
+          vk::PhysicalDeviceType::DISCRETE_GPU => 3,
+          vk::PhysicalDeviceType::VIRTUAL_GPU => 2,
+          vk::PhysicalDeviceType::CPU => 1,
+          _ => 0,
+        }
+      })
+      .unwrap();
+
+    let framebuffer_sample_counts = vk_physical_device_props
+      .properties
+      .limits
+      .framebuffer_color_sample_counts;
+
+    let msaa_samples = if framebuffer_sample_counts.contains(vk::SampleCountFlags::TYPE_2) {
+      vk::SampleCountFlags::TYPE_2
+    } else {
+      println!("MSAA not supported");
+      vk::SampleCountFlags::TYPE_1
+    };
 
     let queue_priorities = [1.0];
 
@@ -512,28 +537,82 @@ impl Renderer<Creating> {
       })
       .unwrap_or(&vk_surface_formats[0]);
 
-    let attachment_descs = [vk::AttachmentDescription2 {
-      format: vk_surface_format.format,
-      samples: vk::SampleCountFlags::TYPE_1,
-      load_op: vk::AttachmentLoadOp::CLEAR,
-      store_op: vk::AttachmentStoreOp::STORE,
-      stencil_load_op: vk::AttachmentLoadOp::DONT_CARE,
-      stencil_store_op: vk::AttachmentStoreOp::DONT_CARE,
-      initial_layout: vk::ImageLayout::UNDEFINED,
-      final_layout: vk::ImageLayout::PRESENT_SRC_KHR,
-      ..Default::default()
-    }];
+    let mut attachment_descs = vec![];
+    let mut color_attachment_refs = vec![];
+    let mut resolve_attachment_refs = vec![];
 
-    let color_attachment_refs = [vk::AttachmentReference2 {
-      attachment: 0,
-      layout: vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
-      ..Default::default()
-    }];
+    if msaa_samples > vk::SampleCountFlags::TYPE_1 {
+      attachment_descs.extend([
+        // Attachment 0: MSAA color attachment
+        vk::AttachmentDescription2 {
+          format: vk_surface_format.format,
+          samples: msaa_samples,
+          load_op: vk::AttachmentLoadOp::CLEAR,
+          store_op: vk::AttachmentStoreOp::DONT_CARE,
+          stencil_load_op: vk::AttachmentLoadOp::DONT_CARE,
+          stencil_store_op: vk::AttachmentStoreOp::DONT_CARE,
+          initial_layout: vk::ImageLayout::UNDEFINED,
+          final_layout: vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
+          ..Default::default()
+        },
+        // Attachment 1: Resolve attachment (swapchain image)
+        vk::AttachmentDescription2 {
+          format: vk_surface_format.format,
+          samples: vk::SampleCountFlags::TYPE_1,
+          load_op: vk::AttachmentLoadOp::DONT_CARE,
+          store_op: vk::AttachmentStoreOp::STORE,
+          stencil_load_op: vk::AttachmentLoadOp::DONT_CARE,
+          stencil_store_op: vk::AttachmentStoreOp::DONT_CARE,
+          initial_layout: vk::ImageLayout::UNDEFINED,
+          final_layout: vk::ImageLayout::PRESENT_SRC_KHR,
+          ..Default::default()
+        },
+      ]);
+
+      // Attachment 0: MSAA color attachment reference
+      color_attachment_refs.push(vk::AttachmentReference2 {
+        attachment: 0,
+        layout: vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
+        ..Default::default()
+      });
+
+      // Attachment 1: Resolve attachment reference (swapchain image)
+      resolve_attachment_refs.push(vk::AttachmentReference2 {
+        attachment: 1,
+        layout: vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
+        ..Default::default()
+      });
+    } else {
+      // Attachment 0: swapchain color attachment
+      attachment_descs.push(vk::AttachmentDescription2 {
+        format: vk_surface_format.format,
+        samples: vk::SampleCountFlags::TYPE_1,
+        load_op: vk::AttachmentLoadOp::CLEAR,
+        store_op: vk::AttachmentStoreOp::STORE,
+        stencil_load_op: vk::AttachmentLoadOp::DONT_CARE,
+        stencil_store_op: vk::AttachmentStoreOp::DONT_CARE,
+        initial_layout: vk::ImageLayout::UNDEFINED,
+        final_layout: vk::ImageLayout::PRESENT_SRC_KHR,
+        ..Default::default()
+      });
+
+      // Attachment 0: swapchain color attachment reference
+      color_attachment_refs.push(vk::AttachmentReference2 {
+        attachment: 0,
+        layout: vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
+        ..Default::default()
+      });
+    }
 
     let subpass_descs = [vk::SubpassDescription2 {
       pipeline_bind_point: vk::PipelineBindPoint::GRAPHICS,
       color_attachment_count: color_attachment_refs.len() as _,
       p_color_attachments: color_attachment_refs.as_ptr(),
+      p_resolve_attachments: if msaa_samples > vk::SampleCountFlags::TYPE_1 {
+        resolve_attachment_refs.as_ptr()
+      } else {
+        ptr::null()
+      },
       ..Default::default()
     }];
 
@@ -542,7 +621,7 @@ impl Renderer<Creating> {
       dst_subpass: 0,
       src_stage_mask: vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
       dst_stage_mask: vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
-      src_access_mask: vk::AccessFlags::empty(),
+      src_access_mask: vk::AccessFlags::COLOR_ATTACHMENT_WRITE,
       dst_access_mask: vk::AccessFlags::COLOR_ATTACHMENT_WRITE,
       dependency_flags: vk::DependencyFlags::BY_REGION,
       ..Default::default()
@@ -662,6 +741,7 @@ impl Renderer<Creating> {
       render_done_semaphores,
       in_flight_fences,
       pipeline_cache,
+      msaa_samples,
       state: Creating { rect_renderer },
     }
   }
@@ -780,13 +860,88 @@ impl Renderer<Creating> {
       })
       .collect::<Box<_>>();
 
+    let (msaa_color_image, msaa_color_image_alloc, msaa_color_image_view) =
+      if self.msaa_samples > vk::SampleCountFlags::TYPE_1 {
+        let msaa_color_image_create_info = vk::ImageCreateInfo {
+          image_type: vk::ImageType::TYPE_2D,
+          format: self.vk_surface_format.format,
+          extent: vk::Extent3D {
+            width: swapchain_image_extent.width,
+            height: swapchain_image_extent.height,
+            depth: 1,
+          },
+          mip_levels: 1,
+          array_layers: 1,
+          samples: self.msaa_samples,
+          tiling: vk::ImageTiling::OPTIMAL,
+          usage: vk::ImageUsageFlags::COLOR_ATTACHMENT | vk::ImageUsageFlags::TRANSIENT_ATTACHMENT,
+          sharing_mode: vk::SharingMode::EXCLUSIVE,
+          initial_layout: vk::ImageLayout::UNDEFINED,
+          ..Default::default()
+        };
+
+        let msaa_color_image_alloc_create_info = vk_mem::AllocationCreateInfo {
+          flags: vk_mem::AllocationCreateFlags::DEDICATED_MEMORY,
+          usage: vk_mem::MemoryUsage::AutoPreferDevice,
+          preferred_flags: vk::MemoryPropertyFlags::LAZILY_ALLOCATED,
+          ..Default::default()
+        };
+
+        let (msaa_color_image, msaa_color_image_alloc) = unsafe {
+          self
+            .vk_allocator
+            .create_image(
+              &msaa_color_image_create_info,
+              &msaa_color_image_alloc_create_info,
+            )
+            .unwrap()
+        };
+
+        let msaa_color_image_view_create_info = vk::ImageViewCreateInfo {
+          image: msaa_color_image,
+          view_type: vk::ImageViewType::TYPE_2D,
+          format: self.vk_surface_format.format,
+          subresource_range: vk::ImageSubresourceRange {
+            aspect_mask: vk::ImageAspectFlags::COLOR,
+            base_mip_level: 0,
+            level_count: 1,
+            base_array_layer: 0,
+            layer_count: 1,
+          },
+          ..Default::default()
+        };
+
+        let msaa_color_image_view = unsafe {
+          self
+            .vk_device
+            .create_image_view(&msaa_color_image_view_create_info, None)
+            .unwrap()
+        };
+
+        (
+          msaa_color_image,
+          Some(msaa_color_image_alloc),
+          msaa_color_image_view,
+        )
+      } else {
+        (vk::Image::null(), None, vk::ImageView::null())
+      };
+
     let framebuffers = swapchain_image_views
       .iter()
-      .map(|&image_view| {
+      .map(|&swapchain_image_view| {
+        let mut attachments = vec![];
+
+        if !msaa_color_image_view.is_null() {
+          attachments.push(msaa_color_image_view);
+        }
+
+        attachments.push(swapchain_image_view);
+
         let framebuffer_create_info = vk::FramebufferCreateInfo {
           render_pass: self.render_pass,
-          attachment_count: 1,
-          p_attachments: &image_view,
+          attachment_count: attachments.len() as _,
+          p_attachments: attachments.as_ptr(),
           width: swapchain_image_extent.width,
           height: swapchain_image_extent.height,
           layers: 1,
@@ -807,6 +962,7 @@ impl Renderer<Creating> {
       self.render_pass,
       self.pipeline_cache,
       swapchain_image_extent,
+      self.msaa_samples,
     );
 
     Ok(Renderer {
@@ -834,11 +990,15 @@ impl Renderer<Creating> {
       render_done_semaphores: self.render_done_semaphores,
       in_flight_fences: self.in_flight_fences,
       pipeline_cache: self.pipeline_cache,
+      msaa_samples: self.msaa_samples,
       state: Created {
         swapchain_image_extent,
         swapchain,
         _swapchain_images: swapchain_images,
         swapchain_image_views,
+        msaa_color_image,
+        msaa_color_image_alloc,
+        msaa_color_image_view,
         framebuffers,
         rect_renderer,
         frame_index: 0,
@@ -1081,6 +1241,16 @@ impl Renderer<Created> {
         .for_each(|&framebuffer| self.vk_device.destroy_framebuffer(framebuffer, None));
 
       self
+        .vk_device
+        .destroy_image_view(self.state.msaa_color_image_view, None);
+
+      if let Some(mut msaa_color_image_alloc) = self.state.msaa_color_image_alloc {
+        self
+          .vk_allocator
+          .destroy_image(self.state.msaa_color_image, &mut msaa_color_image_alloc);
+      }
+
+      self
         .state
         .swapchain_image_views
         .iter()
@@ -1116,6 +1286,7 @@ impl Renderer<Created> {
       render_done_semaphores: self.render_done_semaphores,
       in_flight_fences: self.in_flight_fences,
       pipeline_cache: self.pipeline_cache,
+      msaa_samples: self.msaa_samples,
       state: Creating { rect_renderer },
     }
   }
@@ -1130,6 +1301,16 @@ impl Renderer<Created> {
         .framebuffers
         .iter()
         .for_each(|&framebuffer| self.vk_device.destroy_framebuffer(framebuffer, None));
+
+      self
+        .vk_device
+        .destroy_image_view(self.state.msaa_color_image_view, None);
+
+      if let Some(mut msaa_color_image_alloc) = self.state.msaa_color_image_alloc {
+        self
+          .vk_allocator
+          .destroy_image(self.state.msaa_color_image, &mut msaa_color_image_alloc);
+      }
 
       self
         .state
