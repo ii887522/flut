@@ -1,18 +1,19 @@
-use crate::renderers::{
-  Renderer, RendererRef,
-  renderer::{AnyRenderer, FinishError},
+use crate::{
+  pipelines::rect_pipeline::Rect,
+  renderers::{
+    Renderer, RendererRef,
+    renderer::{AnyRenderer, FinishError},
+  },
 };
 use optarg2chain::optarg_fn;
-use sdl3::{event::Event, image::LoadSurface, surface::Surface};
-use std::{borrow::Cow, time::Instant};
+use sdl3::{event::Event, image::LoadSurface, surface::Surface, video::WindowPos};
+use std::{borrow::Cow, mem, time::Instant};
 
 pub trait App {
   fn init(&mut self, _renderer: RendererRef<'_>) {}
   fn process_event(&mut self, _event: Event) {}
   fn update(&mut self, _dt: f32, _renderer: RendererRef<'_>) {}
 }
-
-impl App for () {}
 
 pub struct ModelCapacities {
   pub rect_capacity: usize,
@@ -29,8 +30,8 @@ impl Default for ModelCapacities {
 
 impl ModelCapacities {
   #[inline]
-  pub(super) const fn get(&self) -> usize {
-    self.rect_capacity
+  pub(super) const fn calc_total_size(&self) -> usize {
+    self.rect_capacity * mem::size_of::<Rect>()
   }
 }
 
@@ -54,6 +55,24 @@ pub fn run<A: App>(
     .hidden()
     .build()
     .unwrap();
+
+  match window.get_display() {
+    Ok(window_display) => match window_display.get_content_scale() {
+      Ok(display_content_scale) => match window.set_size(
+        (size.0 as f32 * display_content_scale) as _,
+        (size.1 as f32 * display_content_scale) as _,
+      ) {
+        Ok(_) => {
+          if !window.set_position(WindowPos::Centered, WindowPos::Centered) {
+            println!("Failed to re-center the window");
+          }
+        }
+        Err(err) => println!("Failed to calibrate window size: {err}"),
+      },
+      Err(err) => println!("Failed to get display content scale: {err}"),
+    },
+    Err(err) => println!("Failed to get window display: {err}"),
+  }
 
   if let Ok(favicon) = Surface::from_file(&*favicon_path) {
     window.set_icon(favicon);
@@ -88,7 +107,7 @@ pub fn run<A: App>(
     }
 
     vk_renderer = match vk_renderer {
-      Ok(renderer) => match renderer.render() {
+      Ok(renderer) => match renderer.render(window.clone()) {
         AnyRenderer::Creating(renderer) => renderer.finish(window.clone()),
         AnyRenderer::Created(renderer) => Ok(renderer),
       },

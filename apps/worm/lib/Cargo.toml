@@ -1,0 +1,28 @@
+[package]
+name = "worm_lib"
+description = "A simple 2D board game written in Rust where the player controls a worm to eat foods to grow longer while avoiding obstacles"
+version = "0.1.0"
+edition = "2024"
+publish = false
+repository = "https://github.com/ii887522/flut"
+rust-version = "1.91"
+
+[features]
+reload = []
+
+[lib]
+crate-type = ["rlib"]
+
+[dependencies]
+flut = { path = "../../.." }
+rayon = { version = "1.11", default-features = false }
+
+[dependencies.fastrand]
+version = "2.3"
+default-features = false
+features = ["std"]
+
+[dependencies.indexmap]
+version = "2.12"
+default-features = false
+features = ["rayon", "std"]

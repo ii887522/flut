@@ -1,0 +1,21 @@
+[package]
+name = "worm"
+description = "A simple 2D board game written in Rust where the player controls a worm to eat foods to grow longer while avoiding obstacles"
+version = "0.1.0"
+edition = "2024"
+publish = false
+repository = "https://github.com/ii887522/flut"
+rust-version = "1.91"
+
+[features]
+reload = ["dep:hot-lib-reloader", "worm_lib/reload"]
+
+[dependencies]
+flut = { path = "../.." }
+hot-lib-reloader = { version = "0.8", default-features = false, optional = true }
+worm_lib = { path = "lib" }
+
+[dependencies.mimalloc]
+version = "0.1"
+default-features = false
+features = ["v3"]

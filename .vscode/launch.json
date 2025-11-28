@@ -6,7 +6,7 @@
       "type": "lldb",
       "request": "launch",
       "cargo": {
-        "args": ["run", "--example", "worm"]
+        "args": ["run", "--package", "worm", "--features", "reload"]
       },
       "args": []
     }

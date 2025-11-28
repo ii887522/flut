@@ -1,7 +1,7 @@
 use crate::{
   collections::{SparseSet, sparse_set::Id},
   models::Write,
-  pipelines::{self, CreatedPipeline, CreatingPipeline},
+  pipelines::{self, CreatedPipeline, CreatingPipeline, Model},
   renderers::MAX_IN_FLIGHT_FRAME_COUNT,
 };
 use ash::vk;
@@ -11,7 +11,7 @@ use std::{collections::VecDeque, mem, ptr, slice};
 const MIN_SEQ_LEN: usize = 1024;
 
 pub(super) trait State {
-  type Model;
+  type Model: pipelines::Model;
 }
 
 pub(super) struct Creating<Model: pipelines::Model> {
@@ -55,16 +55,20 @@ impl<Model: pipelines::Model> ModelRenderer<Creating<Model>> {
     render_pass: vk::RenderPass,
     cache: vk::PipelineCache,
     swapchain_image_extent: vk::Extent2D,
+    msaa_samples: vk::SampleCountFlags,
   ) -> ModelRenderer<Created<Model>> {
     ModelRenderer {
       models: self.models,
       writes_queue: self.writes_queue,
       model_capacity: self.model_capacity,
       state: Created {
-        pipeline: self
-          .state
-          .pipeline
-          .finish(device, render_pass, cache, swapchain_image_extent),
+        pipeline: self.state.pipeline.finish(
+          device,
+          render_pass,
+          cache,
+          swapchain_image_extent,
+          msaa_samples,
+        ),
       },
     }
   }
@@ -136,7 +140,7 @@ impl<Model: pipelines::Model> ModelRenderer<Created<Model>> {
 
       device.cmd_draw(
         graphics_command_buffer,
-        (self.models.len() * self.state.pipeline.get_model_vertex_count()) as _,
+        (self.models.len() * Model::get_vertex_count()) as _,
         1,
         0,
         0,
@@ -162,6 +166,14 @@ impl<Model: pipelines::Model> ModelRenderer<Created<Model>> {
 
 impl<S: State> ModelRenderer<S> {
   pub(super) fn add_model(&mut self, model: S::Model) -> Id {
+    debug_assert!(
+      self.models.len() < self.model_capacity,
+      "{model_name} capacity exceeded: {} < {}",
+      self.models.len(),
+      self.model_capacity,
+      model_name = S::Model::get_name(),
+    );
+
     let add_resp = self.models.add(model);
     let writes = self.writes_queue.back_mut().unwrap();
 
@@ -200,6 +212,15 @@ where
   S::Model: Send,
 {
   pub(super) fn bulk_add_models(&mut self, models: Box<[S::Model]>) -> Box<[Id]> {
+    debug_assert!(
+      self.models.len() + models.len() <= self.model_capacity,
+      "{model_name} capacity exceeded: {} + {} <= {}",
+      self.models.len(),
+      models.len(),
+      self.model_capacity,
+      model_name = S::Model::get_name(),
+    );
+
     let bulk_add_resp = self.models.bulk_add(models);
     let writes = self.writes_queue.back_mut().unwrap();
 

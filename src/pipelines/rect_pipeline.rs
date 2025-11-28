@@ -20,6 +20,16 @@ impl Model for Rect {
   type PushConsts = RectPushConsts;
   type CreatingPipeline = RectPipeline<Creating>;
   type CreatedPipeline = RectPipeline<Created>;
+
+  #[inline]
+  fn get_name() -> &'static str {
+    "rect"
+  }
+
+  #[inline]
+  fn get_vertex_count() -> usize {
+    6
+  }
 }
 
 impl From<models::Rect> for Rect {
@@ -111,6 +121,7 @@ impl CreatingPipeline for RectPipeline<Creating> {
     render_pass: vk::RenderPass,
     cache: vk::PipelineCache,
     swapchain_image_extent: vk::Extent2D,
+    msaa_samples: vk::SampleCountFlags,
   ) -> RectPipeline<Created> {
     let main_fn_name = CString::new("main").unwrap();
 
@@ -165,7 +176,7 @@ impl CreatingPipeline for RectPipeline<Creating> {
     };
 
     let multisample_state = vk::PipelineMultisampleStateCreateInfo {
-      rasterization_samples: vk::SampleCountFlags::TYPE_1,
+      rasterization_samples: msaa_samples,
       ..Default::default()
     };
 
@@ -253,11 +264,6 @@ impl CreatedPipeline for RectPipeline<Created> {
   #[inline]
   fn get_pipeline_layout(&self) -> vk::PipelineLayout {
     self.layout
-  }
-
-  #[inline]
-  fn get_model_vertex_count(&self) -> usize {
-    6
   }
 
   fn on_swapchain_suboptimal(self) -> RectPipeline<Creating> {

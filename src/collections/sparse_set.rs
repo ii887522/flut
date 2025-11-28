@@ -80,6 +80,17 @@ impl<T> Default for SparseSet<T> {
   }
 }
 
+impl<T: Send> FromParallelIterator<T> for SparseSet<T> {
+  fn from_par_iter<I>(par_iter: I) -> Self
+  where
+    I: IntoParallelIterator<Item = T>,
+  {
+    let mut set = Self::new();
+    set.bulk_add(par_iter.into_par_iter().collect());
+    set
+  }
+}
+
 impl<T> SparseSet<T> {
   #[inline]
   pub const fn new() -> Self {
