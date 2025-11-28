@@ -3,12 +3,9 @@
 
 mod models;
 
-use crate::models::Direction;
-use flut::{
-  Event, Keycode,
-  models::Rect,
-  renderers::{RendererRef, renderer_ref},
-};
+use crate::models::{Direction, GameCell, GameCellType};
+use flut::{Event, Keycode, models::Rect, renderers::RendererRef};
+use indexmap::{IndexSet, indexset};
 use rayon::prelude::*;
 use std::collections::VecDeque;
 
@@ -33,18 +30,13 @@ const GRID_CELL_COUNTS: (u32, u32) = (
 );
 const TOTAL_GRID_CELL_COUNT: u32 = GRID_CELL_COUNTS.0 * GRID_CELL_COUNTS.1;
 
-// Color settings
-const AIR_COLOR: (f32, f32, f32, f32) = (0.15, 0.15, 0.15, 1.0);
-const WALL_COLOR: (f32, f32, f32, f32) = (1.0, 0.0, 0.0, 1.0);
-const WORM_COLOR: (f32, f32, f32, f32) = (0.918, 0.663, 0.596, 1.0);
-const FOOD_COLOR: (f32, f32, f32, f32) = (0.0, 1.0, 0.0, 1.0);
-
 pub struct Game {
-  grid_render_ids: Box<[renderer_ref::Id]>,
-  air_positions: Vec<u16>,
+  grid_cells: Box<[GameCell]>,
+  air_positions: IndexSet<u16>,
   worm_positions: VecDeque<u16>, // Front is head, back is tail
   worm_direction: Direction,
   input_worm_direction: Option<Direction>,
+  worm_dead: bool,
   accum: f32,
 }
 
@@ -59,41 +51,84 @@ impl Game {
   #[inline]
   pub fn new() -> Self {
     Self {
-      grid_render_ids: Box::new([]),
-      air_positions: vec![],
-      worm_positions: VecDeque::new(),
+      grid_cells: Box::new([]),
+      air_positions: indexset! {},
+      worm_positions: VecDeque::from_iter([(TOTAL_GRID_CELL_COUNT >> 1) as _]),
       worm_direction: Direction::rand(),
       input_worm_direction: None,
+      worm_dead: false,
       accum: 0.0,
     }
+  }
+
+  fn set_grid_cell(
+    &mut self,
+    renderer: &mut RendererRef<'_>,
+    position: u16,
+    cell_ty: GameCellType,
+  ) {
+    let grid_cell = &mut self.grid_cells[position as usize];
+    grid_cell.ty = cell_ty;
+
+    renderer.update_rect(
+      grid_cell.render_id,
+      Rect {
+        position: to_position(position as _),
+        size: GRID_CELL_SIZE,
+        color: cell_ty.get_color(),
+      },
+    );
+  }
+
+  fn move_worm(&mut self, renderer: &mut RendererRef<'_>, new_worm_head_position: u16) {
+    let worm_tail_position = self.worm_positions.pop_back().unwrap();
+    self.worm_positions.push_front(new_worm_head_position);
+    self.air_positions.swap_remove(&new_worm_head_position);
+    self.air_positions.insert(worm_tail_position);
+    self.set_grid_cell(renderer, worm_tail_position, GameCellType::Air);
+    self.set_grid_cell(renderer, new_worm_head_position, GameCellType::Worm);
+  }
+
+  fn grow_worm(&mut self, renderer: &mut RendererRef<'_>, new_worm_head_position: u16) {
+    self.worm_positions.push_front(new_worm_head_position);
+    self.set_grid_cell(renderer, new_worm_head_position, GameCellType::Worm);
+  }
+
+  fn spawn_food(&mut self, renderer: &mut RendererRef<'_>) {
+    let air_position_to_remove = self
+      .air_positions
+      .swap_remove_index(fastrand::usize(..self.air_positions.len()))
+      .unwrap();
+
+    self.set_grid_cell(renderer, air_position_to_remove, GameCellType::Food);
   }
 }
 
 #[cfg_attr(feature = "reload", unsafe(no_mangle))]
 pub extern "Rust" fn init(game: &mut Game, mut renderer: RendererRef<'_>) {
-  let (is_airs, grid_rects): (Vec<_>, Vec<_>) = (0..TOTAL_GRID_CELL_COUNT)
+  let (cell_tys, grid_rects): (Vec<_>, Vec<_>) = (0..TOTAL_GRID_CELL_COUNT)
     .into_par_iter()
     .with_min_len(MIN_SEQ_LEN)
     .map(|index| {
-      let (is_air, color) = if index < GRID_CELL_COUNTS.0 // Top wall
+      let cell_ty = if index < GRID_CELL_COUNTS.0 // Top wall
           || index % GRID_CELL_COUNTS.0 == 0 // Left wall
           || index % GRID_CELL_COUNTS.0 == GRID_CELL_COUNTS.0 - 1 // Right wall
           || index >= (GRID_CELL_COUNTS.1 - 1) * GRID_CELL_COUNTS.0
       // Bottom wall
       {
-        (false, WALL_COLOR) // Wall
+        GameCellType::Wall // Wall
       } else if index == TOTAL_GRID_CELL_COUNT >> 1 {
-        (false, WORM_COLOR) // Worm
+        GameCellType::Worm // Worm
       } else {
-        (true, AIR_COLOR) // Air
+        GameCellType::Air // Air
       };
 
       (
-        is_air,
+        cell_ty,
         Rect {
           position: to_position(index),
           size: GRID_CELL_SIZE,
-          color,
+          color: cell_ty.get_color(),
         },
       )
     })
@@ -101,29 +136,32 @@ pub extern "Rust" fn init(game: &mut Game, mut renderer: RendererRef<'_>) {
 
   let grid_render_ids = renderer.bulk_add_rects(grid_rects.into_boxed_slice());
 
-  let mut air_positions = is_airs
+  let grid_cells = cell_tys
+    .par_iter()
+    .with_min_len(MIN_SEQ_LEN)
+    .zip(grid_render_ids.par_iter().with_min_len(MIN_SEQ_LEN))
+    .map(|(&cell_ty, &render_id)| GameCell {
+      ty: cell_ty,
+      render_id,
+    })
+    .collect::<Box<_>>();
+
+  let air_positions = cell_tys
     .into_par_iter()
-    .with_max_len(MIN_SEQ_LEN)
+    .with_min_len(MIN_SEQ_LEN)
     .enumerate()
-    .filter_map(|(index, is_air)| if is_air { Some(index as _) } else { None })
-    .collect::<Vec<_>>();
+    .filter_map(|(index, cell_ty)| {
+      if let GameCellType::Air = cell_ty {
+        Some(index as _)
+      } else {
+        None
+      }
+    })
+    .collect::<IndexSet<_>>();
 
-  let air_position_to_remove = air_positions.swap_remove(fastrand::usize(..air_positions.len()));
-
-  renderer.update_rect(
-    grid_render_ids[air_position_to_remove as usize],
-    Rect {
-      position: to_position(air_position_to_remove as _),
-      size: GRID_CELL_SIZE,
-      color: FOOD_COLOR,
-    },
-  );
-
-  let worm_positions = VecDeque::from_iter([(TOTAL_GRID_CELL_COUNT >> 1) as _]);
-
-  game.grid_render_ids = grid_render_ids;
+  game.grid_cells = grid_cells;
   game.air_positions = air_positions;
-  game.worm_positions = worm_positions;
+  game.spawn_food(&mut renderer);
 }
 
 #[cfg_attr(feature = "reload", unsafe(no_mangle))]
@@ -155,6 +193,10 @@ pub extern "Rust" fn process_event(game: &mut Game, event: Event) {
 
 #[cfg_attr(feature = "reload", unsafe(no_mangle))]
 pub extern "Rust" fn update(game: &mut Game, dt: f32, mut renderer: RendererRef<'_>) {
+  if game.worm_dead {
+    return;
+  }
+
   game.accum += dt;
 
   if game.accum < 1.0 / UPDATES_PER_SECOND {
@@ -168,7 +210,6 @@ pub extern "Rust" fn update(game: &mut Game, dt: f32, mut renderer: RendererRef<
   }
 
   let worm_head_position = *game.worm_positions.front().unwrap();
-  let worm_tail_position = game.worm_positions.pop_back().unwrap();
 
   let new_worm_head_position = match game.worm_direction {
     Direction::Up => worm_head_position - GRID_CELL_COUNTS.0 as u16,
@@ -177,25 +218,14 @@ pub extern "Rust" fn update(game: &mut Game, dt: f32, mut renderer: RendererRef<
     Direction::Left => worm_head_position - 1,
   };
 
-  game.worm_positions.push_front(new_worm_head_position);
-
-  renderer.update_rect(
-    game.grid_render_ids[worm_tail_position as usize],
-    Rect {
-      position: to_position(worm_tail_position as _),
-      size: GRID_CELL_SIZE,
-      color: AIR_COLOR,
-    },
-  );
-
-  renderer.update_rect(
-    game.grid_render_ids[new_worm_head_position as usize],
-    Rect {
-      position: to_position(new_worm_head_position as _),
-      size: GRID_CELL_SIZE,
-      color: WORM_COLOR,
-    },
-  );
+  match game.grid_cells[new_worm_head_position as usize].ty {
+    GameCellType::Air => game.move_worm(&mut renderer, new_worm_head_position),
+    GameCellType::Wall | GameCellType::Worm => game.worm_dead = true,
+    GameCellType::Food => {
+      game.grow_worm(&mut renderer, new_worm_head_position);
+      game.spawn_food(&mut renderer);
+    }
+  }
 }
 
 #[inline]
