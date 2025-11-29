@@ -6,7 +6,10 @@ mod models;
 use crate::models::{Direction, GameCell, GameCellType};
 use flut::{Context, Event, Keycode, models::Rect};
 use indexmap::{IndexSet, indexset};
-use kira::Tween;
+use kira::{
+  Tween,
+  sound::{FromFileError, streaming::StreamingSoundHandle},
+};
 use rayon::prelude::*;
 use std::collections::VecDeque;
 
@@ -41,6 +44,7 @@ pub struct Game {
   worm_positions: VecDeque<u16>, // Front is head, back is tail
   worm_direction: Direction,
   input_worm_direction: Option<Direction>,
+  worm_move_music: Option<StreamingSoundHandle<FromFileError>>,
   worm_dead: bool,
   accum: f32,
   shake_accum: f32,
@@ -62,6 +66,7 @@ impl Game {
       worm_positions: VecDeque::from_iter([(TOTAL_GRID_CELL_COUNT >> 1) as _]),
       worm_direction: Direction::rand(),
       input_worm_direction: None,
+      worm_move_music: None,
       worm_dead: false,
       accum: 0.0,
       shake_accum: 0.0,
@@ -114,6 +119,10 @@ impl Game {
       audio_manager.play_sound("assets/worm/audios/hit.wav");
     }
 
+    if let Some(mut worm_move_music) = self.worm_move_music.take() {
+      worm_move_music.stop(Tween::default());
+    }
+
     self.worm_dead = true;
   }
 }
@@ -125,6 +134,7 @@ pub extern "Rust" fn init(game: &mut Game, mut context: Context<'_>) {
   {
     worm_move_music.set_loop_region(0.2..);
     worm_move_music.set_volume(-10.0, Tween::default());
+    game.worm_move_music = Some(worm_move_music);
   }
 
   let (cell_tys, grid_rects): (Vec<_>, Vec<_>) = (0..TOTAL_GRID_CELL_COUNT)
