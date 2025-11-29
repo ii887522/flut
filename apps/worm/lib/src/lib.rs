@@ -4,8 +4,9 @@
 mod models;
 
 use crate::models::{Direction, GameCell, GameCellType};
-use flut::{Event, Keycode, models::Rect, renderers::RendererRef};
+use flut::{Context, Event, Keycode, models::Rect};
 use indexmap::{IndexSet, indexset};
+use kira::Tween;
 use rayon::prelude::*;
 use std::collections::VecDeque;
 
@@ -61,16 +62,11 @@ impl Game {
     }
   }
 
-  fn set_grid_cell(
-    &mut self,
-    renderer: &mut RendererRef<'_>,
-    position: u16,
-    cell_ty: GameCellType,
-  ) {
+  fn set_grid_cell(&mut self, context: &mut Context<'_>, position: u16, cell_ty: GameCellType) {
     let grid_cell = &mut self.grid_cells[position as usize];
     grid_cell.ty = cell_ty;
 
-    renderer.update_rect(
+    context.renderer.update_rect(
       grid_cell.render_id,
       Rect {
         position: to_position(position as _),
@@ -80,32 +76,51 @@ impl Game {
     );
   }
 
-  fn move_worm(&mut self, renderer: &mut RendererRef<'_>, new_worm_head_position: u16) {
+  fn move_worm(&mut self, context: &mut Context<'_>, new_worm_head_position: u16) {
     let worm_tail_position = self.worm_positions.pop_back().unwrap();
     self.worm_positions.push_front(new_worm_head_position);
     self.air_positions.swap_remove(&new_worm_head_position);
     self.air_positions.insert(worm_tail_position);
-    self.set_grid_cell(renderer, worm_tail_position, GameCellType::Air);
-    self.set_grid_cell(renderer, new_worm_head_position, GameCellType::Worm);
+    self.set_grid_cell(context, worm_tail_position, GameCellType::Air);
+    self.set_grid_cell(context, new_worm_head_position, GameCellType::Worm);
   }
 
-  fn grow_worm(&mut self, renderer: &mut RendererRef<'_>, new_worm_head_position: u16) {
+  fn grow_worm(&mut self, context: &mut Context<'_>, new_worm_head_position: u16) {
+    if let Some(audio_manager) = context.audio_manager {
+      audio_manager.play_sound("assets/worm/audios/eat.mp3");
+    }
+
     self.worm_positions.push_front(new_worm_head_position);
-    self.set_grid_cell(renderer, new_worm_head_position, GameCellType::Worm);
+    self.set_grid_cell(context, new_worm_head_position, GameCellType::Worm);
   }
 
-  fn spawn_food(&mut self, renderer: &mut RendererRef<'_>) {
+  fn spawn_food(&mut self, context: &mut Context<'_>) {
     let air_position_to_remove = self
       .air_positions
       .swap_remove_index(fastrand::usize(..self.air_positions.len()))
       .unwrap();
 
-    self.set_grid_cell(renderer, air_position_to_remove, GameCellType::Food);
+    self.set_grid_cell(context, air_position_to_remove, GameCellType::Food);
+  }
+
+  fn kill_worm(&mut self, context: &mut Context<'_>) {
+    if let Some(audio_manager) = context.audio_manager {
+      audio_manager.play_sound("assets/worm/audios/hit.wav");
+    }
+
+    self.worm_dead = true;
   }
 }
 
 #[cfg_attr(feature = "reload", unsafe(no_mangle))]
-pub extern "Rust" fn init(game: &mut Game, mut renderer: RendererRef<'_>) {
+pub extern "Rust" fn init(game: &mut Game, mut context: Context<'_>) {
+  if let Some(audio_manager) = context.audio_manager
+    && let Some(mut worm_move_music) = audio_manager.play_music("assets/worm/audios/worm_move.mp3")
+  {
+    worm_move_music.set_loop_region(0.2..);
+    worm_move_music.set_volume(-10.0, Tween::default());
+  }
+
   let (cell_tys, grid_rects): (Vec<_>, Vec<_>) = (0..TOTAL_GRID_CELL_COUNT)
     .into_par_iter()
     .with_min_len(MIN_SEQ_LEN)
@@ -134,7 +149,9 @@ pub extern "Rust" fn init(game: &mut Game, mut renderer: RendererRef<'_>) {
     })
     .unzip();
 
-  let grid_render_ids = renderer.bulk_add_rects(grid_rects.into_boxed_slice());
+  let grid_render_ids = context
+    .renderer
+    .bulk_add_rects(grid_rects.into_boxed_slice());
 
   let grid_cells = cell_tys
     .par_iter()
@@ -161,7 +178,7 @@ pub extern "Rust" fn init(game: &mut Game, mut renderer: RendererRef<'_>) {
 
   game.grid_cells = grid_cells;
   game.air_positions = air_positions;
-  game.spawn_food(&mut renderer);
+  game.spawn_food(&mut context);
 }
 
 #[cfg_attr(feature = "reload", unsafe(no_mangle))]
@@ -192,7 +209,7 @@ pub extern "Rust" fn process_event(game: &mut Game, event: Event) {
 }
 
 #[cfg_attr(feature = "reload", unsafe(no_mangle))]
-pub extern "Rust" fn update(game: &mut Game, dt: f32, mut renderer: RendererRef<'_>) {
+pub extern "Rust" fn update(game: &mut Game, dt: f32, mut context: Context<'_>) {
   if game.worm_dead {
     return;
   }
@@ -219,11 +236,11 @@ pub extern "Rust" fn update(game: &mut Game, dt: f32, mut renderer: RendererRef<
   };
 
   match game.grid_cells[new_worm_head_position as usize].ty {
-    GameCellType::Air => game.move_worm(&mut renderer, new_worm_head_position),
-    GameCellType::Wall | GameCellType::Worm => game.worm_dead = true,
+    GameCellType::Air => game.move_worm(&mut context, new_worm_head_position),
+    GameCellType::Wall | GameCellType::Worm => game.kill_worm(&mut context),
     GameCellType::Food => {
-      game.grow_worm(&mut renderer, new_worm_head_position);
-      game.spawn_food(&mut renderer);
+      game.grow_worm(&mut context, new_worm_head_position);
+      game.spawn_food(&mut context);
     }
   }
 }

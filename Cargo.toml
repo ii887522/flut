@@ -31,6 +31,11 @@ version = "0.38"
 default-features = false
 features = ["loaded", "std"]
 
+[dependencies.kira]
+version = "0.11"
+default-features = false
+features = ["cpal", "mp3", "wav"]
+
 [dependencies.rustc-hash]
 version = "2.1"
 default-features = false
