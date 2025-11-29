@@ -21,6 +21,24 @@ impl<'render> RendererRef<'render> {
     Self(renderer)
   }
 
+  pub fn set_cam_position(&mut self, cam_position: Option<(f32, f32)>) {
+    match self.0 {
+      Ok(renderer) => renderer.set_cam_position(cam_position),
+      Err(FinishError::WindowMinimized(renderer)) => {
+        renderer.set_cam_position(cam_position);
+      }
+    }
+  }
+
+  pub fn set_cam_size(&mut self, cam_size: Option<(f32, f32)>) {
+    match self.0 {
+      Ok(renderer) => renderer.set_cam_size(cam_size),
+      Err(FinishError::WindowMinimized(renderer)) => {
+        renderer.set_cam_size(cam_size);
+      }
+    }
+  }
+
   pub fn add_rect(&mut self, rect: Rect) -> Id {
     match self.0 {
       Ok(renderer) => Id(renderer.get_rect_renderer().add_model(rect.into())),

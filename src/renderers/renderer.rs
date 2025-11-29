@@ -64,6 +64,8 @@ pub(crate) struct Renderer<State> {
   in_flight_fences: Vec<vk::Fence>,
   pipeline_cache: vk::PipelineCache,
   msaa_samples: vk::SampleCountFlags,
+  cam_position: Option<(f32, f32)>,
+  cam_size: Option<(f32, f32)>,
   state: State,
 }
 
@@ -742,6 +744,8 @@ impl Renderer<Creating> {
       in_flight_fences,
       pipeline_cache,
       msaa_samples,
+      cam_position: None,
+      cam_size: None,
       state: Creating { rect_renderer },
     }
   }
@@ -991,6 +995,8 @@ impl Renderer<Creating> {
       in_flight_fences: self.in_flight_fences,
       pipeline_cache: self.pipeline_cache,
       msaa_samples: self.msaa_samples,
+      cam_position: self.cam_position,
+      cam_size: self.cam_size,
       state: Created {
         swapchain_image_extent,
         swapchain,
@@ -1145,13 +1151,24 @@ impl Renderer<Created> {
         &subpass_begin_info,
       );
 
+      let cam_position = self.cam_position.unwrap_or_default();
+
+      let cam_size = self.cam_size.unwrap_or((
+        self.state.swapchain_image_extent.width as _,
+        self.state.swapchain_image_extent.height as _,
+      ));
+
       let window_display_scale = window.display_scale();
 
       let rect_push_consts = RectPushConsts {
         rect_buffer: self.model_buffer_addr,
+        cam_position: (
+          cam_position.0 / window_display_scale,
+          cam_position.1 / window_display_scale,
+        ),
         cam_size: (
-          self.state.swapchain_image_extent.width as f32 / window_display_scale,
-          self.state.swapchain_image_extent.height as f32 / window_display_scale,
+          cam_size.0 / window_display_scale,
+          cam_size.1 / window_display_scale,
         ),
       };
 
@@ -1287,6 +1304,8 @@ impl Renderer<Created> {
       in_flight_fences: self.in_flight_fences,
       pipeline_cache: self.pipeline_cache,
       msaa_samples: self.msaa_samples,
+      cam_position: self.cam_position,
+      cam_size: self.cam_size,
       state: Creating { rect_renderer },
     }
   }
@@ -1357,5 +1376,17 @@ impl Renderer<Created> {
       self.surface_inst.destroy_surface(self.vk_surface, None);
       self.vk_inst.destroy_instance(None);
     }
+  }
+}
+
+impl<State> Renderer<State> {
+  #[inline]
+  pub(super) fn set_cam_position(&mut self, cam_position: Option<(f32, f32)>) {
+    self.cam_position = cam_position;
+  }
+
+  #[inline]
+  pub(super) fn set_cam_size(&mut self, cam_size: Option<(f32, f32)>) {
+    self.cam_size = cam_size;
   }
 }

@@ -22,6 +22,7 @@ layout(std430, buffer_reference) readonly buffer RectBuffer {
 
 layout(push_constant) uniform PushConsts {
   RectBuffer rect_buffer;
+  vec2 cam_position;
   vec2 cam_size;
 } push_consts;
 
@@ -31,7 +32,9 @@ void main() {
   const Rect rect = push_consts.rect_buffer.rects[gl_VertexIndex / POSITIONS.length()];
 
   gl_Position = vec4(
-    (POSITIONS[gl_VertexIndex % POSITIONS.length()] * rect.size + rect.position) / push_consts.cam_size * 2.0 - 1.0, 0.0, 1.0
+    (POSITIONS[gl_VertexIndex % POSITIONS.length()] * rect.size + rect.position + push_consts.cam_position) / push_consts.cam_size * 2.0 - 1.0,
+    0.0,
+    1.0
   );
 
   frag_color = rect.color;

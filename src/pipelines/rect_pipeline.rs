@@ -46,6 +46,7 @@ impl From<models::Rect> for Rect {
 #[derive(Clone, Copy)]
 pub(crate) struct RectPushConsts {
   pub(crate) rect_buffer: vk::DeviceAddress,
+  pub(crate) cam_position: (f32, f32),
   pub(crate) cam_size: (f32, f32),
 }
 
