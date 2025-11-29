@@ -15,6 +15,10 @@ const MIN_SEQ_LEN: usize = 256;
 pub const WINDOW_SIZE: (u32, u32) = (1280, 720);
 const UPDATES_PER_SECOND: f32 = 30.0;
 
+// Shake settings
+const SHAKE_DURATION: f32 = 0.5;
+const SHAKE_STRENGTH: f32 = 64.0;
+
 // Grid settings
 const GRID_SIZE: (f32, f32) = (684.0, 684.0);
 const GRID_CELL_SIZE: (f32, f32) = (12.0, 12.0);
@@ -39,6 +43,7 @@ pub struct Game {
   input_worm_direction: Option<Direction>,
   worm_dead: bool,
   accum: f32,
+  shake_accum: f32,
 }
 
 impl Default for Game {
@@ -59,6 +64,7 @@ impl Game {
       input_worm_direction: None,
       worm_dead: false,
       accum: 0.0,
+      shake_accum: 0.0,
     }
   }
 
@@ -210,17 +216,31 @@ pub extern "Rust" fn process_event(game: &mut Game, event: Event) {
 
 #[cfg_attr(feature = "reload", unsafe(no_mangle))]
 pub extern "Rust" fn update(game: &mut Game, dt: f32, mut context: Context<'_>) {
-  if game.worm_dead {
-    return;
-  }
-
   game.accum += dt;
+
+  if game.worm_dead {
+    game.shake_accum += dt;
+  }
 
   if game.accum < 1.0 / UPDATES_PER_SECOND {
     return;
   }
 
   game.accum -= 1.0 / UPDATES_PER_SECOND;
+
+  if game.worm_dead {
+    if game.shake_accum < SHAKE_DURATION {
+      context.renderer.set_cam_position(Some((
+        fastrand::f32() * SHAKE_STRENGTH,
+        fastrand::f32() * SHAKE_STRENGTH,
+      )));
+    } else {
+      game.shake_accum = SHAKE_DURATION;
+      context.renderer.set_cam_position(None);
+    }
+
+    return;
+  }
 
   if let Some(input_worm_direction) = game.input_worm_direction.take() {
     game.worm_direction = input_worm_direction;
