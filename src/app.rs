@@ -1,4 +1,5 @@
 use crate::{
+  AudioManager, Context,
   pipelines::rect_pipeline::Rect,
   renderers::{
     Renderer, RendererRef,
@@ -10,9 +11,9 @@ use sdl3::{event::Event, image::LoadSurface, surface::Surface, video::WindowPos}
 use std::{borrow::Cow, mem, time::Instant};
 
 pub trait App {
-  fn init(&mut self, _renderer: RendererRef<'_>) {}
+  fn init(&mut self, _context: Context<'_>) {}
   fn process_event(&mut self, _event: Event) {}
-  fn update(&mut self, _dt: f32, _renderer: RendererRef<'_>) {}
+  fn update(&mut self, _dt: f32, _context: Context<'_>) {}
 }
 
 pub struct ModelCapacities {
@@ -42,7 +43,14 @@ pub fn run<A: App>(
   #[optarg((800, 600))] size: (u32, u32),
   #[optarg_default] favicon_path: Cow<'static, str>,
   #[optarg_default] model_capacities: ModelCapacities,
+  #[optarg_default] quiet: bool,
 ) {
+  let mut audio_manager = if quiet {
+    None
+  } else {
+    Some(AudioManager::new())
+  };
+
   let sdl = sdl3::init().unwrap();
   sdl3::hint::set("SDL_VIDEO_EXTERNAL_CONTEXT", "1");
   let vid_subsys = sdl.video().unwrap();
@@ -79,11 +87,18 @@ pub fn run<A: App>(
   }
 
   let mut vk_renderer = Renderer::new(window.clone(), model_capacities).finish(window.clone());
-  app.init(RendererRef::new(&mut vk_renderer));
+
+  app.init(Context {
+    audio_manager: &mut audio_manager,
+    renderer: RendererRef::new(&mut vk_renderer),
+  });
+
   window.show();
   let mut event_pump = sdl.event_pump().unwrap();
   const UPDATES_PER_SECOND: f32 = 120.0;
   const MAX_UPDATES_PER_FRAME: usize = 8;
+  let mut total_frame_time = 0.0;
+  let mut frame_count = 0;
   let mut prev = Instant::now();
 
   'running: loop {
@@ -97,11 +112,34 @@ pub fn run<A: App>(
 
     let mut frame_time = prev.elapsed().as_secs_f32();
     prev = Instant::now();
+    total_frame_time += frame_time;
+    frame_count += 1;
+
+    if total_frame_time >= 1.0 {
+      window
+        .set_title(&format!(
+          "{title} | {:.0} FPS",
+          frame_count as f32 / total_frame_time
+        ))
+        .unwrap();
+
+      total_frame_time = 0.0;
+      frame_count = 0;
+    }
+
     let mut update_count = 0;
 
     while frame_time > 0.0 && update_count < MAX_UPDATES_PER_FRAME {
       let dt = frame_time.min(1.0 / UPDATES_PER_SECOND);
-      app.update(dt, RendererRef::new(&mut vk_renderer));
+
+      app.update(
+        dt,
+        Context {
+          audio_manager: &mut audio_manager,
+          renderer: RendererRef::new(&mut vk_renderer),
+        },
+      );
+
       frame_time -= dt;
       update_count += 1;
     }

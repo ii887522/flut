@@ -1,4 +1,4 @@
-use flut::{App, Event, renderers::RendererRef};
+use flut::{App, Context, Event};
 
 #[cfg(feature = "reload")]
 #[hot_lib_reloader::hot_module(
@@ -6,7 +6,7 @@ use flut::{App, Event, renderers::RendererRef};
   lib_dir = if cfg!(debug_assertions) { "apps/worm/lib/target/debug" } else { "apps/worm/lib/target/release" }
 )]
 mod lib {
-  use flut::{Event, renderers::RendererRef};
+  use flut::{Context, Event};
   pub use worm_lib::Game;
 
   hot_functions_from_file!("apps/worm/lib/src/lib.rs");
@@ -26,8 +26,8 @@ impl Game {
 
 impl App for Game {
   #[inline]
-  fn init(&mut self, renderer: RendererRef<'_>) {
-    lib::init(&mut self.0, renderer);
+  fn init(&mut self, context: Context<'_>) {
+    lib::init(&mut self.0, context);
   }
 
   #[inline]
@@ -36,7 +36,7 @@ impl App for Game {
   }
 
   #[inline]
-  fn update(&mut self, dt: f32, renderer: RendererRef<'_>) {
-    lib::update(&mut self.0, dt, renderer);
+  fn update(&mut self, dt: f32, context: Context<'_>) {
+    lib::update(&mut self.0, dt, context);
   }
 }
