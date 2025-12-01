@@ -6,6 +6,7 @@ mod game;
 
 use flut::app::{self, ModelCapacities};
 use game::Game;
+use worm_lib::consts;
 
 #[cfg(not(feature = "reload"))]
 use mimalloc::MiMalloc;
@@ -17,7 +18,7 @@ static GLOBAL: MiMalloc = MiMalloc;
 fn main() {
   app::run(Game::new())
     .title("Worm")
-    .size(worm_lib::WINDOW_SIZE)
+    .size(consts::WINDOW_SIZE)
     .favicon_path("assets/worm/images/favicon.png")
     .model_capacities(ModelCapacities {
       rect_capacity: 4096,

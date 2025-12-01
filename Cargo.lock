@@ -1656,4 +1656,5 @@ dependencies = [
  "indexmap",
  "kira",
  "rayon",
+ "rustc-hash",
 ]

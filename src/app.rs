@@ -7,7 +7,12 @@ use crate::{
   },
 };
 use optarg2chain::optarg_fn;
-use sdl3::{event::Event, image::LoadSurface, surface::Surface, video::WindowPos};
+use sdl3::{
+  event::{Event, WindowEvent},
+  image::LoadSurface,
+  surface::Surface,
+  video::WindowPos,
+};
 use std::{borrow::Cow, mem, time::Instant};
 
 pub trait App {
@@ -102,55 +107,71 @@ pub fn run<A: App>(
   let mut prev = Instant::now();
 
   'running: loop {
-    for event in event_pump.poll_iter() {
-      if let Event::Quit { .. } = event {
-        break 'running;
+    'hot: loop {
+      for event in event_pump.poll_iter() {
+        match event {
+          Event::Quit { .. } => break 'running,
+          Event::Window {
+            win_event: WindowEvent::Minimized,
+            ..
+          } => break 'hot,
+          event => app.process_event(event),
+        }
       }
 
-      app.process_event(event);
-    }
+      let mut frame_time = prev.elapsed().as_secs_f32();
+      prev = Instant::now();
+      total_frame_time += frame_time;
+      frame_count += 1;
 
-    let mut frame_time = prev.elapsed().as_secs_f32();
-    prev = Instant::now();
-    total_frame_time += frame_time;
-    frame_count += 1;
+      if total_frame_time >= 1.0 {
+        window
+          .set_title(&format!(
+            "{title} | {:.0} FPS",
+            frame_count as f32 / total_frame_time
+          ))
+          .unwrap();
 
-    if total_frame_time >= 1.0 {
-      window
-        .set_title(&format!(
-          "{title} | {:.0} FPS",
-          frame_count as f32 / total_frame_time
-        ))
-        .unwrap();
+        total_frame_time = 0.0;
+        frame_count = 0;
+      }
 
-      total_frame_time = 0.0;
-      frame_count = 0;
-    }
+      let mut update_count = 0;
 
-    let mut update_count = 0;
+      while frame_time > 0.0 && update_count < MAX_UPDATES_PER_FRAME {
+        let dt = frame_time.min(1.0 / UPDATES_PER_SECOND);
 
-    while frame_time > 0.0 && update_count < MAX_UPDATES_PER_FRAME {
-      let dt = frame_time.min(1.0 / UPDATES_PER_SECOND);
+        app.update(
+          dt,
+          Context {
+            audio_manager: &mut audio_manager,
+            renderer: RendererRef::new(&mut vk_renderer),
+          },
+        );
 
-      app.update(
-        dt,
-        Context {
-          audio_manager: &mut audio_manager,
-          renderer: RendererRef::new(&mut vk_renderer),
+        frame_time -= dt;
+        update_count += 1;
+      }
+
+      vk_renderer = match vk_renderer {
+        Ok(renderer) => match renderer.render(window.clone()) {
+          AnyRenderer::Creating(renderer) => renderer.finish(window.clone()),
+          AnyRenderer::Created(renderer) => Ok(renderer),
         },
-      );
-
-      frame_time -= dt;
-      update_count += 1;
+        Err(FinishError::WindowMinimized(renderer)) => renderer.finish(window.clone()),
+      };
     }
 
-    vk_renderer = match vk_renderer {
-      Ok(renderer) => match renderer.render(window.clone()) {
-        AnyRenderer::Creating(renderer) => renderer.finish(window.clone()),
-        AnyRenderer::Created(renderer) => Ok(renderer),
-      },
-      Err(FinishError::WindowMinimized(renderer)) => renderer.finish(window.clone()),
-    };
+    'cold: for event in event_pump.wait_iter() {
+      match event {
+        Event::Quit { .. } => break 'running,
+        Event::Window {
+          win_event: WindowEvent::Restored,
+          ..
+        } => break 'cold,
+        _ => {}
+      }
+    }
   }
 
   match vk_renderer {

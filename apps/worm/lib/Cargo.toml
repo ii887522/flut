@@ -27,3 +27,8 @@ features = ["std"]
 version = "2.12"
 default-features = false
 features = ["rayon", "std"]
+
+[dependencies.rustc-hash]
+version = "2.1"
+default-features = false
+features = ["std"]
