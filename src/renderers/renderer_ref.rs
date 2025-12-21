@@ -41,28 +41,44 @@ impl<'render> RendererRef<'render> {
 
   pub fn add_rect(&mut self, rect: Rect) -> Id {
     match self.0 {
-      Ok(renderer) => Id(renderer.get_rect_renderer().add_model(rect.into())),
-      Err(FinishError::WindowMinimized(renderer)) => {
-        Id(renderer.get_rect_renderer().add_model(rect.into()))
-      }
+      Ok(renderer) => Id(
+        renderer
+          .get_text_renderer()
+          .get_glyph_renderer_mut()
+          .add_model(rect.into()),
+      ),
+      Err(FinishError::WindowMinimized(renderer)) => Id(
+        renderer
+          .get_text_renderer()
+          .get_glyph_renderer_mut()
+          .add_model(rect.into()),
+      ),
     }
   }
 
   pub fn update_rect(&mut self, id: Id, rect: Rect) {
     match self.0 {
-      Ok(renderer) => renderer.get_rect_renderer().update_model(id.0, rect.into()),
-      Err(FinishError::WindowMinimized(renderer)) => {
-        renderer.get_rect_renderer().update_model(id.0, rect.into())
-      }
+      Ok(renderer) => renderer
+        .get_text_renderer()
+        .get_glyph_renderer_mut()
+        .update_model(id.0, rect.into()),
+      Err(FinishError::WindowMinimized(renderer)) => renderer
+        .get_text_renderer()
+        .get_glyph_renderer_mut()
+        .update_model(id.0, rect.into()),
     }
   }
 
   pub fn remove_rect(&mut self, id: Id) {
     match self.0 {
-      Ok(renderer) => renderer.get_rect_renderer().remove_model(id.0),
-      Err(FinishError::WindowMinimized(renderer)) => {
-        renderer.get_rect_renderer().remove_model(id.0)
-      }
+      Ok(renderer) => renderer
+        .get_text_renderer()
+        .get_glyph_renderer_mut()
+        .remove_model(id.0),
+      Err(FinishError::WindowMinimized(renderer)) => renderer
+        .get_text_renderer()
+        .get_glyph_renderer_mut()
+        .remove_model(id.0),
     }
   }
 
@@ -75,14 +91,16 @@ impl<'render> RendererRef<'render> {
 
     match self.0 {
       Ok(renderer) => renderer
-        .get_rect_renderer()
+        .get_text_renderer()
+        .get_glyph_renderer_mut()
         .bulk_add_models(rects)
         .into_par_iter()
         .with_min_len(MIN_SEQ_LEN)
         .map(Id)
         .collect(),
       Err(FinishError::WindowMinimized(renderer)) => renderer
-        .get_rect_renderer()
+        .get_text_renderer()
+        .get_glyph_renderer_mut()
         .bulk_add_models(rects)
         .into_par_iter()
         .with_min_len(MIN_SEQ_LEN)
@@ -99,10 +117,14 @@ impl<'render> RendererRef<'render> {
       .collect();
 
     match self.0 {
-      Ok(renderer) => renderer.get_rect_renderer().bulk_update_models(updates),
-      Err(FinishError::WindowMinimized(renderer)) => {
-        renderer.get_rect_renderer().bulk_update_models(updates)
-      }
+      Ok(renderer) => renderer
+        .get_text_renderer()
+        .get_glyph_renderer_mut()
+        .bulk_update_models(updates),
+      Err(FinishError::WindowMinimized(renderer)) => renderer
+        .get_text_renderer()
+        .get_glyph_renderer_mut()
+        .bulk_update_models(updates),
     }
   }
 
@@ -114,10 +136,14 @@ impl<'render> RendererRef<'render> {
       .collect::<Box<_>>();
 
     match self.0 {
-      Ok(renderer) => renderer.get_rect_renderer().bulk_remove_models(&ids),
-      Err(FinishError::WindowMinimized(renderer)) => {
-        renderer.get_rect_renderer().bulk_remove_models(&ids)
-      }
+      Ok(renderer) => renderer
+        .get_text_renderer()
+        .get_glyph_renderer_mut()
+        .bulk_remove_models(&ids),
+      Err(FinishError::WindowMinimized(renderer)) => renderer
+        .get_text_renderer()
+        .get_glyph_renderer_mut()
+        .bulk_remove_models(&ids),
     }
   }
 
