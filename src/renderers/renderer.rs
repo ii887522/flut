@@ -1,14 +1,20 @@
 use crate::{
-  app::ModelCapacities,
-  pipelines::rect_pipeline::{Rect, RectPushConsts},
-  renderers::{MAX_IN_FLIGHT_FRAME_COUNT, ModelRenderer, model_renderer},
+  models::{AtlasSizes, ModelCapacities},
+  pipelines::{
+    glyph_pipeline::{Glyph, GlyphPushConsts},
+    rect_pipeline::{Rect, RectPushConsts},
+  },
+  renderers::{
+    MAX_IN_FLIGHT_FRAME_COUNT, ModelRenderer, model_renderer,
+    text_renderer::{self, TextRenderer},
+  },
 };
 use ash::vk::{self, Handle};
 use rustc_hash::FxHashSet;
 use sdl3::video::Window;
 use std::{
   ffi::{CStr, CString, c_void},
-  iter, ptr,
+  iter, mem, ptr,
 };
 use vk_mem::Alloc;
 
@@ -23,6 +29,7 @@ pub(crate) enum FinishError {
 
 pub(crate) struct Creating {
   rect_renderer: ModelRenderer<model_renderer::Creating<Rect>>,
+  text_renderer: TextRenderer<text_renderer::Creating>,
 }
 
 pub(crate) struct Created {
@@ -35,6 +42,7 @@ pub(crate) struct Created {
   msaa_color_image_view: vk::ImageView,
   framebuffers: Box<[vk::Framebuffer]>,
   rect_renderer: ModelRenderer<model_renderer::Created<Rect>>,
+  text_renderer: TextRenderer<text_renderer::Created>,
   frame_index: usize,
 }
 
@@ -46,9 +54,11 @@ pub(crate) struct Renderer<State> {
   vk_physical_device: vk::PhysicalDevice,
   graphics_queue_family_index: u32,
   present_queue_family_index: u32,
+  transfer_queue_family_index: u32,
   vk_device: ash::Device,
   graphics_queue: vk::Queue,
   present_queue: vk::Queue,
+  transfer_queue: vk::Queue,
   vk_allocator: vk_mem::Allocator,
   model_buffer: vk::Buffer,
   model_buffer_alloc: vk_mem::Allocation,
@@ -59,18 +69,31 @@ pub(crate) struct Renderer<State> {
   render_pass: vk::RenderPass,
   graphics_command_pools: Vec<vk::CommandPool>,
   graphics_command_buffers: Vec<vk::CommandBuffer>,
+  transition_command_pool: vk::CommandPool,
+  transition_command_buffer: vk::CommandBuffer,
+  transfer_command_pools: Vec<vk::CommandPool>,
+  transfer_command_buffers: Vec<vk::CommandBuffer>,
+  descriptor_pool: vk::DescriptorPool,
   image_avail_semaphores: Vec<vk::Semaphore>,
   render_done_semaphores: Vec<vk::Semaphore>,
   in_flight_fences: Vec<vk::Fence>,
+  transition_done_semaphore: vk::Semaphore,
+  glyph_atlas_semaphores: Vec<(vk::Semaphore, u64)>,
+  read_atlas_semaphores: Vec<(vk::Semaphore, u64)>,
   pipeline_cache: vk::PipelineCache,
   msaa_samples: vk::SampleCountFlags,
+  atlas_sizes: AtlasSizes,
   cam_position: Option<(f32, f32)>,
   cam_size: Option<(f32, f32)>,
   state: State,
 }
 
 impl Renderer<Creating> {
-  pub(crate) fn new(window: Window, model_capacities: ModelCapacities) -> Self {
+  pub(crate) fn new(
+    window: Window,
+    model_capacities: ModelCapacities,
+    atlas_sizes: AtlasSizes,
+  ) -> Self {
     let ash_entry = unsafe { ash::Entry::load().unwrap() };
     let app_name = CString::new(window.title()).unwrap();
 
@@ -277,6 +300,7 @@ impl Renderer<Creating> {
       vk_physical_device_props,
       graphics_queue_family_index,
       present_queue_family_index,
+      transfer_queue_family_index,
     ) = vk_physical_devices
       .into_iter()
       .filter_map(|vk_physical_device| {
@@ -326,6 +350,20 @@ impl Renderer<Creating> {
               }
             });
 
+        let transfer_queue_family_index = queue_family_props.iter().enumerate().find_map(
+          |(queue_family_index, queue_family_props)| {
+            if queue_family_props
+              .queue_family_properties
+              .queue_flags
+              .contains(vk::QueueFlags::TRANSFER)
+            {
+              Some(queue_family_index as _)
+            } else {
+              None
+            }
+          },
+        );
+
         let mut vk_physical_device_props = vk::PhysicalDeviceProperties2::default();
 
         unsafe {
@@ -333,20 +371,27 @@ impl Renderer<Creating> {
             .get_physical_device_properties2(vk_physical_device, &mut vk_physical_device_props);
         }
 
-        if let (Some(graphics_queue_family_index), Some(present_queue_family_index)) =
-          (graphics_queue_family_index, present_queue_family_index)
-        {
+        if let (
+          Some(graphics_queue_family_index),
+          Some(present_queue_family_index),
+          Some(transfer_queue_family_index),
+        ) = (
+          graphics_queue_family_index,
+          present_queue_family_index,
+          transfer_queue_family_index,
+        ) {
           Some((
             vk_physical_device,
             vk_physical_device_props,
             graphics_queue_family_index,
             present_queue_family_index,
+            transfer_queue_family_index,
           ))
         } else {
           None
         }
       })
-      .max_by_key(|&(_, vk_physical_device_props, _, _)| {
+      .max_by_key(|&(_, vk_physical_device_props, _, _, _)| {
         match vk_physical_device_props.properties.device_type {
           vk::PhysicalDeviceType::INTEGRATED_GPU => 4,
           vk::PhysicalDeviceType::DISCRETE_GPU => 3,
@@ -371,16 +416,19 @@ impl Renderer<Creating> {
 
     let queue_priorities = [1.0];
 
-    let queue_create_infos =
-      FxHashSet::from_iter([graphics_queue_family_index, present_queue_family_index])
-        .into_iter()
-        .map(|queue_family_index| vk::DeviceQueueCreateInfo {
-          queue_family_index,
-          queue_count: queue_priorities.len() as _,
-          p_queue_priorities: queue_priorities.as_ptr(),
-          ..Default::default()
-        })
-        .collect::<Box<_>>();
+    let queue_create_infos = FxHashSet::from_iter([
+      graphics_queue_family_index,
+      present_queue_family_index,
+      transfer_queue_family_index,
+    ])
+    .into_iter()
+    .map(|queue_family_index| vk::DeviceQueueCreateInfo {
+      queue_family_index,
+      queue_count: queue_priorities.len() as _,
+      p_queue_priorities: queue_priorities.as_ptr(),
+      ..Default::default()
+    })
+    .collect::<Box<_>>();
 
     let vk_ext_props = unsafe {
       vk_inst
@@ -473,8 +521,15 @@ impl Renderer<Creating> {
       ..Default::default()
     };
 
+    let transfer_queue_info = vk::DeviceQueueInfo2 {
+      queue_family_index: transfer_queue_family_index,
+      queue_index: 0,
+      ..Default::default()
+    };
+
     let graphics_queue = unsafe { vk_device.get_device_queue2(&graphics_queue_info) };
     let present_queue = unsafe { vk_device.get_device_queue2(&present_queue_info) };
+    let transfer_queue = unsafe { vk_device.get_device_queue2(&transfer_queue_info) };
     let total_model_capacity_size = model_capacities.calc_total_size();
 
     let mut vk_allocator_create_info =
@@ -651,11 +706,54 @@ impl Renderer<Creating> {
       ..Default::default()
     };
 
+    let transition_command_pool_create_info = vk::CommandPoolCreateInfo {
+      queue_family_index: transfer_queue_family_index,
+      ..Default::default()
+    };
+
+    let transfer_command_pool_create_info = vk::CommandPoolCreateInfo {
+      queue_family_index: transfer_queue_family_index,
+      ..Default::default()
+    };
+
     let image_avail_semaphore_create_info = vk::SemaphoreCreateInfo::default();
     let render_done_semaphore_create_info = vk::SemaphoreCreateInfo::default();
 
     let in_flight_fence_create_info = vk::FenceCreateInfo {
       flags: vk::FenceCreateFlags::SIGNALED,
+      ..Default::default()
+    };
+
+    let transition_done_semaphore_type_create_info = vk::SemaphoreTypeCreateInfo {
+      semaphore_type: vk::SemaphoreType::TIMELINE,
+      initial_value: 0,
+      ..Default::default()
+    };
+
+    let transition_done_semaphore_create_info = vk::SemaphoreCreateInfo {
+      p_next: &transition_done_semaphore_type_create_info as *const _ as *const _,
+      ..Default::default()
+    };
+
+    let glyph_atlas_semaphore_type_create_info = vk::SemaphoreTypeCreateInfo {
+      semaphore_type: vk::SemaphoreType::TIMELINE,
+      initial_value: 0,
+      ..Default::default()
+    };
+
+    let glyph_atlas_semaphore_create_info = vk::SemaphoreCreateInfo {
+      p_next: &glyph_atlas_semaphore_type_create_info as *const _ as *const _,
+      ..Default::default()
+    };
+
+    let read_atlas_semaphore_type_create_info = vk::SemaphoreTypeCreateInfo {
+      semaphore_type: vk::SemaphoreType::TIMELINE,
+      initial_value: 0,
+      ..Default::default()
+    };
+
+    let read_atlas_semaphore_create_info = vk::SemaphoreCreateInfo {
+      p_next: &read_atlas_semaphore_type_create_info as *const _ as *const _,
       ..Default::default()
     };
 
@@ -681,6 +779,65 @@ impl Renderer<Creating> {
       })
       .unzip();
 
+    let transition_command_pool = unsafe {
+      vk_device
+        .create_command_pool(&transition_command_pool_create_info, None)
+        .unwrap()
+    };
+
+    let transition_command_buffer_alloc_info = vk::CommandBufferAllocateInfo {
+      command_pool: transition_command_pool,
+      level: vk::CommandBufferLevel::PRIMARY,
+      command_buffer_count: 1,
+      ..Default::default()
+    };
+
+    let transition_command_buffer = unsafe {
+      vk_device
+        .allocate_command_buffers(&transition_command_buffer_alloc_info)
+        .unwrap()[0]
+    };
+
+    let (transfer_command_pools, transfer_command_buffers): (Vec<_>, Vec<_>) = (0
+      ..MAX_IN_FLIGHT_FRAME_COUNT)
+      .map(|_| unsafe {
+        let command_pool = vk_device
+          .create_command_pool(&transfer_command_pool_create_info, None)
+          .unwrap();
+
+        let command_buffer_alloc_info = vk::CommandBufferAllocateInfo {
+          command_pool,
+          level: vk::CommandBufferLevel::PRIMARY,
+          command_buffer_count: 1,
+          ..Default::default()
+        };
+
+        let command_buffer = vk_device
+          .allocate_command_buffers(&command_buffer_alloc_info)
+          .unwrap()[0];
+
+        (command_pool, command_buffer)
+      })
+      .unzip();
+
+    let descriptor_pool_sizes = [vk::DescriptorPoolSize {
+      ty: vk::DescriptorType::COMBINED_IMAGE_SAMPLER,
+      descriptor_count: MAX_IN_FLIGHT_FRAME_COUNT as _,
+    }];
+
+    let descriptor_pool_create_info = vk::DescriptorPoolCreateInfo {
+      max_sets: MAX_IN_FLIGHT_FRAME_COUNT as _,
+      pool_size_count: descriptor_pool_sizes.len() as _,
+      p_pool_sizes: descriptor_pool_sizes.as_ptr(),
+      ..Default::default()
+    };
+
+    let descriptor_pool = unsafe {
+      vk_device
+        .create_descriptor_pool(&descriptor_pool_create_info, None)
+        .unwrap()
+    };
+
     let (image_avail_semaphores, (render_done_semaphores, in_flight_fences)): (
       Vec<_>,
       (Vec<_>, Vec<_>),
@@ -705,6 +862,27 @@ impl Renderer<Creating> {
       })
       .unzip();
 
+    let transition_done_semaphore = unsafe {
+      vk_device
+        .create_semaphore(&transition_done_semaphore_create_info, None)
+        .unwrap()
+    };
+
+    let (glyph_atlas_semaphores, read_atlas_semaphores): (Vec<_>, Vec<_>) = (0
+      ..MAX_IN_FLIGHT_FRAME_COUNT)
+      .map(|_| unsafe {
+        let glyph_atlas_semaphore = vk_device
+          .create_semaphore(&glyph_atlas_semaphore_create_info, None)
+          .unwrap();
+
+        let read_atlas_semaphore = vk_device
+          .create_semaphore(&read_atlas_semaphore_create_info, None)
+          .unwrap();
+
+        ((glyph_atlas_semaphore, 0), (read_atlas_semaphore, 0))
+      })
+      .unzip();
+
     let pipeline_cache_create_info = vk::PipelineCacheCreateInfo::default();
 
     let pipeline_cache = unsafe {
@@ -716,7 +894,64 @@ impl Renderer<Creating> {
         })
     };
 
+    let transition_command_buffer_begin_info = vk::CommandBufferBeginInfo {
+      flags: vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT,
+      ..Default::default()
+    };
+
+    unsafe {
+      vk_device
+        .begin_command_buffer(
+          transition_command_buffer,
+          &transition_command_buffer_begin_info,
+        )
+        .unwrap();
+    }
+
     let rect_renderer = ModelRenderer::new(&vk_device, model_capacities.rect_capacity);
+
+    let text_renderer = TextRenderer::new(
+      window,
+      &vk_device,
+      &vk_allocator,
+      transition_command_buffer,
+      descriptor_pool,
+      model_capacities.glyph_capacity,
+      atlas_sizes.glyph_atlas_size,
+    );
+
+    unsafe {
+      vk_device
+        .end_command_buffer(transition_command_buffer)
+        .unwrap();
+    }
+
+    let transition_done_semaphore_value = 1;
+
+    let transition_done_semaphore_submit_info = vk::TimelineSemaphoreSubmitInfo {
+      signal_semaphore_value_count: 1,
+      p_signal_semaphore_values: &transition_done_semaphore_value,
+      ..Default::default()
+    };
+
+    let transfer_queue_submit_info = vk::SubmitInfo {
+      command_buffer_count: 1,
+      p_command_buffers: &transition_command_buffer,
+      signal_semaphore_count: 1,
+      p_signal_semaphores: &transition_done_semaphore,
+      p_next: &transition_done_semaphore_submit_info as *const _ as *const _,
+      ..Default::default()
+    };
+
+    unsafe {
+      vk_device
+        .queue_submit(
+          transfer_queue,
+          &[transfer_queue_submit_info],
+          vk::Fence::null(),
+        )
+        .unwrap();
+    }
 
     Self {
       ash_entry,
@@ -726,9 +961,11 @@ impl Renderer<Creating> {
       vk_physical_device,
       graphics_queue_family_index,
       present_queue_family_index,
+      transfer_queue_family_index,
       vk_device,
       graphics_queue,
       present_queue,
+      transfer_queue,
       vk_allocator,
       model_buffer,
       model_buffer_alloc,
@@ -739,14 +976,26 @@ impl Renderer<Creating> {
       render_pass,
       graphics_command_pools,
       graphics_command_buffers,
+      transition_command_pool,
+      transition_command_buffer,
+      transfer_command_pools,
+      transfer_command_buffers,
+      descriptor_pool,
       image_avail_semaphores,
       render_done_semaphores,
       in_flight_fences,
+      transition_done_semaphore,
+      glyph_atlas_semaphores,
+      read_atlas_semaphores,
       pipeline_cache,
       msaa_samples,
+      atlas_sizes,
       cam_position: None,
       cam_size: None,
-      state: Creating { rect_renderer },
+      state: Creating {
+        rect_renderer,
+        text_renderer,
+      },
     }
   }
 
@@ -969,6 +1218,14 @@ impl Renderer<Creating> {
       self.msaa_samples,
     );
 
+    let text_renderer = self.state.text_renderer.finish(
+      &self.vk_device,
+      self.render_pass,
+      self.pipeline_cache,
+      swapchain_image_extent,
+      self.msaa_samples,
+    );
+
     Ok(Renderer {
       ash_entry: self.ash_entry,
       vk_inst: self.vk_inst,
@@ -977,9 +1234,11 @@ impl Renderer<Creating> {
       vk_physical_device: self.vk_physical_device,
       graphics_queue_family_index: self.graphics_queue_family_index,
       present_queue_family_index: self.present_queue_family_index,
+      transfer_queue_family_index: self.transfer_queue_family_index,
       vk_device: self.vk_device,
       graphics_queue: self.graphics_queue,
       present_queue: self.present_queue,
+      transfer_queue: self.transfer_queue,
       vk_allocator: self.vk_allocator,
       model_buffer: self.model_buffer,
       model_buffer_alloc: self.model_buffer_alloc,
@@ -990,11 +1249,20 @@ impl Renderer<Creating> {
       render_pass: self.render_pass,
       graphics_command_pools: self.graphics_command_pools,
       graphics_command_buffers: self.graphics_command_buffers,
+      transition_command_pool: self.transition_command_pool,
+      transition_command_buffer: self.transition_command_buffer,
+      transfer_command_pools: self.transfer_command_pools,
+      transfer_command_buffers: self.transfer_command_buffers,
+      descriptor_pool: self.descriptor_pool,
       image_avail_semaphores: self.image_avail_semaphores,
       render_done_semaphores: self.render_done_semaphores,
       in_flight_fences: self.in_flight_fences,
+      transition_done_semaphore: self.transition_done_semaphore,
+      glyph_atlas_semaphores: self.glyph_atlas_semaphores,
+      read_atlas_semaphores: self.read_atlas_semaphores,
       pipeline_cache: self.pipeline_cache,
       msaa_samples: self.msaa_samples,
+      atlas_sizes: self.atlas_sizes,
       cam_position: self.cam_position,
       cam_size: self.cam_size,
       state: Created {
@@ -1007,6 +1275,7 @@ impl Renderer<Creating> {
         msaa_color_image_view,
         framebuffers,
         rect_renderer,
+        text_renderer,
         frame_index: 0,
       },
     })
@@ -1019,14 +1288,39 @@ impl Renderer<Creating> {
     &mut self.state.rect_renderer
   }
 
+  #[inline]
+  pub(super) const fn get_text_renderer(&mut self) -> &mut TextRenderer<text_renderer::Creating> {
+    &mut self.state.text_renderer
+  }
+
   pub(crate) fn drop(mut self) {
     unsafe {
       self.vk_device.device_wait_idle().unwrap();
+
+      self
+        .state
+        .text_renderer
+        .drop(&self.vk_device, &self.vk_allocator);
+
       self.state.rect_renderer.drop(&self.vk_device);
 
       self
         .vk_device
         .destroy_pipeline_cache(self.pipeline_cache, None);
+
+      self
+        .read_atlas_semaphores
+        .iter()
+        .for_each(|&(semaphore, _)| self.vk_device.destroy_semaphore(semaphore, None));
+
+      self
+        .glyph_atlas_semaphores
+        .iter()
+        .for_each(|&(semaphore, _)| self.vk_device.destroy_semaphore(semaphore, None));
+
+      self
+        .vk_device
+        .destroy_semaphore(self.transition_done_semaphore, None);
 
       self
         .in_flight_fences
@@ -1042,6 +1336,19 @@ impl Renderer<Creating> {
         .image_avail_semaphores
         .iter()
         .for_each(|&semaphore| self.vk_device.destroy_semaphore(semaphore, None));
+
+      self
+        .vk_device
+        .destroy_descriptor_pool(self.descriptor_pool, None);
+
+      self
+        .transfer_command_pools
+        .iter()
+        .for_each(|&command_pool| self.vk_device.destroy_command_pool(command_pool, None));
+
+      self
+        .vk_device
+        .destroy_command_pool(self.transition_command_pool, None);
 
       self
         .graphics_command_pools
@@ -1070,12 +1377,116 @@ impl Renderer<Created> {
     &mut self.state.rect_renderer
   }
 
+  #[inline]
+  pub(super) const fn get_text_renderer(&mut self) -> &mut TextRenderer<text_renderer::Created> {
+    &mut self.state.text_renderer
+  }
+
   pub(crate) fn render(mut self, window: Window) -> AnyRenderer {
     let graphics_command_pool = self.graphics_command_pools[self.state.frame_index];
     let graphics_command_buffer = self.graphics_command_buffers[self.state.frame_index];
     let image_avail_semaphore = self.image_avail_semaphores[self.state.frame_index];
     let render_done_semaphore = self.render_done_semaphores[self.state.frame_index];
     let in_flight_fence = self.in_flight_fences[self.state.frame_index];
+    let write_image_index = self.state.text_renderer.get_write_image_index();
+    let transfer_command_pool = self.transfer_command_pools[write_image_index];
+    let transfer_command_buffer = self.transfer_command_buffers[write_image_index];
+    let (glyph_atlas_semaphore, glyph_atlas_semaphore_value) =
+      self.glyph_atlas_semaphores[write_image_index];
+    let (read_atlas_semaphore, read_atlas_semaphore_value) =
+      self.read_atlas_semaphores[write_image_index];
+
+    let glyph_atlas_semaphore_value = if self.state.text_renderer.flush_atlas_updates(
+      &self.vk_device,
+      glyph_atlas_semaphore,
+      glyph_atlas_semaphore_value,
+    ) {
+      unsafe {
+        self
+          .vk_device
+          .reset_command_pool(transfer_command_pool, vk::CommandPoolResetFlags::empty())
+          .unwrap();
+
+        let transfer_command_buffer_begin_info = vk::CommandBufferBeginInfo {
+          flags: vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT,
+          ..Default::default()
+        };
+
+        self
+          .vk_device
+          .begin_command_buffer(transfer_command_buffer, &transfer_command_buffer_begin_info)
+          .unwrap();
+
+        self.state.text_renderer.record_copy_commands(
+          &self.vk_device,
+          transfer_command_buffer,
+          self.graphics_queue_family_index,
+          self.transfer_queue_family_index,
+        );
+
+        self
+          .vk_device
+          .end_command_buffer(transfer_command_buffer)
+          .unwrap();
+
+        let (extra_transfer_wait_semaphore, extra_transfer_wait_semaphore_value) =
+          if read_atlas_semaphore_value > 0 {
+            (read_atlas_semaphore, read_atlas_semaphore_value)
+          } else {
+            (self.transition_done_semaphore, 1)
+          };
+
+        let wait_semaphores = [extra_transfer_wait_semaphore, glyph_atlas_semaphore];
+        let wait_semaphore_values = [
+          extra_transfer_wait_semaphore_value,
+          glyph_atlas_semaphore_value + 1,
+        ];
+        let signal_semaphore = glyph_atlas_semaphore;
+        let signal_semaphore_value = glyph_atlas_semaphore_value + 2;
+
+        let transfer_semaphore_submit_info = vk::TimelineSemaphoreSubmitInfo {
+          wait_semaphore_value_count: wait_semaphore_values.len() as _,
+          p_wait_semaphore_values: wait_semaphore_values.as_ptr(),
+          signal_semaphore_value_count: 1,
+          p_signal_semaphore_values: &signal_semaphore_value,
+          ..Default::default()
+        };
+
+        let wait_dst_stage_masks = [
+          vk::PipelineStageFlags::TRANSFER,
+          vk::PipelineStageFlags::TRANSFER,
+        ];
+
+        let transfer_queue_submit_info = vk::SubmitInfo {
+          wait_semaphore_count: wait_semaphores.len() as _,
+          p_wait_semaphores: wait_semaphores.as_ptr(),
+          p_wait_dst_stage_mask: wait_dst_stage_masks.as_ptr(),
+          command_buffer_count: 1,
+          p_command_buffers: &transfer_command_buffer,
+          signal_semaphore_count: 1,
+          p_signal_semaphores: &signal_semaphore,
+          p_next: &transfer_semaphore_submit_info as *const _ as *const _,
+          ..Default::default()
+        };
+
+        self
+          .vk_device
+          .queue_submit(
+            self.transfer_queue,
+            &[transfer_queue_submit_info],
+            vk::Fence::null(),
+          )
+          .unwrap();
+      }
+
+      glyph_atlas_semaphore_value + 2
+    } else {
+      glyph_atlas_semaphore_value
+    };
+
+    let read_image_index = self.state.text_renderer.get_read_image_index();
+    let (read_atlas_semaphore, read_atlas_semaphore_value) =
+      self.read_atlas_semaphores[read_image_index];
 
     unsafe {
       self
@@ -1102,10 +1513,34 @@ impl Renderer<Created> {
         Err(err) => panic!("{err}"),
       };
 
+      let rect_capacity_size =
+        self.state.rect_renderer.get_model_capacity() * mem::size_of::<Rect>();
+
+      let glyph_capacity_size = self
+        .state
+        .text_renderer
+        .get_glyph_renderer()
+        .get_model_capacity()
+        * mem::size_of::<Glyph>();
+
+      let total_model_capacity_size = rect_capacity_size + glyph_capacity_size;
+
       self.state.rect_renderer.flush_writes(
-        (self.model_buffer_data as *mut Rect)
-          .add(self.state.frame_index * self.state.rect_renderer.get_model_capacity()),
+        self
+          .model_buffer_data
+          .byte_add(self.state.frame_index * total_model_capacity_size) as *mut Rect,
       );
+
+      self
+        .state
+        .text_renderer
+        .get_glyph_renderer_mut()
+        .flush_writes(
+          self
+            .model_buffer_data
+            .byte_add(self.state.frame_index * total_model_capacity_size + rect_capacity_size)
+            as *mut Glyph,
+        );
 
       self
         .vk_device
@@ -1160,23 +1595,51 @@ impl Renderer<Created> {
 
       let window_display_scale = window.display_scale();
 
+      let actual_cam_position = (
+        cam_position.0 / window_display_scale,
+        cam_position.1 / window_display_scale,
+      );
+
+      let actual_cam_size = (
+        cam_size.0 / window_display_scale,
+        cam_size.1 / window_display_scale,
+      );
+
       let rect_push_consts = RectPushConsts {
-        rect_buffer: self.model_buffer_addr,
-        cam_position: (
-          cam_position.0 / window_display_scale,
-          cam_position.1 / window_display_scale,
-        ),
-        cam_size: (
-          cam_size.0 / window_display_scale,
-          cam_size.1 / window_display_scale,
+        rect_buffer: self.model_buffer_addr
+          + (self.state.frame_index * total_model_capacity_size) as u64,
+        cam_position: actual_cam_position,
+        cam_size: actual_cam_size,
+      };
+
+      let glyph_push_consts = GlyphPushConsts {
+        glyph_buffer: self.model_buffer_addr
+          + (self.state.frame_index * total_model_capacity_size + rect_capacity_size) as u64,
+        cam_position: actual_cam_position,
+        cam_size: actual_cam_size,
+        atlas_size: (
+          self.atlas_sizes.glyph_atlas_size.0 as _,
+          self.atlas_sizes.glyph_atlas_size.1 as _,
         ),
       };
 
       self.state.rect_renderer.record_draw_commands(
         &self.vk_device,
         graphics_command_buffer,
+        vk::DescriptorSet::null(),
         &rect_push_consts,
       );
+
+      self
+        .state
+        .text_renderer
+        .get_glyph_renderer()
+        .record_draw_commands(
+          &self.vk_device,
+          graphics_command_buffer,
+          self.state.text_renderer.get_descriptor_set(),
+          &glyph_push_consts,
+        );
 
       let subpass_end_info = vk::SubpassEndInfo::default();
 
@@ -1191,16 +1654,33 @@ impl Renderer<Created> {
 
       self.vk_device.reset_fences(&[in_flight_fence]).unwrap();
 
-      let wait_dst_stage_mask = vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT;
+      let wait_semaphores = [image_avail_semaphore, glyph_atlas_semaphore];
+      let wait_semaphore_values = [0, glyph_atlas_semaphore_value];
+      let signal_semaphores = [render_done_semaphore, read_atlas_semaphore];
+      let signal_semaphore_values = [0, read_atlas_semaphore_value + 1];
+
+      let graphics_semaphore_submit_info = vk::TimelineSemaphoreSubmitInfo {
+        wait_semaphore_value_count: wait_semaphore_values.len() as _,
+        p_wait_semaphore_values: wait_semaphore_values.as_ptr(),
+        signal_semaphore_value_count: signal_semaphore_values.len() as _,
+        p_signal_semaphore_values: signal_semaphore_values.as_ptr(),
+        ..Default::default()
+      };
+
+      let wait_dst_stage_masks = [
+        vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
+        vk::PipelineStageFlags::FRAGMENT_SHADER,
+      ];
 
       let graphics_queue_submit_info = vk::SubmitInfo {
-        wait_semaphore_count: 1,
-        p_wait_semaphores: &image_avail_semaphore,
-        p_wait_dst_stage_mask: &wait_dst_stage_mask,
+        wait_semaphore_count: wait_semaphores.len() as _,
+        p_wait_semaphores: wait_semaphores.as_ptr(),
+        p_wait_dst_stage_mask: wait_dst_stage_masks.as_ptr(),
         command_buffer_count: 1,
         p_command_buffers: &graphics_command_buffer,
-        signal_semaphore_count: 1,
-        p_signal_semaphores: &render_done_semaphore,
+        signal_semaphore_count: signal_semaphores.len() as _,
+        p_signal_semaphores: signal_semaphores.as_ptr(),
+        p_next: &graphics_semaphore_submit_info as *const _ as *const _,
         ..Default::default()
       };
 
@@ -1234,6 +1714,9 @@ impl Renderer<Created> {
       }
     }
 
+    self.glyph_atlas_semaphores[write_image_index].1 = glyph_atlas_semaphore_value;
+    self.read_atlas_semaphores[read_image_index].1 = read_atlas_semaphore_value + 1;
+
     AnyRenderer::Created(Self {
       state: Created {
         frame_index: (self.state.frame_index + 1) % MAX_IN_FLIGHT_FRAME_COUNT,
@@ -1248,6 +1731,7 @@ impl Renderer<Created> {
       self.vk_device.device_wait_idle().unwrap();
     }
 
+    let text_renderer = self.state.text_renderer.on_swapchain_suboptimal();
     let rect_renderer = self.state.rect_renderer.on_swapchain_suboptimal();
 
     unsafe {
@@ -1286,9 +1770,11 @@ impl Renderer<Created> {
       vk_physical_device: self.vk_physical_device,
       graphics_queue_family_index: self.graphics_queue_family_index,
       present_queue_family_index: self.present_queue_family_index,
+      transfer_queue_family_index: self.transfer_queue_family_index,
       vk_device: self.vk_device,
       graphics_queue: self.graphics_queue,
       present_queue: self.present_queue,
+      transfer_queue: self.transfer_queue,
       vk_allocator: self.vk_allocator,
       model_buffer: self.model_buffer,
       model_buffer_alloc: self.model_buffer_alloc,
@@ -1299,20 +1785,38 @@ impl Renderer<Created> {
       render_pass: self.render_pass,
       graphics_command_pools: self.graphics_command_pools,
       graphics_command_buffers: self.graphics_command_buffers,
+      transition_command_pool: self.transition_command_pool,
+      transition_command_buffer: self.transition_command_buffer,
+      transfer_command_pools: self.transfer_command_pools,
+      transfer_command_buffers: self.transfer_command_buffers,
+      descriptor_pool: self.descriptor_pool,
       image_avail_semaphores: self.image_avail_semaphores,
       render_done_semaphores: self.render_done_semaphores,
       in_flight_fences: self.in_flight_fences,
+      transition_done_semaphore: self.transition_done_semaphore,
+      glyph_atlas_semaphores: self.glyph_atlas_semaphores,
+      read_atlas_semaphores: self.read_atlas_semaphores,
       pipeline_cache: self.pipeline_cache,
       msaa_samples: self.msaa_samples,
+      atlas_sizes: self.atlas_sizes,
       cam_position: self.cam_position,
       cam_size: self.cam_size,
-      state: Creating { rect_renderer },
+      state: Creating {
+        rect_renderer,
+        text_renderer,
+      },
     }
   }
 
   pub(crate) fn drop(mut self) {
     unsafe {
       self.vk_device.device_wait_idle().unwrap();
+
+      self
+        .state
+        .text_renderer
+        .drop(&self.vk_device, &self.vk_allocator);
+
       self.state.rect_renderer.drop(&self.vk_device);
 
       self
@@ -1346,6 +1850,20 @@ impl Renderer<Created> {
         .destroy_pipeline_cache(self.pipeline_cache, None);
 
       self
+        .read_atlas_semaphores
+        .iter()
+        .for_each(|&(semaphore, _)| self.vk_device.destroy_semaphore(semaphore, None));
+
+      self
+        .glyph_atlas_semaphores
+        .iter()
+        .for_each(|&(semaphore, _)| self.vk_device.destroy_semaphore(semaphore, None));
+
+      self
+        .vk_device
+        .destroy_semaphore(self.transition_done_semaphore, None);
+
+      self
         .in_flight_fences
         .iter()
         .for_each(|&fence| self.vk_device.destroy_fence(fence, None));
@@ -1359,6 +1877,19 @@ impl Renderer<Created> {
         .image_avail_semaphores
         .iter()
         .for_each(|&semaphore| self.vk_device.destroy_semaphore(semaphore, None));
+
+      self
+        .vk_device
+        .destroy_descriptor_pool(self.descriptor_pool, None);
+
+      self
+        .transfer_command_pools
+        .iter()
+        .for_each(|&command_pool| self.vk_device.destroy_command_pool(command_pool, None));
+
+      self
+        .vk_device
+        .destroy_command_pool(self.transition_command_pool, None);
 
       self
         .graphics_command_pools

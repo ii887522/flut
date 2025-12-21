@@ -1,6 +1,6 @@
 use crate::{
   AudioManager, Context,
-  pipelines::rect_pipeline::Rect,
+  models::{AtlasSizes, ModelCapacities},
   renderers::{
     Renderer, RendererRef,
     renderer::{AnyRenderer, FinishError},
@@ -13,32 +13,12 @@ use sdl3::{
   surface::Surface,
   video::WindowPos,
 };
-use std::{borrow::Cow, mem, time::Instant};
+use std::{borrow::Cow, time::Instant};
 
 pub trait App {
   fn init(&mut self, _context: Context<'_>) {}
   fn process_event(&mut self, _event: Event) {}
   fn update(&mut self, _dt: f32, _context: Context<'_>) {}
-}
-
-pub struct ModelCapacities {
-  pub rect_capacity: usize,
-}
-
-impl Default for ModelCapacities {
-  #[inline]
-  fn default() -> Self {
-    Self {
-      rect_capacity: 1024,
-    }
-  }
-}
-
-impl ModelCapacities {
-  #[inline]
-  pub(super) const fn calc_total_size(&self) -> usize {
-    self.rect_capacity * mem::size_of::<Rect>()
-  }
 }
 
 #[optarg_fn(RunBuilder, call)]
@@ -48,6 +28,7 @@ pub fn run<A: App>(
   #[optarg((800, 600))] size: (u32, u32),
   #[optarg_default] favicon_path: Cow<'static, str>,
   #[optarg_default] model_capacities: ModelCapacities,
+  #[optarg_default] atlas_sizes: AtlasSizes,
   #[optarg_default] quiet: bool,
 ) {
   let mut audio_manager = if quiet {
@@ -91,7 +72,8 @@ pub fn run<A: App>(
     window.set_icon(favicon);
   }
 
-  let mut vk_renderer = Renderer::new(window.clone(), model_capacities).finish(window.clone());
+  let mut vk_renderer =
+    Renderer::new(window.clone(), model_capacities, atlas_sizes).finish(window.clone());
 
   app.init(Context {
     audio_manager: &mut audio_manager,

@@ -4,7 +4,7 @@
 
 mod game;
 
-use flut::app::{self, ModelCapacities};
+use flut::{app, models::ModelCapacities};
 use game::Game;
 use worm_lib::consts;
 
@@ -22,6 +22,7 @@ fn main() {
     .favicon_path("assets/worm/images/favicon.png")
     .model_capacities(ModelCapacities {
       rect_capacity: 4096,
+      ..Default::default()
     })
     .call();
 }

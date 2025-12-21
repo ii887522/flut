@@ -10,7 +10,11 @@ use crate::{
   level::Level,
   models::{Direction, GameCell, GameCellType},
 };
-use flut::{Context, Event, Keycode};
+use flut::{
+  Context, Event, Keycode,
+  models::{Align, Text},
+  renderers::renderer_ref,
+};
 use kira::{
   Tween,
   sound::{FromFileError, streaming::StreamingSoundHandle},
@@ -22,6 +26,7 @@ const SHAKE_STRENGTH: f32 = 64.0;
 
 pub struct Game {
   level: Option<Level>,
+  score_render_id: Option<renderer_ref::Id>,
   worm_direction: Direction,
   input_worm_direction: Option<Direction>,
   worm_move_music: Option<StreamingSoundHandle<FromFileError>>,
@@ -42,6 +47,7 @@ impl Game {
   pub fn new() -> Self {
     Self {
       level: None,
+      score_render_id: None,
       worm_direction: Direction::rand(),
       input_worm_direction: None,
       worm_move_music: None,
@@ -51,13 +57,60 @@ impl Game {
     }
   }
 
+  fn move_worm(&mut self, context: &mut Context<'_>, new_worm_head_position: u16) {
+    let level = self.level.as_mut().unwrap();
+    let worm_tail_position = level.get_worm_positions_mut().pop_back().unwrap();
+
+    level
+      .get_worm_positions_mut()
+      .push_front(new_worm_head_position);
+
+    level
+      .get_air_positions_mut()
+      .swap_remove(&new_worm_head_position);
+
+    level.get_air_positions_mut().insert(worm_tail_position);
+    level.set_grid_cell(context, worm_tail_position, GameCellType::Air);
+    level.set_grid_cell(context, new_worm_head_position, GameCellType::Worm);
+  }
+
   fn grow_worm(&mut self, context: &mut Context<'_>, new_worm_head_position: u16) {
     if let Some(audio_manager) = context.audio_manager {
       audio_manager.play_sound("assets/worm/audios/eat.mp3");
     }
 
     let level = self.level.as_mut().unwrap();
-    level.grow_worm(context, new_worm_head_position);
+
+    level
+      .get_worm_positions_mut()
+      .push_front(new_worm_head_position);
+
+    level.set_grid_cell(context, new_worm_head_position, GameCellType::Worm);
+
+    let score_render_id = self.score_render_id.unwrap();
+
+    context.renderer.update_text(
+      score_render_id,
+      Text {
+        position: consts::SCORE_POSITION,
+        color: consts::SCORE_COLOR,
+        font_size: consts::SCORE_FONT_SIZE,
+        align: Align::Center,
+        text: (level.get_worm_positions().len() - 1).to_string().into(),
+      },
+    );
+  }
+
+  fn spawn_food(&mut self, context: &mut Context<'_>) {
+    let level = self.level.as_mut().unwrap();
+    let rand_air_position_index = fastrand::usize(..level.get_air_positions().len());
+
+    let air_position_to_remove = level
+      .get_air_positions_mut()
+      .swap_remove_index(rand_air_position_index)
+      .unwrap();
+
+    level.set_grid_cell(context, air_position_to_remove, GameCellType::Food);
   }
 
   fn kill_worm(&mut self, context: &mut Context<'_>) {
@@ -84,8 +137,17 @@ pub extern "Rust" fn init(game: &mut Game, mut context: Context<'_>) {
   }
 
   game.level = Some(Level::new(&mut context));
-  let level = game.level.as_mut().unwrap();
-  level.spawn_food(&mut context);
+  game.spawn_food(&mut context);
+
+  let score_render_id = context.renderer.add_text(Text {
+    position: consts::SCORE_POSITION,
+    color: consts::SCORE_COLOR,
+    font_size: consts::SCORE_FONT_SIZE,
+    align: Align::Center,
+    text: "0".into(),
+  });
+
+  game.score_render_id = Some(score_render_id);
 }
 
 #[cfg_attr(feature = "reload", unsafe(no_mangle))]
@@ -148,13 +210,20 @@ pub extern "Rust" fn update(game: &mut Game, dt: f32, mut context: Context<'_>) 
   }
 
   let level = game.level.as_mut().unwrap();
-  let new_worm_head_position = level.calc_new_worm_head_position(game.worm_direction);
+  let worm_head_position = *level.get_worm_positions().front().unwrap();
+
+  let new_worm_head_position = match game.worm_direction {
+    Direction::Up => worm_head_position - consts::GRID_CELL_COUNTS.0,
+    Direction::Right => worm_head_position + 1,
+    Direction::Down => worm_head_position + consts::GRID_CELL_COUNTS.0,
+    Direction::Left => worm_head_position - 1,
+  };
 
   match level.get_grid_cell(new_worm_head_position) {
-    GameCellType::Air => level.move_worm(&mut context, new_worm_head_position),
+    GameCellType::Air => game.move_worm(&mut context, new_worm_head_position),
     GameCellType::Wall | GameCellType::Worm => game.kill_worm(&mut context),
     GameCellType::Food => {
-      level.spawn_food(&mut context);
+      game.spawn_food(&mut context);
       game.grow_worm(&mut context, new_worm_head_position);
     }
   }

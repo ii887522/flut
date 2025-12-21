@@ -1,3 +1,4 @@
+pub(super) mod glyph_pipeline;
 pub(super) mod model;
 pub(super) mod rect_pipeline;
 
@@ -18,6 +19,10 @@ pub(super) trait CreatingPipeline {
     swapchain_image_extent: vk::Extent2D,
     msaa_samples: vk::SampleCountFlags,
   ) -> <Self::Model as Model>::CreatedPipeline;
+
+  fn get_descriptor_set_layout(&self) -> vk::DescriptorSetLayout {
+    vk::DescriptorSetLayout::null()
+  }
 
   fn drop(self, device: &ash::Device);
 }
