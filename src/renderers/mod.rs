@@ -1,6 +1,7 @@
 mod model_renderer;
 pub(super) mod renderer;
 pub mod renderer_ref;
+mod text_renderer;
 
 use model_renderer::ModelRenderer;
 pub(super) use renderer::Renderer;

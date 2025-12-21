@@ -48,8 +48,9 @@ pub struct UpdateResp {
   pub index: u32,
 }
 
-pub struct RemoveResp {
+pub struct RemoveResp<T> {
   pub index: Option<u32>,
+  pub item: T,
 }
 
 pub struct BulkAddResp {
@@ -127,6 +128,18 @@ impl<T> SparseSet<T> {
     unsafe { slice::from_raw_parts(self.dense.as_ptr() as *const _, self.dense.len()) }
   }
 
+  pub fn get(&self, id: Id) -> Option<&T> {
+    let index = self.sparse.get(id.0 as usize)?;
+    let item = self.dense.get(index.load(Ordering::Relaxed) as usize)?;
+    unsafe { Some(&*item.0.get()) }
+  }
+
+  pub fn get_mut(&mut self, id: Id) -> Option<&mut T> {
+    let index = self.sparse.get_mut(id.0 as usize)?;
+    let item = self.dense.get_mut(*index.get_mut() as usize)?;
+    Some(item.0.get_mut())
+  }
+
   pub fn add(&mut self, item: T) -> AddResp {
     let index = self.dense.len() as _;
     self.dense.push(DenseCell::new(item));
@@ -150,9 +163,9 @@ impl<T> SparseSet<T> {
     UpdateResp { index }
   }
 
-  pub fn remove(&mut self, id: Id) -> RemoveResp {
+  pub fn remove(&mut self, id: Id) -> RemoveResp<T> {
     let dense_index = *self.sparse[id.0 as usize].get_mut();
-    self.dense.swap_remove(dense_index as _);
+    let item = self.dense.swap_remove(dense_index as _).0.into_inner();
     self.ids.swap_remove(dense_index as _);
 
     let resp = if let Some(swapped_id) = self.ids.get_mut(dense_index as usize) {
@@ -160,9 +173,10 @@ impl<T> SparseSet<T> {
 
       RemoveResp {
         index: Some(dense_index),
+        item,
       }
     } else {
-      RemoveResp { index: None }
+      RemoveResp { index: None, item }
     };
 
     self.free_ids.push(id.0);

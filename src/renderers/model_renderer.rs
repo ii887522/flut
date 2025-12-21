@@ -4,7 +4,7 @@ use crate::{
   pipelines::{self, CreatedPipeline, CreatingPipeline, Model},
   renderers::MAX_IN_FLIGHT_FRAME_COUNT,
 };
-use ash::vk;
+use ash::vk::{self, Handle};
 use rayon::prelude::*;
 use std::{collections::VecDeque, mem, ptr, slice};
 
@@ -53,7 +53,7 @@ impl<Model: pipelines::Model> ModelRenderer<Creating<Model>> {
     self,
     device: &ash::Device,
     render_pass: vk::RenderPass,
-    cache: vk::PipelineCache,
+    pipeline_cache: vk::PipelineCache,
     swapchain_image_extent: vk::Extent2D,
     msaa_samples: vk::SampleCountFlags,
   ) -> ModelRenderer<Created<Model>> {
@@ -65,12 +65,17 @@ impl<Model: pipelines::Model> ModelRenderer<Creating<Model>> {
         pipeline: self.state.pipeline.finish(
           device,
           render_pass,
-          cache,
+          pipeline_cache,
           swapchain_image_extent,
           msaa_samples,
         ),
       },
     }
+  }
+
+  #[inline]
+  pub(super) fn get_descriptor_set_layout(&self) -> vk::DescriptorSetLayout {
+    self.state.pipeline.get_descriptor_set_layout()
   }
 
   pub(super) fn drop(self, device: &ash::Device) {
@@ -118,6 +123,7 @@ impl<Model: pipelines::Model> ModelRenderer<Created<Model>> {
     &self,
     device: &ash::Device,
     graphics_command_buffer: vk::CommandBuffer,
+    descriptor_set: vk::DescriptorSet,
     push_consts: &Model::PushConsts,
   ) {
     unsafe {
@@ -126,6 +132,17 @@ impl<Model: pipelines::Model> ModelRenderer<Created<Model>> {
         vk::PipelineBindPoint::GRAPHICS,
         self.state.pipeline.get_pipeline(),
       );
+
+      if !descriptor_set.is_null() {
+        device.cmd_bind_descriptor_sets(
+          graphics_command_buffer,
+          vk::PipelineBindPoint::GRAPHICS,
+          self.state.pipeline.get_pipeline_layout(),
+          0,
+          &[descriptor_set],
+          &[],
+        );
+      }
 
       device.cmd_push_constants(
         graphics_command_buffer,

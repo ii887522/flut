@@ -1,6 +1,6 @@
 use crate::{
   collections::sparse_set,
-  models::Rect,
+  models::{Rect, Text},
   renderers::{
     Renderer,
     renderer::{Created, FinishError},
@@ -111,14 +111,86 @@ impl<'render> RendererRef<'render> {
       .into_par_iter()
       .with_min_len(MIN_SEQ_LEN)
       .map(|id| id.0)
-      .collect::<Vec<_>>();
-
-    let ids = ids.as_slice();
+      .collect::<Box<_>>();
 
     match self.0 {
-      Ok(renderer) => renderer.get_rect_renderer().bulk_remove_models(ids),
+      Ok(renderer) => renderer.get_rect_renderer().bulk_remove_models(&ids),
       Err(FinishError::WindowMinimized(renderer)) => {
-        renderer.get_rect_renderer().bulk_remove_models(ids)
+        renderer.get_rect_renderer().bulk_remove_models(&ids)
+      }
+    }
+  }
+
+  pub fn add_text(&mut self, text: Text) -> Id {
+    match self.0 {
+      Ok(renderer) => Id(renderer.get_text_renderer().add_text(text)),
+      Err(FinishError::WindowMinimized(renderer)) => {
+        Id(renderer.get_text_renderer().add_text(text))
+      }
+    }
+  }
+
+  pub fn update_text(&mut self, id: Id, text: Text) {
+    match self.0 {
+      Ok(renderer) => renderer.get_text_renderer().update_text(id.0, text),
+      Err(FinishError::WindowMinimized(renderer)) => {
+        renderer.get_text_renderer().update_text(id.0, text)
+      }
+    }
+  }
+
+  pub fn remove_text(&mut self, id: Id) {
+    match self.0 {
+      Ok(renderer) => renderer.get_text_renderer().remove_text(id.0),
+      Err(FinishError::WindowMinimized(renderer)) => renderer.get_text_renderer().remove_text(id.0),
+    }
+  }
+
+  pub fn bulk_add_text(&mut self, texts: Box<[Text]>) -> Box<[Id]> {
+    match self.0 {
+      Ok(renderer) => renderer
+        .get_text_renderer()
+        .bulk_add_text(texts)
+        .into_par_iter()
+        .with_min_len(MIN_SEQ_LEN)
+        .map(Id)
+        .collect(),
+      Err(FinishError::WindowMinimized(renderer)) => renderer
+        .get_text_renderer()
+        .bulk_add_text(texts)
+        .into_par_iter()
+        .with_min_len(MIN_SEQ_LEN)
+        .map(Id)
+        .collect(),
+    }
+  }
+
+  pub fn bulk_update_text(&mut self, updates: Box<[(Id, Text)]>) {
+    let updates = updates
+      .into_par_iter()
+      .with_min_len(MIN_SEQ_LEN)
+      .map(|(id, text)| (id.0, text))
+      .collect();
+
+    match self.0 {
+      Ok(renderer) => renderer.get_text_renderer().bulk_update_text(updates),
+      Err(FinishError::WindowMinimized(renderer)) => {
+        renderer.get_text_renderer().bulk_update_text(updates)
+      }
+    }
+  }
+
+  pub fn bulk_remove_text(&mut self, ids: &[Id]) {
+    let ids = ids
+      .into_par_iter()
+      .with_min_len(MIN_SEQ_LEN)
+      .map(|id| id.0)
+      .collect::<Box<_>>();
+
+    match self.0 {
+      Ok(renderer) => renderer.get_text_renderer().bulk_remove_text(&ids),
+      Err(FinishError::WindowMinimized(renderer)) => {
+        renderer.get_text_renderer().bulk_remove_text(&ids)
       }
     }
   }

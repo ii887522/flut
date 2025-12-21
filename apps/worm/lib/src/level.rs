@@ -1,4 +1,4 @@
-use crate::{Direction, GameCell, GameCellType, consts, models::DirectedEdges, utils};
+use crate::{GameCell, GameCellType, consts, models::DirectedEdges, utils};
 use fastrand::Rng;
 use flut::{Context, models::Rect};
 use indexmap::IndexSet;
@@ -474,38 +474,24 @@ impl Level {
     );
   }
 
-  pub(super) fn calc_new_worm_head_position(&self, worm_direction: Direction) -> u16 {
-    let worm_head_position = *self.worm_positions.front().unwrap();
-
-    match worm_direction {
-      Direction::Up => worm_head_position - consts::GRID_CELL_COUNTS.0,
-      Direction::Right => worm_head_position + 1,
-      Direction::Down => worm_head_position + consts::GRID_CELL_COUNTS.0,
-      Direction::Left => worm_head_position - 1,
-    }
+  #[inline]
+  pub(super) const fn get_worm_positions(&self) -> &VecDeque<u16> {
+    &self.worm_positions
   }
 
-  pub(super) fn move_worm(&mut self, context: &mut Context<'_>, new_worm_head_position: u16) {
-    let worm_tail_position = self.worm_positions.pop_back().unwrap();
-    self.worm_positions.push_front(new_worm_head_position);
-    self.air_positions.swap_remove(&new_worm_head_position);
-    self.air_positions.insert(worm_tail_position);
-    self.set_grid_cell(context, worm_tail_position, GameCellType::Air);
-    self.set_grid_cell(context, new_worm_head_position, GameCellType::Worm);
+  #[inline]
+  pub(super) const fn get_worm_positions_mut(&mut self) -> &mut VecDeque<u16> {
+    &mut self.worm_positions
   }
 
-  pub(super) fn grow_worm(&mut self, context: &mut Context<'_>, new_worm_head_position: u16) {
-    self.worm_positions.push_front(new_worm_head_position);
-    self.set_grid_cell(context, new_worm_head_position, GameCellType::Worm);
+  #[inline]
+  pub(super) const fn get_air_positions(&self) -> &IndexSet<u16> {
+    &self.air_positions
   }
 
-  pub(super) fn spawn_food(&mut self, context: &mut Context<'_>) {
-    let air_position_to_remove = self
-      .air_positions
-      .swap_remove_index(fastrand::usize(..self.air_positions.len()))
-      .unwrap();
-
-    self.set_grid_cell(context, air_position_to_remove, GameCellType::Food);
+  #[inline]
+  pub(super) const fn get_air_positions_mut(&mut self) -> &mut IndexSet<u16> {
+    &mut self.air_positions
   }
 }
 
