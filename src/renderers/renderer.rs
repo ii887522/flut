@@ -1,11 +1,8 @@
 use crate::{
   models::{AtlasSizes, ModelCapacities},
-  pipelines::{
-    glyph_pipeline::{Glyph, GlyphPushConsts},
-    rect_pipeline::{Rect, RectPushConsts},
-  },
+  pipelines::glyph_pipeline::{Glyph, GlyphPushConsts},
   renderers::{
-    MAX_IN_FLIGHT_FRAME_COUNT, ModelRenderer, model_renderer,
+    MAX_IN_FLIGHT_FRAME_COUNT,
     text_renderer::{self, TextRenderer},
   },
 };
@@ -28,7 +25,6 @@ pub(crate) enum FinishError {
 }
 
 pub(crate) struct Creating {
-  rect_renderer: ModelRenderer<model_renderer::Creating<Rect>>,
   text_renderer: TextRenderer<text_renderer::Creating>,
 }
 
@@ -41,7 +37,6 @@ pub(crate) struct Created {
   msaa_color_image_alloc: Option<vk_mem::Allocation>,
   msaa_color_image_view: vk::ImageView,
   framebuffers: Box<[vk::Framebuffer]>,
-  rect_renderer: ModelRenderer<model_renderer::Created<Rect>>,
   text_renderer: TextRenderer<text_renderer::Created>,
   frame_index: usize,
 }
@@ -907,9 +902,6 @@ impl Renderer<Creating> {
         )
         .unwrap();
     }
-
-    let rect_renderer = ModelRenderer::new(&vk_device, model_capacities.rect_capacity);
-
     let text_renderer = TextRenderer::new(
       window,
       &vk_device,
@@ -992,10 +984,7 @@ impl Renderer<Creating> {
       atlas_sizes,
       cam_position: None,
       cam_size: None,
-      state: Creating {
-        rect_renderer,
-        text_renderer,
-      },
+      state: Creating { text_renderer },
     }
   }
 
@@ -1210,14 +1199,6 @@ impl Renderer<Creating> {
       })
       .collect::<Box<_>>();
 
-    let rect_renderer = self.state.rect_renderer.finish(
-      &self.vk_device,
-      self.render_pass,
-      self.pipeline_cache,
-      swapchain_image_extent,
-      self.msaa_samples,
-    );
-
     let text_renderer = self.state.text_renderer.finish(
       &self.vk_device,
       self.render_pass,
@@ -1274,18 +1255,10 @@ impl Renderer<Creating> {
         msaa_color_image_alloc,
         msaa_color_image_view,
         framebuffers,
-        rect_renderer,
         text_renderer,
         frame_index: 0,
       },
     })
-  }
-
-  #[inline]
-  pub(super) const fn get_rect_renderer(
-    &mut self,
-  ) -> &mut ModelRenderer<model_renderer::Creating<Rect>> {
-    &mut self.state.rect_renderer
   }
 
   #[inline]
@@ -1301,8 +1274,6 @@ impl Renderer<Creating> {
         .state
         .text_renderer
         .drop(&self.vk_device, &self.vk_allocator);
-
-      self.state.rect_renderer.drop(&self.vk_device);
 
       self
         .vk_device
@@ -1370,13 +1341,6 @@ impl Renderer<Creating> {
 }
 
 impl Renderer<Created> {
-  #[inline]
-  pub(super) const fn get_rect_renderer(
-    &mut self,
-  ) -> &mut ModelRenderer<model_renderer::Created<Rect>> {
-    &mut self.state.rect_renderer
-  }
-
   #[inline]
   pub(super) const fn get_text_renderer(&mut self) -> &mut TextRenderer<text_renderer::Created> {
     &mut self.state.text_renderer
@@ -1513,23 +1477,12 @@ impl Renderer<Created> {
         Err(err) => panic!("{err}"),
       };
 
-      let rect_capacity_size =
-        self.state.rect_renderer.get_model_capacity() * mem::size_of::<Rect>();
-
       let glyph_capacity_size = self
         .state
         .text_renderer
         .get_glyph_renderer()
         .get_model_capacity()
         * mem::size_of::<Glyph>();
-
-      let total_model_capacity_size = rect_capacity_size + glyph_capacity_size;
-
-      self.state.rect_renderer.flush_writes(
-        self
-          .model_buffer_data
-          .byte_add(self.state.frame_index * total_model_capacity_size) as *mut Rect,
-      );
 
       self
         .state
@@ -1538,8 +1491,7 @@ impl Renderer<Created> {
         .flush_writes(
           self
             .model_buffer_data
-            .byte_add(self.state.frame_index * total_model_capacity_size + rect_capacity_size)
-            as *mut Glyph,
+            .byte_add(self.state.frame_index * glyph_capacity_size) as *mut Glyph,
         );
 
       self
@@ -1605,16 +1557,9 @@ impl Renderer<Created> {
         cam_size.1 / window_display_scale,
       );
 
-      let rect_push_consts = RectPushConsts {
-        rect_buffer: self.model_buffer_addr
-          + (self.state.frame_index * total_model_capacity_size) as u64,
-        cam_position: actual_cam_position,
-        cam_size: actual_cam_size,
-      };
-
       let glyph_push_consts = GlyphPushConsts {
         glyph_buffer: self.model_buffer_addr
-          + (self.state.frame_index * total_model_capacity_size + rect_capacity_size) as u64,
+          + (self.state.frame_index * glyph_capacity_size) as u64,
         cam_position: actual_cam_position,
         cam_size: actual_cam_size,
         atlas_size: (
@@ -1622,13 +1567,6 @@ impl Renderer<Created> {
           self.atlas_sizes.glyph_atlas_size.1 as _,
         ),
       };
-
-      self.state.rect_renderer.record_draw_commands(
-        &self.vk_device,
-        graphics_command_buffer,
-        vk::DescriptorSet::null(),
-        &rect_push_consts,
-      );
 
       self
         .state
@@ -1732,7 +1670,6 @@ impl Renderer<Created> {
     }
 
     let text_renderer = self.state.text_renderer.on_swapchain_suboptimal();
-    let rect_renderer = self.state.rect_renderer.on_swapchain_suboptimal();
 
     unsafe {
       self
@@ -1801,10 +1738,7 @@ impl Renderer<Created> {
       atlas_sizes: self.atlas_sizes,
       cam_position: self.cam_position,
       cam_size: self.cam_size,
-      state: Creating {
-        rect_renderer,
-        text_renderer,
-      },
+      state: Creating { text_renderer },
     }
   }
 
@@ -1816,8 +1750,6 @@ impl Renderer<Created> {
         .state
         .text_renderer
         .drop(&self.vk_device, &self.vk_allocator);
-
-      self.state.rect_renderer.drop(&self.vk_device);
 
       self
         .state

@@ -1,6 +1,5 @@
 pub(super) mod glyph_pipeline;
 pub(super) mod model;
-pub(super) mod rect_pipeline;
 
 pub(super) use model::Model;
 

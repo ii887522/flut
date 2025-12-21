@@ -394,13 +394,6 @@ impl TextRenderer<Created> {
   }
 
   #[inline]
-  pub(super) const fn get_glyph_renderer_mut(
-    &mut self,
-  ) -> &mut ModelRenderer<model_renderer::Created<Glyph>> {
-    &mut self.state.glyph_renderer
-  }
-
-  #[inline]
   pub(super) const fn get_descriptor_set(&self) -> vk::DescriptorSet {
     self.descriptor_sets[self.read_image_index]
   }
@@ -669,6 +662,11 @@ impl TextRenderer<Created> {
 }
 
 impl<S: State> TextRenderer<S> {
+  #[inline]
+  pub(super) fn get_glyph_renderer_mut(&mut self) -> &mut ModelRenderer<S::GlyphState> {
+    self.state.get_glyph_renderer_mut()
+  }
+
   pub(super) fn add_text(&mut self, text: Text) -> Id {
     let text_id = self.prepare_text(text);
     let add_resp = self.text_ids.add(text_id);

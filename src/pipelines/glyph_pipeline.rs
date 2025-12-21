@@ -1,4 +1,7 @@
-use crate::pipelines::{CreatedPipeline, CreatingPipeline, Model};
+use crate::{
+  models,
+  pipelines::{CreatedPipeline, CreatingPipeline, Model},
+};
 use ash::vk::{self, Handle};
 use std::{ffi::CString, mem};
 
@@ -28,6 +31,18 @@ impl Model for Glyph {
   #[inline]
   fn get_vertex_count() -> usize {
     6
+  }
+}
+
+impl From<models::Rect> for Glyph {
+  fn from(rect: models::Rect) -> Self {
+    Self {
+      position: rect.position,
+      size: rect.size,
+      color: rect.color,
+      atlas_position: (-1.0, -1.0),
+      atlas_size: (0.0, 0.0),
+    }
   }
 }
 
