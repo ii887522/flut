@@ -471,7 +471,13 @@ impl TextRenderer<Created> {
           return (pixels, regions);
         };
 
-        let mut canvas = Canvas::new(Vector2I::new(size.0 as _, size.1 as _), Format::A8);
+        let mut canvas = Canvas::new(
+          Vector2I::new(
+            (size.0 as i32) + (GLYPH_MARGIN << 1),
+            (size.1 as i32) + (GLYPH_MARGIN << 1),
+          ),
+          Format::A8,
+        );
 
         self
           .font
@@ -479,7 +485,10 @@ impl TextRenderer<Created> {
             &mut canvas,
             glyph_id,
             glyph_key.font_size as f32 * self.window_display_scale * RESOLUTION_SCALE,
-            Transform2F::from_translation(Vector2F::new(-origin.0, -origin.1)),
+            Transform2F::from_translation(Vector2F::new(
+              GLYPH_MARGIN as f32 - origin.0,
+              GLYPH_MARGIN as f32 - origin.1,
+            )),
             HintingOptions::Vertical(glyph_key.font_size as f32 * self.window_display_scale),
             RasterizationOptions::GrayscaleAa,
           )
@@ -496,13 +505,13 @@ impl TextRenderer<Created> {
             layer_count: 1,
           },
           image_offset: vk::Offset3D {
-            x: position.0 as _,
-            y: position.1 as _,
+            x: (position.0 as i32) - GLYPH_MARGIN,
+            y: (position.1 as i32) - GLYPH_MARGIN,
             z: 0,
           },
           image_extent: vk::Extent3D {
-            width: size.0 as _,
-            height: size.1 as _,
+            width: ((size.0 as i32) + (GLYPH_MARGIN << 1)) as _,
+            height: ((size.1 as i32) + (GLYPH_MARGIN << 1)) as _,
             depth: 1,
           },
           ..Default::default()
