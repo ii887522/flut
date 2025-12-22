@@ -8,7 +8,7 @@ mod utils;
 
 use crate::{
   level::Level,
-  models::{Direction, GameCell, GameCellType},
+  models::{Countdown, Direction, GameCell, GameCellType},
 };
 use flut::{
   Context, Event, Keycode,
@@ -27,6 +27,7 @@ const SHAKE_STRENGTH: f32 = 64.0;
 pub struct Game {
   level: Option<Level>,
   score_render_id: Option<renderer_ref::Id>,
+  countdown: Option<Countdown>,
   worm_direction: Direction,
   input_worm_direction: Option<Direction>,
   worm_move_music: Option<StreamingSoundHandle<FromFileError>>,
@@ -48,6 +49,7 @@ impl Game {
     Self {
       level: None,
       score_render_id: None,
+      countdown: None,
       worm_direction: Direction::rand(),
       input_worm_direction: None,
       worm_move_music: None,
@@ -55,6 +57,69 @@ impl Game {
       accum: 0.0,
       shake_accum: 0.0,
     }
+  }
+
+  fn update_countdown(&mut self, dt: f32, context: &mut Context<'_>) -> bool {
+    let Some(countdown) = self.countdown.as_mut() else {
+      return false;
+    };
+
+    countdown.accum += dt;
+
+    if countdown.accum < consts::COUNTDOWN_INTERVAL {
+      let t = countdown.accum / consts::COUNTDOWN_INTERVAL;
+
+      context.renderer.update_text(
+        countdown.render_id,
+        Text {
+          position: consts::COUNTDOWN_POSITION,
+          color: (
+            consts::COUNTDOWN_COLOR.0,
+            consts::COUNTDOWN_COLOR.1,
+            consts::COUNTDOWN_COLOR.1,
+            consts::COUNTDOWN_MAX_ALPHA * (1.0 - t),
+          ),
+          font_size: consts::COUNTDOWN_MIN_FONT_SIZE
+            + (t * (consts::COUNTDOWN_MAX_FONT_SIZE - consts::COUNTDOWN_MIN_FONT_SIZE) as f32)
+              as u16,
+          align: Align::Center,
+          text: countdown.countdown.to_string().into(),
+        },
+      );
+
+      return true;
+    }
+
+    countdown.accum -= consts::COUNTDOWN_INTERVAL;
+    countdown.countdown -= 1;
+
+    if countdown.countdown > 0 {
+      context.renderer.update_text(
+        countdown.render_id,
+        Text {
+          position: consts::COUNTDOWN_POSITION,
+          color: (1.0, 1.0, 1.0, 0.5),
+          font_size: consts::COUNTDOWN_MIN_FONT_SIZE,
+          align: Align::Center,
+          text: countdown.countdown.to_string().into(),
+        },
+      );
+    } else {
+      // Worm start moving
+      if let Some(audio_manager) = context.audio_manager
+        && let Some(mut worm_move_music) =
+          audio_manager.play_music("assets/worm/audios/worm_move.mp3")
+      {
+        worm_move_music.set_loop_region(0.2..);
+        worm_move_music.set_volume(-10.0, Tween::default());
+        self.worm_move_music = Some(worm_move_music);
+      }
+
+      context.renderer.remove_text(countdown.render_id);
+      self.countdown = None;
+    }
+
+    true
   }
 
   fn move_worm(&mut self, context: &mut Context<'_>, new_worm_head_position: u16) {
@@ -124,18 +189,22 @@ impl Game {
 
     self.worm_dead = true;
   }
+
+  fn shake(&mut self, context: &mut Context<'_>) {
+    if self.shake_accum < SHAKE_DURATION {
+      context.renderer.set_cam_position(Some((
+        fastrand::f32() * SHAKE_STRENGTH,
+        fastrand::f32() * SHAKE_STRENGTH,
+      )));
+    } else {
+      self.shake_accum = SHAKE_DURATION;
+      context.renderer.set_cam_position(None);
+    }
+  }
 }
 
 #[cfg_attr(feature = "reload", unsafe(no_mangle))]
 pub extern "Rust" fn init(game: &mut Game, mut context: Context<'_>) {
-  if let Some(audio_manager) = context.audio_manager
-    && let Some(mut worm_move_music) = audio_manager.play_music("assets/worm/audios/worm_move.mp3")
-  {
-    worm_move_music.set_loop_region(0.2..);
-    worm_move_music.set_volume(-10.0, Tween::default());
-    game.worm_move_music = Some(worm_move_music);
-  }
-
   game.level = Some(Level::new(&mut context));
   game.spawn_food(&mut context);
 
@@ -148,6 +217,20 @@ pub extern "Rust" fn init(game: &mut Game, mut context: Context<'_>) {
   });
 
   game.score_render_id = Some(score_render_id);
+
+  let countdown_render_id = context.renderer.add_text(Text {
+    position: consts::COUNTDOWN_POSITION,
+    color: (1.0, 1.0, 1.0, 0.5),
+    font_size: consts::COUNTDOWN_MIN_FONT_SIZE,
+    align: Align::Center,
+    text: consts::MAX_COUNTDOWN.to_string().into(),
+  });
+
+  game.countdown = Some(Countdown {
+    countdown: consts::MAX_COUNTDOWN,
+    render_id: countdown_render_id,
+    accum: 0.0,
+  });
 }
 
 #[cfg_attr(feature = "reload", unsafe(no_mangle))]
@@ -156,21 +239,25 @@ pub extern "Rust" fn process_event(game: &mut Game, event: Event) {
     Event::KeyDown {
       keycode: Some(Keycode::W | Keycode::Up),
       ..
-    } if game.worm_direction != Direction::Down => game.input_worm_direction = Some(Direction::Up),
+    } if game.worm_direction != Direction::Down || game.countdown.is_some() => {
+      game.input_worm_direction = Some(Direction::Up)
+    }
     Event::KeyDown {
       keycode: Some(Keycode::D | Keycode::Right),
       ..
-    } if game.worm_direction != Direction::Left => {
+    } if game.worm_direction != Direction::Left || game.countdown.is_some() => {
       game.input_worm_direction = Some(Direction::Right)
     }
     Event::KeyDown {
       keycode: Some(Keycode::S | Keycode::Down),
       ..
-    } if game.worm_direction != Direction::Up => game.input_worm_direction = Some(Direction::Down),
+    } if game.worm_direction != Direction::Up || game.countdown.is_some() => {
+      game.input_worm_direction = Some(Direction::Down)
+    }
     Event::KeyDown {
       keycode: Some(Keycode::A | Keycode::Left),
       ..
-    } if game.worm_direction != Direction::Right => {
+    } if game.worm_direction != Direction::Right || game.countdown.is_some() => {
       game.input_worm_direction = Some(Direction::Left)
     }
     _ => {}
@@ -179,6 +266,10 @@ pub extern "Rust" fn process_event(game: &mut Game, event: Event) {
 
 #[cfg_attr(feature = "reload", unsafe(no_mangle))]
 pub extern "Rust" fn update(game: &mut Game, dt: f32, mut context: Context<'_>) {
+  if game.update_countdown(dt, &mut context) {
+    return;
+  }
+
   game.accum += dt;
 
   if game.worm_dead {
@@ -192,16 +283,7 @@ pub extern "Rust" fn update(game: &mut Game, dt: f32, mut context: Context<'_>) 
   game.accum -= 1.0 / consts::UPDATES_PER_SECOND;
 
   if game.worm_dead {
-    if game.shake_accum < SHAKE_DURATION {
-      context.renderer.set_cam_position(Some((
-        fastrand::f32() * SHAKE_STRENGTH,
-        fastrand::f32() * SHAKE_STRENGTH,
-      )));
-    } else {
-      game.shake_accum = SHAKE_DURATION;
-      context.renderer.set_cam_position(None);
-    }
-
+    game.shake(&mut context);
     return;
   }
 
