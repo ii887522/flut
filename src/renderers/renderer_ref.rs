@@ -1,6 +1,6 @@
 use crate::{
   collections::sparse_set,
-  models::{Rect, Text},
+  models::{Rect, RoundRect, Text},
   renderers::{
     Renderer,
     renderer::{Created, FinishError},
@@ -144,6 +144,92 @@ impl<'render> RendererRef<'render> {
         .get_text_renderer()
         .get_glyph_renderer_mut()
         .bulk_remove_models(&ids),
+    }
+  }
+
+  pub fn add_round_rect(&mut self, rect: RoundRect) -> Id {
+    match self.0 {
+      Ok(renderer) => Id(renderer.get_round_rect_renderer().add_model(rect.into())),
+      Err(FinishError::WindowMinimized(renderer)) => {
+        Id(renderer.get_round_rect_renderer().add_model(rect.into()))
+      }
+    }
+  }
+
+  pub fn update_round_rect(&mut self, id: Id, rect: RoundRect) {
+    match self.0 {
+      Ok(renderer) => renderer
+        .get_round_rect_renderer()
+        .update_model(id.0, rect.into()),
+      Err(FinishError::WindowMinimized(renderer)) => renderer
+        .get_round_rect_renderer()
+        .update_model(id.0, rect.into()),
+    }
+  }
+
+  pub fn remove_round_rect(&mut self, id: Id) {
+    match self.0 {
+      Ok(renderer) => renderer.get_round_rect_renderer().remove_model(id.0),
+      Err(FinishError::WindowMinimized(renderer)) => {
+        renderer.get_round_rect_renderer().remove_model(id.0)
+      }
+    }
+  }
+
+  pub fn bulk_add_round_rects(&mut self, rects: Box<[RoundRect]>) -> Box<[Id]> {
+    let rects = rects
+      .into_par_iter()
+      .with_min_len(MIN_SEQ_LEN)
+      .map(|rect| rect.into())
+      .collect();
+
+    match self.0 {
+      Ok(renderer) => renderer
+        .get_round_rect_renderer()
+        .bulk_add_models(rects)
+        .into_par_iter()
+        .with_min_len(MIN_SEQ_LEN)
+        .map(Id)
+        .collect(),
+      Err(FinishError::WindowMinimized(renderer)) => renderer
+        .get_round_rect_renderer()
+        .bulk_add_models(rects)
+        .into_par_iter()
+        .with_min_len(MIN_SEQ_LEN)
+        .map(Id)
+        .collect(),
+    }
+  }
+
+  pub fn bulk_update_round_rects(&mut self, updates: Box<[(Id, RoundRect)]>) {
+    let updates = updates
+      .into_par_iter()
+      .with_min_len(MIN_SEQ_LEN)
+      .map(|(id, rect)| (id.0, rect.into()))
+      .collect();
+
+    match self.0 {
+      Ok(renderer) => renderer
+        .get_round_rect_renderer()
+        .bulk_update_models(updates),
+      Err(FinishError::WindowMinimized(renderer)) => renderer
+        .get_round_rect_renderer()
+        .bulk_update_models(updates),
+    }
+  }
+
+  pub fn bulk_remove_round_rects(&mut self, ids: &[Id]) {
+    let ids = ids
+      .into_par_iter()
+      .with_min_len(MIN_SEQ_LEN)
+      .map(|id| id.0)
+      .collect::<Box<_>>();
+
+    match self.0 {
+      Ok(renderer) => renderer.get_round_rect_renderer().bulk_remove_models(&ids),
+      Err(FinishError::WindowMinimized(renderer)) => {
+        renderer.get_round_rect_renderer().bulk_remove_models(&ids)
+      }
     }
   }
 

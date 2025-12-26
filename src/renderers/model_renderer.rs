@@ -126,6 +126,10 @@ impl<Model: pipelines::Model> ModelRenderer<Created<Model>> {
     descriptor_set: vk::DescriptorSet,
     push_consts: &Model::PushConsts,
   ) {
+    if self.models.is_empty() {
+      return;
+    }
+
     unsafe {
       device.cmd_bind_pipeline(
         graphics_command_buffer,

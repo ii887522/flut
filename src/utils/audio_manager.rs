@@ -11,7 +11,7 @@ pub struct AudioManager {
 }
 
 impl AudioManager {
-  pub(super) fn new() -> Self {
+  pub(crate) fn new() -> Self {
     Self {
       audio_manager: match kira::AudioManager::<kira::DefaultBackend>::new(
         kira::AudioManagerSettings::default(),

@@ -2,15 +2,14 @@
 #![allow(clippy::needless_lifetimes, clippy::too_many_arguments)]
 
 pub mod app;
-pub mod audio_manager;
 pub mod collections;
 pub mod context;
 pub mod models;
 mod pipelines;
 pub mod renderers;
+pub mod utils;
 
 pub use app::App;
-pub use audio_manager::AudioManager;
 pub use context::Context;
 pub use sdl3::{event::Event, keyboard::Keycode};
 
