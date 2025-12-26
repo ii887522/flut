@@ -22,6 +22,7 @@ fn main() {
     .favicon_path("assets/worm/images/favicon.png")
     .model_capacities(ModelCapacities {
       glyph_capacity: 4096,
+      ..Default::default()
     })
     .call();
 }

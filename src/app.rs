@@ -1,10 +1,11 @@
 use crate::{
-  AudioManager, Context,
+  Context,
   models::{AtlasSizes, ModelCapacities},
   renderers::{
     Renderer, RendererRef,
     renderer::{AnyRenderer, FinishError},
   },
+  utils::AudioManager,
 };
 use optarg2chain::optarg_fn;
 use sdl3::{

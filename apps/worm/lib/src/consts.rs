@@ -1,7 +1,7 @@
 // General settings
 pub(super) const MIN_SEQ_LEN: usize = 256;
 pub const WINDOW_SIZE: (u32, u32) = (1280, 720);
-pub(super) const UPDATES_PER_SECOND: f32 = 28.0;
+pub(super) const UPDATES_PER_SECOND: f32 = 24.0;
 
 // Grid settings
 pub(super) const GRID_MARGIN: f32 = 56.0;
