@@ -13,6 +13,6 @@ void main() {
   const float d = length(max(abs(local_pos) - half_size + vec2(radius), vec2(0.0))) - radius;
 
   // Anti-aliasing for smoother edges
-  const float alpha = 1.0 - smoothstep(0.0, 1.5, d);
+  const float alpha = 1.0 - smoothstep(0.0, 1.5, d / fwidth(d));
   out_color = vec4(color.rgb, color.a * alpha);
 }

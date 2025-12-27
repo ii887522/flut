@@ -14,24 +14,25 @@ pub(super) const SCORE_MARGIN: f32 = 44.0;
 pub(super) const SCORE_FONT_SIZE: u16 = 48;
 pub(super) const SCORE_COLOR: (f32, f32, f32, f32) = (1.0, 1.0, 1.0, 1.0);
 
-// Countdown settings
-pub(super) const MAX_COUNTDOWN: u32 = 3;
-pub(super) const COUNTDOWN_MIN_FONT_SIZE: u16 = 64;
-pub(super) const COUNTDOWN_MAX_FONT_SIZE: u16 = 128;
-pub(super) const COUNTDOWN_INTERVAL: f32 = 0.75;
-pub(super) const COUNTDOWN_COLOR: (f32, f32, f32) = (1.0, 1.0, 1.0);
-pub(super) const COUNTDOWN_MAX_ALPHA: f32 = 0.5;
+// Dialog settings
+pub(super) const MAX_DIALOG_SIZE: (f32, f32) = (512.0, 256.0);
+pub(super) const DIALOG_COLOR: (f32, f32, f32, f32) = (1.0, 0.0, 0.0, 1.0);
+pub(super) const DIALOG_BORDER_RADIUS: f32 = 16.0;
 
 // Computed grid settings
 pub(super) const GRID_POSITION: (f32, f32) =
   ((WINDOW_SIZE.0 as f32 - GRID_SIZE.0) * 0.5, GRID_MARGIN);
-pub(super) const SCORE_POSITION: (f32, f32) = (WINDOW_SIZE.0 as f32 * 0.5, SCORE_MARGIN);
-pub(super) const COUNTDOWN_POSITION: (f32, f32) = (
-  WINDOW_SIZE.0 as f32 * 0.5,
-  WINDOW_SIZE.1 as f32 * 0.5 + COUNTDOWN_MAX_FONT_SIZE as f32 * 0.5,
-);
 pub(super) const GRID_CELL_COUNTS: (u16, u16) = (
   ((GRID_SIZE.0 + GRID_CELL_MARGIN.0) / (GRID_CELL_SIZE.0 + GRID_CELL_MARGIN.0)) as _,
   ((GRID_SIZE.1 + GRID_CELL_MARGIN.1) / (GRID_CELL_SIZE.1 + GRID_CELL_MARGIN.1)) as _,
 );
 pub(super) const TOTAL_GRID_CELL_COUNT: u16 = GRID_CELL_COUNTS.0 * GRID_CELL_COUNTS.1;
+
+// Computed score settings
+pub(super) const SCORE_POSITION: (f32, f32) = (WINDOW_SIZE.0 as f32 * 0.5, SCORE_MARGIN);
+
+// Computed dialog settings
+pub(super) const MIN_DIALOG_POSITION: (f32, f32) = (
+  (WINDOW_SIZE.0 as f32 - MAX_DIALOG_SIZE.0) * 0.5,
+  (WINDOW_SIZE.1 as f32 - MAX_DIALOG_SIZE.1) * 0.5,
+);

@@ -18,7 +18,7 @@ use std::{borrow::Cow, time::Instant};
 
 pub trait App {
   fn init(&mut self, _context: Context<'_>) {}
-  fn process_event(&mut self, _event: Event) {}
+  fn process_event(&mut self, _event: Event, _context: Context<'_>) {}
   fn update(&mut self, _dt: f32, _context: Context<'_>) {}
 }
 
@@ -51,23 +51,33 @@ pub fn run<A: App>(
     .build()
     .unwrap();
 
-  match window.get_display() {
+  let window_content_scale = match window.get_display() {
     Ok(window_display) => match window_display.get_content_scale() {
-      Ok(display_content_scale) => match window.set_size(
-        (size.0 as f32 * display_content_scale) as _,
-        (size.1 as f32 * display_content_scale) as _,
-      ) {
-        Ok(_) => {
-          if !window.set_position(WindowPos::Centered, WindowPos::Centered) {
-            println!("Failed to re-center the window");
+      Ok(display_content_scale) => {
+        match window.set_size(
+          (size.0 as f32 * display_content_scale) as _,
+          (size.1 as f32 * display_content_scale) as _,
+        ) {
+          Ok(_) => {
+            if !window.set_position(WindowPos::Centered, WindowPos::Centered) {
+              println!("Failed to re-center the window");
+            }
           }
-        }
-        Err(err) => println!("Failed to calibrate window size: {err}"),
-      },
-      Err(err) => println!("Failed to get display content scale: {err}"),
+          Err(err) => println!("Failed to calibrate window size: {err}"),
+        };
+
+        display_content_scale
+      }
+      Err(err) => {
+        println!("Failed to get display content scale: {err}. Fallback to 1.0");
+        1.0
+      }
     },
-    Err(err) => println!("Failed to get window display: {err}"),
-  }
+    Err(err) => {
+      println!("Failed to get window display: {err}");
+      1.0
+    }
+  };
 
   if let Ok(favicon) = Surface::from_file(&*favicon_path) {
     window.set_icon(favicon);
@@ -79,6 +89,7 @@ pub fn run<A: App>(
   app.init(Context {
     audio_manager: &mut audio_manager,
     renderer: RendererRef::new(&mut vk_renderer),
+    window_content_scale,
   });
 
   window.show();
@@ -98,7 +109,14 @@ pub fn run<A: App>(
             win_event: WindowEvent::Minimized,
             ..
           } => break 'hot,
-          event => app.process_event(event),
+          event => app.process_event(
+            event,
+            Context {
+              audio_manager: &mut audio_manager,
+              renderer: RendererRef::new(&mut vk_renderer),
+              window_content_scale,
+            },
+          ),
         }
       }
 
@@ -129,6 +147,7 @@ pub fn run<A: App>(
           Context {
             audio_manager: &mut audio_manager,
             renderer: RendererRef::new(&mut vk_renderer),
+            window_content_scale,
           },
         );
 

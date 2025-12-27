@@ -8,7 +8,7 @@ mod tests {
   }
 
   /// Import the coalesce_writes function from the crate
-  use flut::coalesce_writes;
+  use flut::utils::coalesce_writes;
 
   #[test]
   fn test_empty_vector() {

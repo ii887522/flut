@@ -13,7 +13,9 @@ use crate::{
   states::{Preparing, State},
 };
 use flut::{
-  Context, Event, Keycode,
+  Context,
+  event::Event,
+  keyboard::Keycode,
   models::{Align, Text},
   renderers::renderer_ref,
 };
@@ -82,7 +84,7 @@ pub extern "Rust" fn init(game: &mut Game, mut context: Context<'_>) {
 }
 
 #[cfg_attr(feature = "reload", unsafe(no_mangle))]
-pub extern "Rust" fn process_event(game: &mut Game, event: Event) {
+pub extern "Rust" fn process_event(game: &mut Game, event: Event, context: Context<'_>) {
   match event {
     Event::KeyDown {
       keycode: Some(Keycode::W | Keycode::Up),
@@ -110,6 +112,14 @@ pub extern "Rust" fn process_event(game: &mut Game, event: Event) {
     }
     _ => {}
   }
+
+  game.state = match mem::replace(&mut game.state, State::Pending) {
+    State::DialogShown(dialog_shown) => {
+      State::DialogShown(dialog_shown.process_event(event, &context))
+    }
+    State::Pending => unreachable!("game.state is State::Pending"),
+    state => state,
+  };
 }
 
 #[cfg_attr(feature = "reload", unsafe(no_mangle))]
@@ -121,7 +131,9 @@ pub extern "Rust" fn update(game: &mut Game, dt: f32, mut context: Context<'_>) 
   game.state = match mem::replace(&mut game.state, State::Pending) {
     State::Preparing(preparing) => preparing.update(dt, &mut context),
     State::Playing(playing) => playing.update(game, dt, &mut context),
-    State::Shaking(shaking) => State::Shaking(shaking.update(dt, &mut context)),
+    State::Shaking(shaking) => shaking.update(dt, &mut context),
+    State::ShowingDialog(showing_dialog) => showing_dialog.update(dt, &mut context),
+    State::DialogShown(dialog_shown) => State::DialogShown(dialog_shown.update(dt, &mut context)),
     State::Pending => unreachable!("game.state is State::Pending"),
   };
 }

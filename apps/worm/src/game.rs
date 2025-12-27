@@ -1,4 +1,4 @@
-use flut::{App, Context, Event};
+use flut::{App, Context, event::Event};
 
 #[cfg(feature = "reload")]
 #[hot_lib_reloader::hot_module(
@@ -6,7 +6,7 @@ use flut::{App, Context, Event};
   lib_dir = if cfg!(debug_assertions) { "apps/worm/lib/target/debug" } else { "apps/worm/lib/target/release" }
 )]
 mod lib {
-  use flut::{Context, Event};
+  use flut::{Context, event::Event};
   pub use worm_lib::Game;
 
   hot_functions_from_file!("apps/worm/lib/src/lib.rs");
@@ -31,8 +31,8 @@ impl App for Game {
   }
 
   #[inline]
-  fn process_event(&mut self, event: Event) {
-    lib::process_event(&mut self.0, event);
+  fn process_event(&mut self, event: Event, context: Context<'_>) {
+    lib::process_event(&mut self.0, event, context);
   }
 
   #[inline]

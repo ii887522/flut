@@ -44,6 +44,6 @@ void main() {
 
   frag_color = round_rect.color;
   frag_local_pos = (position - vec2(0.5)) * round_rect.size;
-  frag_half_size = round_rect.size * 0.5;
+  frag_half_size = round_rect.size * 0.5 - vec2(1.0); // - vec2(1.0) to leave some headroom for anti-aliasing
   frag_radius = round_rect.radius;
 }
