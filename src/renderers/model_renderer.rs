@@ -3,6 +3,7 @@ use crate::{
   models::Write,
   pipelines::{self, CreatedPipeline, CreatingPipeline, Model},
   renderers::MAX_IN_FLIGHT_FRAME_COUNT,
+  utils,
 };
 use ash::vk::{self, Handle};
 use rayon::prelude::*;
@@ -91,7 +92,7 @@ impl<Model: pipelines::Model> ModelRenderer<Created<Model>> {
 
   pub(super) fn flush_writes(&mut self, model_buffer_data: *mut Model) {
     let writes = self.writes_queue.back_mut().unwrap();
-    crate::coalesce_writes(writes);
+    utils::coalesce_writes(writes);
 
     let mut queued_writes = self
       .writes_queue
@@ -99,7 +100,7 @@ impl<Model: pipelines::Model> ModelRenderer<Created<Model>> {
       .flat_map(|writes| writes.clone())
       .collect();
 
-    crate::coalesce_writes(&mut queued_writes);
+    utils::coalesce_writes(&mut queued_writes);
     let models = self.models.get_items();
 
     unsafe {
