@@ -48,7 +48,7 @@ impl Level {
       })
       .unzip();
 
-    let grid_render_ids = context.renderer.bulk_add_rects(rects.into_boxed_slice());
+    let grid_render_ids = context.renderer.bulk_add_models(rects.into_boxed_slice());
 
     let mut grid_cells = cell_tys
       .par_iter()
@@ -464,7 +464,7 @@ impl Level {
     let grid_cell = &mut self.grid_cells[position as usize];
     grid_cell.ty = cell_ty;
 
-    context.renderer.update_rect(
+    context.renderer.update_model(
       grid_cell.render_id,
       Rect {
         position: utils::to_position(position),
@@ -565,7 +565,7 @@ fn connect_neutral_wall(
   grid_cell.ty = GameCellType::Wall;
   final_air_positions.swap_remove(&wall_position);
 
-  context.renderer.update_rect(
+  context.renderer.update_model(
     grid_cell.render_id,
     Rect {
       position: utils::to_position(wall_position),
@@ -609,7 +609,7 @@ fn connect_up_walls(
     grid_cell.ty = GameCellType::Wall;
     final_air_positions.swap_remove(&wall_position_to_connect);
 
-    context.renderer.update_rect(
+    context.renderer.update_model(
       grid_cell.render_id,
       Rect {
         position: utils::to_position(wall_position_to_connect),
@@ -666,7 +666,7 @@ fn connect_right_walls(
     grid_cell.ty = GameCellType::Wall;
     final_air_positions.swap_remove(&wall_position_to_connect);
 
-    context.renderer.update_rect(
+    context.renderer.update_model(
       grid_cell.render_id,
       Rect {
         position: utils::to_position(wall_position_to_connect),
@@ -723,7 +723,7 @@ fn connect_down_walls(
     grid_cell.ty = GameCellType::Wall;
     final_air_positions.swap_remove(&wall_position_to_connect);
 
-    context.renderer.update_rect(
+    context.renderer.update_model(
       grid_cell.render_id,
       Rect {
         position: utils::to_position(wall_position_to_connect),
@@ -780,7 +780,7 @@ fn connect_left_walls(
     grid_cell.ty = GameCellType::Wall;
     final_air_positions.swap_remove(&wall_position_to_connect);
 
-    context.renderer.update_rect(
+    context.renderer.update_model(
       grid_cell.render_id,
       Rect {
         position: utils::to_position(wall_position_to_connect),

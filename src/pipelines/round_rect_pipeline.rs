@@ -1,6 +1,7 @@
 use crate::{
   models,
   pipelines::{CreatedPipeline, CreatingPipeline, Model},
+  utils,
 };
 use ash::vk::{self, Handle};
 use std::{ffi::CString, mem};
@@ -15,8 +16,8 @@ const FRAG_SHADER_CODE: &[u8] =
 pub(crate) struct RoundRect {
   pub(crate) position: (f32, f32),
   pub(crate) size: (f32, f32),
-  pub(crate) color: (f32, f32, f32, f32),
   pub(crate) radius: f32,
+  pub(crate) color: u32,
 }
 
 impl Model for RoundRect {
@@ -38,10 +39,10 @@ impl Model for RoundRect {
 impl From<models::RoundRect> for RoundRect {
   fn from(rect: models::RoundRect) -> Self {
     Self {
-      position: rect.position,
+      position: (rect.position.0, rect.position.1),
       size: rect.size,
-      color: rect.color,
       radius: rect.radius,
+      color: utils::pack_color(rect.color),
     }
   }
 }

@@ -1,6 +1,6 @@
 use crate::pipelines::{CreatedPipeline, CreatingPipeline};
 
-pub(crate) trait Model {
+pub(crate) trait Model: Clone + Send {
   type PushConsts;
   type CreatingPipeline: CreatingPipeline<Model = Self>;
   type CreatedPipeline: CreatedPipeline<Model = Self>;

@@ -8,12 +8,12 @@ pub(crate) enum GameCellType {
 
 impl GameCellType {
   #[inline]
-  pub(crate) const fn get_color(&self) -> (f32, f32, f32, f32) {
+  pub(crate) const fn get_color(&self) -> (u8, u8, u8, u8) {
     match self {
-      GameCellType::Air => (0.15, 0.15, 0.15, 1.0),
-      GameCellType::Wall => (1.0, 0.0, 0.0, 1.0),
-      GameCellType::Worm => (0.918, 0.663, 0.596, 1.0),
-      GameCellType::Food => (0.0, 1.0, 0.0, 1.0),
+      GameCellType::Air => (38, 38, 38, 255),
+      GameCellType::Wall => (255, 0, 0, 255),
+      GameCellType::Worm => (235, 170, 153, 255),
+      GameCellType::Food => (0, 255, 0, 255),
     }
   }
 }

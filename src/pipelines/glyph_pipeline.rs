@@ -1,6 +1,7 @@
 use crate::{
   models,
   pipelines::{CreatedPipeline, CreatingPipeline, Model},
+  utils,
 };
 use ash::vk::{self, Handle};
 use std::{ffi::CString, mem};
@@ -13,9 +14,10 @@ const FRAG_SHADER_CODE: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/spv/gl
 pub(crate) struct Glyph {
   pub(crate) position: (f32, f32),
   pub(crate) size: (f32, f32),
-  pub(crate) color: (f32, f32, f32, f32),
   pub(crate) atlas_position: (f32, f32),
   pub(crate) atlas_size: (f32, f32),
+  pub(crate) color: u32,
+  pub(crate) pad: f32,
 }
 
 impl Model for Glyph {
@@ -37,11 +39,12 @@ impl Model for Glyph {
 impl From<models::Rect> for Glyph {
   fn from(rect: models::Rect) -> Self {
     Self {
-      position: rect.position,
+      position: (rect.position.0, rect.position.1),
       size: rect.size,
-      color: rect.color,
       atlas_position: (-1.0, -1.0),
       atlas_size: (0.0, 0.0),
+      color: utils::pack_color(rect.color),
+      pad: 0.0,
     }
   }
 }

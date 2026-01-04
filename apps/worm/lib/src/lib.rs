@@ -124,12 +124,8 @@ pub extern "Rust" fn process_event(game: &mut Game, event: Event, context: Conte
 
 #[cfg_attr(feature = "reload", unsafe(no_mangle))]
 pub extern "Rust" fn update(game: &mut Game, dt: f32, mut context: Context<'_>) {
-  if let Some(input_worm_direction) = game.input_worm_direction.take() {
-    game.worm_direction = input_worm_direction;
-  }
-
   game.state = match mem::replace(&mut game.state, State::Pending) {
-    State::Preparing(preparing) => preparing.update(dt, &mut context),
+    State::Preparing(preparing) => preparing.update(game, dt, &mut context),
     State::Playing(playing) => playing.update(game, dt, &mut context),
     State::Shaking(shaking) => shaking.update(dt, &mut context),
     State::ShowingDialog(showing_dialog) => showing_dialog.update(dt, &mut context),

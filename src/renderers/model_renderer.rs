@@ -1,7 +1,7 @@
 use crate::{
   collections::{SparseSet, sparse_set::Id},
   models::Write,
-  pipelines::{self, CreatedPipeline, CreatingPipeline, Model},
+  pipelines,
   renderers::MAX_IN_FLIGHT_FRAME_COUNT,
   utils,
 };
@@ -11,80 +11,21 @@ use std::{collections::VecDeque, mem, ptr, slice};
 
 const MIN_SEQ_LEN: usize = 1024;
 
-pub(super) trait State {
-  type Model: pipelines::Model;
-}
-
-pub(super) struct Creating<Model: pipelines::Model> {
-  pipeline: Model::CreatingPipeline,
-}
-
-impl<Model: pipelines::Model> State for Creating<Model> {
-  type Model = Model;
-}
-
-pub(super) struct Created<Model: pipelines::Model> {
-  pipeline: Model::CreatedPipeline,
-}
-
-impl<Model: pipelines::Model> State for Created<Model> {
-  type Model = Model;
-}
-
-pub(super) struct ModelRenderer<S: State> {
-  models: SparseSet<S::Model>,
+pub(crate) struct ModelRenderer<Model> {
+  models: SparseSet<Model>,
   writes_queue: VecDeque<Vec<Write>>,
   model_capacity: usize,
-  state: S,
 }
 
-impl<Model: pipelines::Model> ModelRenderer<Creating<Model>> {
-  pub(super) fn new(device: &ash::Device, model_capacity: usize) -> Self {
+impl<Model> ModelRenderer<Model> {
+  pub(super) fn new(model_capacity: usize) -> Self {
     Self {
       models: SparseSet::with_capacity(model_capacity),
       writes_queue: VecDeque::from_iter([vec![]]),
       model_capacity,
-      state: Creating {
-        pipeline: Model::CreatingPipeline::new(device),
-      },
     }
   }
 
-  pub(super) fn finish(
-    self,
-    device: &ash::Device,
-    render_pass: vk::RenderPass,
-    pipeline_cache: vk::PipelineCache,
-    swapchain_image_extent: vk::Extent2D,
-    msaa_samples: vk::SampleCountFlags,
-  ) -> ModelRenderer<Created<Model>> {
-    ModelRenderer {
-      models: self.models,
-      writes_queue: self.writes_queue,
-      model_capacity: self.model_capacity,
-      state: Created {
-        pipeline: self.state.pipeline.finish(
-          device,
-          render_pass,
-          pipeline_cache,
-          swapchain_image_extent,
-          msaa_samples,
-        ),
-      },
-    }
-  }
-
-  #[inline]
-  pub(super) fn get_descriptor_set_layout(&self) -> vk::DescriptorSetLayout {
-    self.state.pipeline.get_descriptor_set_layout()
-  }
-
-  pub(super) fn drop(self, device: &ash::Device) {
-    self.state.pipeline.drop(device);
-  }
-}
-
-impl<Model: pipelines::Model> ModelRenderer<Created<Model>> {
   #[inline]
   pub(super) const fn get_model_capacity(&self) -> usize {
     self.model_capacity
@@ -119,11 +60,15 @@ impl<Model: pipelines::Model> ModelRenderer<Created<Model>> {
       self.writes_queue.pop_front();
     }
   }
+}
 
+impl<Model: pipelines::Model> ModelRenderer<Model> {
   pub(super) fn record_draw_commands(
     &self,
     device: &ash::Device,
     graphics_command_buffer: vk::CommandBuffer,
+    pipeline: vk::Pipeline,
+    pipeline_layout: vk::PipelineLayout,
     descriptor_set: vk::DescriptorSet,
     push_consts: &Model::PushConsts,
   ) {
@@ -135,14 +80,14 @@ impl<Model: pipelines::Model> ModelRenderer<Created<Model>> {
       device.cmd_bind_pipeline(
         graphics_command_buffer,
         vk::PipelineBindPoint::GRAPHICS,
-        self.state.pipeline.get_pipeline(),
+        pipeline,
       );
 
       if !descriptor_set.is_null() {
         device.cmd_bind_descriptor_sets(
           graphics_command_buffer,
           vk::PipelineBindPoint::GRAPHICS,
-          self.state.pipeline.get_pipeline_layout(),
+          pipeline_layout,
           0,
           &[descriptor_set],
           &[],
@@ -151,7 +96,7 @@ impl<Model: pipelines::Model> ModelRenderer<Created<Model>> {
 
       device.cmd_push_constants(
         graphics_command_buffer,
-        self.state.pipeline.get_pipeline_layout(),
+        pipeline_layout,
         vk::ShaderStageFlags::VERTEX,
         0,
         slice::from_raw_parts(
@@ -170,30 +115,13 @@ impl<Model: pipelines::Model> ModelRenderer<Created<Model>> {
     }
   }
 
-  pub(super) fn on_swapchain_suboptimal(self) -> ModelRenderer<Creating<Model>> {
-    ModelRenderer {
-      models: self.models,
-      writes_queue: self.writes_queue,
-      model_capacity: self.model_capacity,
-      state: Creating {
-        pipeline: self.state.pipeline.on_swapchain_suboptimal(),
-      },
-    }
-  }
-
-  pub(super) fn drop(self, device: &ash::Device) {
-    self.state.pipeline.drop(device);
-  }
-}
-
-impl<S: State> ModelRenderer<S> {
-  pub(super) fn add_model(&mut self, model: S::Model) -> Id {
+  pub(super) fn add_model(&mut self, model: Model) -> Id {
     debug_assert!(
       self.models.len() < self.model_capacity,
       "{model_name} capacity exceeded: {} < {}",
       self.models.len(),
       self.model_capacity,
-      model_name = S::Model::get_name(),
+      model_name = Model::get_name(),
     );
 
     let add_resp = self.models.add(model);
@@ -207,7 +135,7 @@ impl<S: State> ModelRenderer<S> {
     add_resp.id
   }
 
-  pub(super) fn update_model(&mut self, id: Id, model: S::Model) {
+  pub(super) fn update_model(&mut self, id: Id, model: Model) {
     let update_resp = self.models.update(id, model);
     let writes = self.writes_queue.back_mut().unwrap();
 
@@ -229,18 +157,15 @@ impl<S: State> ModelRenderer<S> {
   }
 }
 
-impl<S: State> ModelRenderer<S>
-where
-  S::Model: Send,
-{
-  pub(super) fn bulk_add_models(&mut self, models: Box<[S::Model]>) -> Box<[Id]> {
+impl<Model: pipelines::Model + Send> ModelRenderer<Model> {
+  pub(super) fn bulk_add_models(&mut self, models: Box<[Model]>) -> Box<[Id]> {
     debug_assert!(
       self.models.len() + models.len() <= self.model_capacity,
       "{model_name} capacity exceeded: {} + {} <= {}",
       self.models.len(),
       models.len(),
       self.model_capacity,
-      model_name = S::Model::get_name(),
+      model_name = Model::get_name(),
     );
 
     let bulk_add_resp = self.models.bulk_add(models);
@@ -254,7 +179,7 @@ where
     bulk_add_resp.ids
   }
 
-  pub(super) fn bulk_update_models(&mut self, updates: Box<[(Id, S::Model)]>) {
+  pub(super) fn bulk_update_models(&mut self, updates: Box<[(Id, Model)]>) {
     let bulk_update_resp = self.models.bulk_update(updates);
     let writes = self.writes_queue.back_mut().unwrap();
 
@@ -268,10 +193,7 @@ where
   }
 }
 
-impl<S: State> ModelRenderer<S>
-where
-  S::Model: Clone + Send,
-{
+impl<Model: pipelines::Model + Clone + Send> ModelRenderer<Model> {
   pub(super) fn bulk_remove_models(&mut self, ids: &[Id]) {
     let bulk_remove_resp = self.models.bulk_remove(ids);
     let writes = self.writes_queue.back_mut().unwrap();

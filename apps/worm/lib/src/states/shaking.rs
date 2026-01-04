@@ -6,16 +6,21 @@ const SHAKE_DURATION: f32 = 0.5;
 const SHAKE_STRENGTH: f32 = 64.0;
 
 pub(crate) struct Shaking {
+  score: usize,
   accum: f32,
   clock: Clock,
 }
 
 impl Shaking {
   #[inline]
-  pub(super) const fn new() -> Self {
+  pub(super) const fn new(score: usize) -> Self {
     let clock = Clock::new(1.0 / consts::UPDATES_PER_SECOND);
 
-    Self { accum: 0.0, clock }
+    Self {
+      score,
+      accum: 0.0,
+      clock,
+    }
   }
 
   pub(crate) fn update(mut self, dt: f32, context: &mut Context<'_>) -> State {
@@ -34,7 +39,7 @@ impl Shaking {
     } else {
       self.accum = SHAKE_DURATION;
       context.renderer.set_cam_position(None);
-      State::ShowingDialog(ShowingDialog::new(context))
+      State::ShowingDialog(ShowingDialog::new(context, self.score))
     }
   }
 }
