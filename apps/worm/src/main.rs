@@ -20,8 +20,9 @@ fn main() {
     .title("Worm")
     .size(consts::WINDOW_SIZE)
     .favicon_path("assets/worm/images/favicon.png")
+    .icon_font_path("assets/worm/fonts/MaterialSymbolsOutlined-Regular.ttf")
     .model_capacities(ModelCapacities {
-      glyph_capacity: 4096,
+      glyph_capacities: Box::new([4096, 128]),
       ..Default::default()
     })
     .call();

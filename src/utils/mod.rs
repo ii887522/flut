@@ -30,3 +30,8 @@ pub fn coalesce_writes(writes: &mut Vec<Write>) {
 
   *writes = results;
 }
+
+#[inline]
+pub const fn pack_color(color: (u8, u8, u8, u8)) -> u32 {
+  (color.0 as u32) << 24 | (color.1 as u32) << 16 | (color.2 as u32) << 8 | (color.3 as u32)
+}

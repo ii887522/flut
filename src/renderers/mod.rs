@@ -1,9 +1,9 @@
-mod model_renderer;
+pub(super) mod model_renderer;
 pub(super) mod renderer;
 pub mod renderer_ref;
-mod text_renderer;
+pub(super) mod text_renderer;
 
-use model_renderer::ModelRenderer;
+pub(super) use model_renderer::ModelRenderer;
 pub(super) use renderer::Renderer;
 pub use renderer_ref::RendererRef;
 

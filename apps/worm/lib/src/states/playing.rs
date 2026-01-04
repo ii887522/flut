@@ -92,7 +92,7 @@ impl Playing {
     self
   }
 
-  fn kill_worm(mut self, context: &mut Context<'_>) -> Shaking {
+  fn kill_worm(mut self, game: &Game, context: &mut Context<'_>) -> Shaking {
     if let Some(audio_manager) = context.audio_manager {
       audio_manager.play_sound("assets/worm/audios/hit.wav");
     }
@@ -101,12 +101,17 @@ impl Playing {
       worm_move_music.stop(Tween::default());
     }
 
-    Shaking::new()
+    let level = game.level.as_ref().unwrap();
+    Shaking::new(level.get_worm_positions().len() - 1)
   }
 
   pub(crate) fn update(mut self, game: &mut Game, dt: f32, context: &mut Context<'_>) -> State {
     if !self.clock.update(dt) {
       return State::Playing(self);
+    }
+
+    if let Some(input_worm_direction) = game.input_worm_direction.take() {
+      game.worm_direction = input_worm_direction;
     }
 
     let (game_cell_type, new_worm_head_position) = {
@@ -128,7 +133,7 @@ impl Playing {
 
     match game_cell_type {
       GameCellType::Air => State::Playing(self.move_worm(game, context, new_worm_head_position)),
-      GameCellType::Wall | GameCellType::Worm => State::Shaking(self.kill_worm(context)),
+      GameCellType::Wall | GameCellType::Worm => State::Shaking(self.kill_worm(game, context)),
       GameCellType::Food => {
         game.spawn_food(context);
         State::Playing(self.grow_worm(game, context, new_worm_head_position))

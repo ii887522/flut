@@ -1,26 +1,31 @@
 use crate::pipelines::{glyph_pipeline::Glyph, round_rect_pipeline::RoundRect};
 use std::mem;
 
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 pub struct ModelCapacities {
-  pub glyph_capacity: usize,
-  pub round_rect_capacity: usize,
+  pub glyph_capacities: Box<[usize]>,
+  pub round_rect_capacities: Box<[usize]>,
 }
 
 impl Default for ModelCapacities {
   #[inline]
   fn default() -> Self {
     Self {
-      glyph_capacity: 1024,
-      round_rect_capacity: 1024,
+      glyph_capacities: Box::new([1024]),
+      round_rect_capacities: Box::new([1024]),
     }
   }
 }
 
 impl ModelCapacities {
   #[inline]
-  pub(crate) const fn calc_total_size(&self) -> usize {
-    self.glyph_capacity * mem::size_of::<Glyph>()
-      + self.round_rect_capacity * mem::size_of::<RoundRect>()
+  pub(crate) fn calc_total_size(&self) -> usize {
+    self.glyph_capacities.iter().sum::<usize>() * mem::size_of::<Glyph>()
+      + self.round_rect_capacities.iter().sum::<usize>() * mem::size_of::<RoundRect>()
+  }
+
+  #[inline]
+  pub(crate) fn calc_total_capacity(&self) -> usize {
+    self.glyph_capacities.iter().sum::<usize>() + self.round_rect_capacities.iter().sum::<usize>()
   }
 }

@@ -1,5 +1,5 @@
 use crate::{
-  Countdown, consts,
+  Countdown, Game, consts,
   states::{Playing, State},
 };
 use flut::{
@@ -9,16 +9,17 @@ use flut::{
 
 // Settings
 const MAX_COUNTDOWN: u32 = 3;
-const COUNTDOWN_MIN_FONT_SIZE: u16 = 64;
-const COUNTDOWN_MAX_FONT_SIZE: u16 = 128;
+const COUNTDOWN_MIN_FONT_SIZE: f32 = 64.0;
+const COUNTDOWN_MAX_FONT_SIZE: f32 = 128.0;
 const COUNTDOWN_INTERVAL: f32 = 0.75;
-const COUNTDOWN_COLOR: (f32, f32, f32) = (1.0, 1.0, 1.0);
-const COUNTDOWN_MAX_ALPHA: f32 = 0.5;
+const COUNTDOWN_COLOR: (u8, u8, u8) = (255, 255, 255);
+const COUNTDOWN_MAX_ALPHA: u8 = 128;
 
 // Computed settings
-const COUNTDOWN_POSITION: (f32, f32) = (
+const COUNTDOWN_POSITION: (f32, f32, u8) = (
   consts::WINDOW_SIZE.0 as f32 * 0.5,
-  consts::WINDOW_SIZE.1 as f32 * 0.5 + COUNTDOWN_MAX_FONT_SIZE as f32 * 0.5,
+  consts::WINDOW_SIZE.1 as f32 * 0.5 + COUNTDOWN_MAX_FONT_SIZE * 0.5,
+  0,
 );
 
 #[derive(Default)]
@@ -35,8 +36,8 @@ impl Preparing {
   pub(crate) fn init(mut self, context: &mut Context<'_>) -> Self {
     let countdown_render_id = context.renderer.add_text(Text {
       position: COUNTDOWN_POSITION,
-      color: (1.0, 1.0, 1.0, 0.5),
       font_size: COUNTDOWN_MIN_FONT_SIZE,
+      color: (255, 255, 255, 128),
       align: Align::Center,
       text: MAX_COUNTDOWN.to_string().into(),
     });
@@ -50,7 +51,11 @@ impl Preparing {
     self
   }
 
-  pub(crate) fn update(mut self, dt: f32, context: &mut Context<'_>) -> State {
+  pub(crate) fn update(mut self, game: &mut Game, dt: f32, context: &mut Context<'_>) -> State {
+    if let Some(input_worm_direction) = game.input_worm_direction.take() {
+      game.worm_direction = input_worm_direction;
+    }
+
     let countdown = self.countdown.as_mut().unwrap();
     countdown.accum += dt;
 
@@ -61,14 +66,14 @@ impl Preparing {
         countdown.render_id,
         Text {
           position: COUNTDOWN_POSITION,
+          font_size: COUNTDOWN_MIN_FONT_SIZE
+            + t * (COUNTDOWN_MAX_FONT_SIZE - COUNTDOWN_MIN_FONT_SIZE),
           color: (
             COUNTDOWN_COLOR.0,
             COUNTDOWN_COLOR.1,
             COUNTDOWN_COLOR.2,
-            COUNTDOWN_MAX_ALPHA * (1.0 - t),
+            (COUNTDOWN_MAX_ALPHA as f32 * (1.0 - t)) as _,
           ),
-          font_size: COUNTDOWN_MIN_FONT_SIZE
-            + (t * (COUNTDOWN_MAX_FONT_SIZE - COUNTDOWN_MIN_FONT_SIZE) as f32) as u16,
           align: Align::Center,
           text: countdown.countdown.to_string().into(),
         },
@@ -85,8 +90,8 @@ impl Preparing {
         countdown.render_id,
         Text {
           position: COUNTDOWN_POSITION,
-          color: (1.0, 1.0, 1.0, 0.5),
           font_size: COUNTDOWN_MIN_FONT_SIZE,
+          color: (255, 255, 255, 128),
           align: Align::Center,
           text: countdown.countdown.to_string().into(),
         },

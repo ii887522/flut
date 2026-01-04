@@ -1,11 +1,12 @@
 use crate::{
-  collections::{
-    LruCache, SparseSet,
-    sparse_set::{self, Id},
-  },
+  collections::{LruCache, SparseSet, sparse_set::Id},
   models::{Align, Text},
-  pipelines::glyph_pipeline::Glyph,
-  renderers::{MAX_IN_FLIGHT_FRAME_COUNT, ModelRenderer, model_renderer},
+  pipelines::{
+    CreatedPipeline, CreatingPipeline,
+    glyph_pipeline::{self, Glyph, GlyphPipeline},
+  },
+  renderers::{MAX_IN_FLIGHT_FRAME_COUNT, ModelRenderer},
+  utils,
 };
 use ash::vk;
 use etagere::{AllocId, BucketedAtlasAllocator, Size};
@@ -26,6 +27,7 @@ use sdl3::video::Window;
 use std::{collections::VecDeque, ffi::c_void, mem, ptr};
 use vk_mem::{self, Alloc};
 
+// Settings
 const RESOLUTION_SCALE: f32 = 2.0;
 const GLYPH_MARGIN: i32 = 1;
 
@@ -44,6 +46,7 @@ enum GlyphMetrics {
     size: (f32, f32),
     glyph_id: u32,
     alloc_id: AllocId,
+    repr_icon: bool,
     ref_count: u32,
   },
   Invisible {
@@ -53,43 +56,20 @@ enum GlyphMetrics {
 }
 
 struct TextId {
+  z: u8,
   glyph_keys: Box<[GlyphKey]>,
-  glyph_ids: Box<[sparse_set::Id]>,
+  glyph_ids: Box<[Id]>,
 }
 
-pub(super) trait State {
-  type GlyphState: model_renderer::State<Model = Glyph>;
-
-  fn get_glyph_renderer_mut(&mut self) -> &mut ModelRenderer<Self::GlyphState>;
+pub(crate) struct Creating {
+  glyph_pipeline: GlyphPipeline<glyph_pipeline::Creating>,
 }
 
-pub(super) struct Creating {
-  glyph_renderer: ModelRenderer<model_renderer::Creating<Glyph>>,
+pub(crate) struct Created {
+  glyph_pipeline: GlyphPipeline<glyph_pipeline::Created>,
 }
 
-impl State for Creating {
-  type GlyphState = model_renderer::Creating<Glyph>;
-
-  #[inline]
-  fn get_glyph_renderer_mut(&mut self) -> &mut ModelRenderer<Self::GlyphState> {
-    &mut self.glyph_renderer
-  }
-}
-
-pub(super) struct Created {
-  glyph_renderer: ModelRenderer<model_renderer::Created<Glyph>>,
-}
-
-impl State for Created {
-  type GlyphState = model_renderer::Created<Glyph>;
-
-  #[inline]
-  fn get_glyph_renderer_mut(&mut self) -> &mut ModelRenderer<Self::GlyphState> {
-    &mut self.glyph_renderer
-  }
-}
-
-pub(super) struct TextRenderer<S: State> {
+pub(crate) struct TextRenderer<State> {
   glyph_atlas_allocator: BucketedAtlasAllocator,
   staging_glyph_atlas_buffer: vk::Buffer,
   staging_glyph_atlas_buffer_alloc: vk_mem::Allocation,
@@ -97,8 +77,10 @@ pub(super) struct TextRenderer<S: State> {
   glyph_atlas_images: Vec<vk::Image>,
   glyph_atlas_image_allocs: Vec<vk_mem::Allocation>,
   glyph_atlas_image_views: Vec<vk::ImageView>,
+  glyph_renderers: Box<[ModelRenderer<Glyph>]>,
   descriptor_sets: Box<[vk::DescriptorSet]>,
   font: Font,
+  icon_font: Option<Font>,
   unused_glyph_cache: LruCache<GlyphKey>,
   glyph_metrics_map: FxHashMap<GlyphKey, GlyphMetrics>,
   glyph_keys_queue: VecDeque<FxHashSet<GlyphKey>>,
@@ -106,7 +88,7 @@ pub(super) struct TextRenderer<S: State> {
   text_ids: SparseSet<TextId>,
   read_image_index: usize,
   window_display_scale: f32,
-  state: S,
+  state: State,
 }
 
 impl TextRenderer<Creating> {
@@ -116,7 +98,8 @@ impl TextRenderer<Creating> {
     vk_allocator: &vk_mem::Allocator,
     transition_command_buffer: vk::CommandBuffer,
     descriptor_pool: vk::DescriptorPool,
-    glyph_capacity: usize,
+    icon_font_path: &str,
+    glyph_capacities: &[usize],
     glyph_atlas_size: (u32, u32),
   ) -> Self {
     let glyph_atlas_allocator =
@@ -215,6 +198,8 @@ impl TextRenderer<Creating> {
       .unwrap();
 
     let font = font_handle.load().unwrap();
+    let icon_font = Font::from_path(icon_font_path, 0).ok();
+
     let unique_glyph_capacity = ((glyph_atlas_size.0 * glyph_atlas_size.1) >> 8) as _;
     let unused_glyph_cache = LruCache::with_capacity(unique_glyph_capacity);
 
@@ -226,7 +211,13 @@ impl TextRenderer<Creating> {
     let text_ids = SparseSet::new();
     let read_image_index = 0;
     let window_display_scale = window.display_scale();
-    let glyph_renderer = ModelRenderer::new(device, glyph_capacity);
+
+    let glyph_renderers = glyph_capacities
+      .iter()
+      .map(|&capacity| ModelRenderer::new(capacity))
+      .collect::<Box<_>>();
+
+    let glyph_pipeline = GlyphPipeline::new(device);
 
     let image_shader_barriers = glyph_atlas_images
       .iter()
@@ -262,7 +253,7 @@ impl TextRenderer<Creating> {
     }
 
     let descriptor_set_layouts =
-      [glyph_renderer.get_descriptor_set_layout(); MAX_IN_FLIGHT_FRAME_COUNT];
+      [glyph_pipeline.get_descriptor_set_layout(); MAX_IN_FLIGHT_FRAME_COUNT];
 
     let descriptor_set_alloc_info = vk::DescriptorSetAllocateInfo {
       descriptor_pool,
@@ -314,8 +305,10 @@ impl TextRenderer<Creating> {
       glyph_atlas_images,
       glyph_atlas_image_allocs,
       glyph_atlas_image_views,
+      glyph_renderers,
       descriptor_sets: descriptor_sets.into_boxed_slice(),
       font,
+      icon_font,
       unused_glyph_cache,
       glyph_metrics_map,
       glyph_keys_queue,
@@ -323,7 +316,7 @@ impl TextRenderer<Creating> {
       text_ids,
       read_image_index,
       window_display_scale,
-      state: Creating { glyph_renderer },
+      state: Creating { glyph_pipeline },
     }
   }
 
@@ -335,7 +328,7 @@ impl TextRenderer<Creating> {
     swapchain_image_extent: vk::Extent2D,
     msaa_samples: vk::SampleCountFlags,
   ) -> TextRenderer<Created> {
-    let glyph_renderer = self.state.glyph_renderer.finish(
+    let glyph_pipeline = self.state.glyph_pipeline.finish(
       device,
       render_pass,
       pipeline_cache,
@@ -351,8 +344,10 @@ impl TextRenderer<Creating> {
       glyph_atlas_images: self.glyph_atlas_images,
       glyph_atlas_image_allocs: self.glyph_atlas_image_allocs,
       glyph_atlas_image_views: self.glyph_atlas_image_views,
+      glyph_renderers: self.glyph_renderers,
       descriptor_sets: self.descriptor_sets,
       font: self.font,
+      icon_font: self.icon_font,
       unused_glyph_cache: self.unused_glyph_cache,
       glyph_metrics_map: self.glyph_metrics_map,
       glyph_keys_queue: self.glyph_keys_queue,
@@ -360,12 +355,12 @@ impl TextRenderer<Creating> {
       text_ids: self.text_ids,
       read_image_index: self.read_image_index,
       window_display_scale: self.window_display_scale,
-      state: Created { glyph_renderer },
+      state: Created { glyph_pipeline },
     }
   }
 
   pub(super) fn drop(mut self, device: &ash::Device, vk_allocator: &vk_mem::Allocator) {
-    self.state.glyph_renderer.drop(device);
+    self.state.glyph_pipeline.drop(device);
 
     unsafe {
       self
@@ -389,8 +384,8 @@ impl TextRenderer<Creating> {
 
 impl TextRenderer<Created> {
   #[inline]
-  pub(super) const fn get_glyph_renderer(&self) -> &ModelRenderer<model_renderer::Created<Glyph>> {
-    &self.state.glyph_renderer
+  pub(super) const fn get_glyph_renderers(&self) -> &[ModelRenderer<Glyph>] {
+    &self.glyph_renderers
   }
 
   #[inline]
@@ -408,6 +403,11 @@ impl TextRenderer<Created> {
     (self.read_image_index + 1) % self.glyph_atlas_images.len()
   }
 
+  #[inline]
+  pub(super) const fn get_glyph_pipeline(&self) -> &GlyphPipeline<glyph_pipeline::Created> {
+    &self.state.glyph_pipeline
+  }
+
   pub(super) fn on_swapchain_suboptimal(self) -> TextRenderer<Creating> {
     TextRenderer {
       glyph_atlas_allocator: self.glyph_atlas_allocator,
@@ -417,8 +417,10 @@ impl TextRenderer<Created> {
       glyph_atlas_images: self.glyph_atlas_images,
       glyph_atlas_image_allocs: self.glyph_atlas_image_allocs,
       glyph_atlas_image_views: self.glyph_atlas_image_views,
+      glyph_renderers: self.glyph_renderers,
       descriptor_sets: self.descriptor_sets,
       font: self.font,
+      icon_font: self.icon_font,
       unused_glyph_cache: self.unused_glyph_cache,
       glyph_metrics_map: self.glyph_metrics_map,
       glyph_keys_queue: self.glyph_keys_queue,
@@ -427,7 +429,7 @@ impl TextRenderer<Created> {
       read_image_index: self.read_image_index,
       window_display_scale: self.window_display_scale,
       state: Creating {
-        glyph_renderer: self.state.glyph_renderer.on_swapchain_suboptimal(),
+        glyph_pipeline: self.state.glyph_pipeline.on_swapchain_suboptimal(),
       },
     }
   }
@@ -465,10 +467,17 @@ impl TextRenderer<Created> {
           position,
           size,
           glyph_id,
+          repr_icon,
           ..
         } = self.glyph_metrics_map[glyph_key]
         else {
           return (pixels, regions);
+        };
+
+        let font = if repr_icon {
+          self.icon_font.as_ref().unwrap()
+        } else {
+          &self.font
         };
 
         let mut canvas = Canvas::new(
@@ -479,8 +488,7 @@ impl TextRenderer<Created> {
           Format::A8,
         );
 
-        self
-          .font
+        font
           .rasterize_glyph(
             &mut canvas,
             glyph_id,
@@ -648,7 +656,7 @@ impl TextRenderer<Created> {
   }
 
   pub(super) fn drop(mut self, device: &ash::Device, vk_allocator: &vk_mem::Allocator) {
-    self.state.glyph_renderer.drop(device);
+    self.state.glyph_pipeline.drop(device);
 
     unsafe {
       self
@@ -670,20 +678,20 @@ impl TextRenderer<Created> {
   }
 }
 
-impl<S: State> TextRenderer<S> {
+impl<State> TextRenderer<State> {
   #[inline]
-  pub(super) fn get_glyph_renderer_mut(&mut self) -> &mut ModelRenderer<S::GlyphState> {
-    self.state.get_glyph_renderer_mut()
+  pub(crate) fn get_glyph_renderers_mut(&mut self) -> &mut [ModelRenderer<Glyph>] {
+    &mut self.glyph_renderers
   }
 
-  pub(super) fn add_text(&mut self, text: Text) -> Id {
-    let text_id = self.prepare_text(text);
+  pub(super) fn add_text(&mut self, text: Text, repr_icon: bool) -> Id {
+    let text_id = self.prepare_text(text, repr_icon);
     let add_resp = self.text_ids.add(text_id);
     add_resp.id
   }
 
-  pub(super) fn update_text(&mut self, id: Id, text: Text) {
-    let new_text_id = self.prepare_text(text);
+  pub(super) fn update_text(&mut self, id: Id, text: Text, repr_icon: bool) {
+    let new_text_id = self.prepare_text(text, repr_icon);
     let text_id = self.text_ids.get_mut(id).unwrap();
     let old_text_id = mem::replace(text_id, new_text_id);
     self.cleanup_text(old_text_id);
@@ -694,13 +702,16 @@ impl<S: State> TextRenderer<S> {
     self.cleanup_text(remove_resp.item);
   }
 
-  pub(super) fn bulk_add_text(&mut self, texts: Box<[Text]>) -> Box<[Id]> {
-    texts.into_iter().map(|text| self.add_text(text)).collect()
+  pub(super) fn bulk_add_text(&mut self, texts: Box<[Text]>, repr_icon: bool) -> Box<[Id]> {
+    texts
+      .into_iter()
+      .map(|text| self.add_text(text, repr_icon))
+      .collect()
   }
 
-  pub(super) fn bulk_update_text(&mut self, updates: Box<[(Id, Text)]>) {
+  pub(super) fn bulk_update_text(&mut self, updates: Box<[(Id, Text)]>, repr_icon: bool) {
     for (id, text) in updates {
-      self.update_text(id, text);
+      self.update_text(id, text, repr_icon);
     }
   }
 
@@ -710,7 +721,13 @@ impl<S: State> TextRenderer<S> {
     }
   }
 
-  fn prepare_text(&mut self, text: Text) -> TextId {
+  fn prepare_text(&mut self, text: Text, repr_icon: bool) -> TextId {
+    let font = if repr_icon {
+      self.icon_font.as_ref().unwrap()
+    } else {
+      &self.font
+    };
+
     let mut current_glyph_position = text.position;
 
     let (glyph_keys, glyphs): (Vec<_>, Vec<_>) = text
@@ -720,7 +737,7 @@ impl<S: State> TextRenderer<S> {
         let (glyph_key, glyph_metrics) = loop {
           let glyph_key = GlyphKey {
             ch,
-            font_size: text.font_size,
+            font_size: text.font_size as _,
           };
 
           if let Some(glyph_metrics) = self.glyph_metrics_map.get_mut(&glyph_key) {
@@ -736,7 +753,7 @@ impl<S: State> TextRenderer<S> {
             break (glyph_key, glyph_metrics);
           }
 
-          let Some(glyph_id) = self.font.glyph_for_char(ch) else {
+          let Some(glyph_id) = font.glyph_for_char(ch) else {
             if ch == '?' {
               panic!("'?' not found in font");
             }
@@ -746,10 +763,9 @@ impl<S: State> TextRenderer<S> {
             continue;
           };
 
-          let advance = self.font.advance(glyph_id).unwrap();
+          let advance = font.advance(glyph_id).unwrap();
 
-          let glyph_bounds = self
-            .font
+          let glyph_bounds = font
             .raster_bounds(
               glyph_id,
               glyph_key.font_size as f32 * self.window_display_scale * RESOLUTION_SCALE,
@@ -808,6 +824,7 @@ impl<S: State> TextRenderer<S> {
               size: (glyph_bounds.width() as _, glyph_bounds.height() as _),
               glyph_id,
               alloc_id: glyph_alloc.id,
+              repr_icon,
               ref_count: 0,
             }
           } else {
@@ -847,21 +864,22 @@ impl<S: State> TextRenderer<S> {
                 size.0 / (self.window_display_scale * RESOLUTION_SCALE),
                 size.1 / (self.window_display_scale * RESOLUTION_SCALE),
               ),
-              color: text.color,
+              color: utils::pack_color(text.color),
               atlas_position: *position,
               atlas_size: *size,
+              pad: 0.0,
             };
 
-            current_glyph_position.0 += advance.0 * glyph_key.font_size as f32 / 2048.0;
-            current_glyph_position.1 += advance.1 * glyph_key.font_size as f32 / 2048.0;
+            current_glyph_position.0 += advance.0 * text.font_size / 2048.0;
+            current_glyph_position.1 += advance.1 * text.font_size / 2048.0;
             Some((glyph_key, glyph))
           }
           GlyphMetrics::Invisible {
             advance, ref_count, ..
           } => {
             *ref_count += 1;
-            current_glyph_position.0 += advance.0 * glyph_key.font_size as f32 / 2048.0;
-            current_glyph_position.1 += advance.1 * glyph_key.font_size as f32 / 2048.0;
+            current_glyph_position.0 += advance.0 * text.font_size / 2048.0;
+            current_glyph_position.1 += advance.1 * text.font_size / 2048.0;
             None
           }
         }
@@ -884,9 +902,10 @@ impl<S: State> TextRenderer<S> {
       })
       .collect::<Box<_>>();
 
-    let glyph_ids = self.state.get_glyph_renderer_mut().bulk_add_models(glyphs);
+    let glyph_ids = self.glyph_renderers[text.position.2 as usize].bulk_add_models(glyphs);
 
     TextId {
+      z: text.position.2,
       glyph_keys: glyph_keys.into_boxed_slice(),
       glyph_ids,
     }
@@ -908,9 +927,6 @@ impl<S: State> TextRenderer<S> {
       }
     }
 
-    self
-      .state
-      .get_glyph_renderer_mut()
-      .bulk_remove_models(&text_id.glyph_ids);
+    self.glyph_renderers[text_id.z as usize].bulk_remove_models(&text_id.glyph_ids);
   }
 }

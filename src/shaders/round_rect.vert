@@ -13,8 +13,8 @@ const vec2 POSITIONS[] = vec2[](
 struct RoundRect {
   vec2 position;
   vec2 size;
-  vec4 color;
   float radius;
+  uint color;
 };
 
 layout(std430, buffer_reference) readonly buffer RoundRectBuffer {
@@ -27,10 +27,10 @@ layout(push_constant) uniform PushConsts {
   vec2 cam_size;
 } push_consts;
 
-layout(location = 0) out vec4 frag_color;
-layout(location = 1) out vec2 frag_local_pos;
-layout(location = 2) out vec2 frag_half_size;
-layout(location = 3) out float frag_radius;
+layout(location = 0) out vec2 frag_local_pos;
+layout(location = 1) out vec2 frag_half_size;
+layout(location = 2) out float frag_radius;
+layout(location = 3) out vec4 frag_color;
 
 void main() {
   const RoundRect round_rect = push_consts.round_rect_buffer.round_rects[gl_VertexIndex / POSITIONS.length()];
@@ -42,8 +42,14 @@ void main() {
     1.0
   );
 
-  frag_color = round_rect.color;
   frag_local_pos = (position - vec2(0.5)) * round_rect.size;
   frag_half_size = round_rect.size * 0.5 - vec2(1.0); // - vec2(1.0) to leave some headroom for anti-aliasing
   frag_radius = round_rect.radius;
+
+  frag_color = vec4(
+    (round_rect.color >> 24) / 255.0,
+    ((round_rect.color >> 16) & 0xFF) / 255.0,
+    ((round_rect.color >> 8) & 0xFF) / 255.0,
+    (round_rect.color & 0xFF) / 255.0
+  );
 }

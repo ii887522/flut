@@ -1,5 +1,6 @@
 use crate::{
   Context,
+  collections::SparseSet,
   models::{AtlasSizes, ModelCapacities},
   renderers::{
     Renderer, RendererRef,
@@ -28,6 +29,7 @@ pub fn run<A: App>(
   #[optarg_default] title: Cow<'static, str>,
   #[optarg((800, 600))] size: (u32, u32),
   #[optarg_default] favicon_path: Cow<'static, str>,
+  #[optarg_default] icon_font_path: Cow<'static, str>,
   #[optarg_default] model_capacities: ModelCapacities,
   #[optarg_default] atlas_sizes: AtlasSizes,
   #[optarg_default] quiet: bool,
@@ -83,12 +85,20 @@ pub fn run<A: App>(
     window.set_icon(favicon);
   }
 
-  let mut vk_renderer =
-    Renderer::new(window.clone(), model_capacities, atlas_sizes).finish(window.clone());
+  let mut model_ids = SparseSet::with_capacity(model_capacities.calc_total_capacity());
+
+  let mut vk_renderer = Renderer::new(
+    window.clone(),
+    model_capacities,
+    atlas_sizes,
+    &icon_font_path,
+  )
+  .finish(window.clone());
 
   app.init(Context {
     audio_manager: &mut audio_manager,
-    renderer: RendererRef::new(&mut vk_renderer),
+    renderer: RendererRef::new(&mut vk_renderer, &mut model_ids),
+    window_size: size,
     window_content_scale,
   });
 
@@ -113,7 +123,8 @@ pub fn run<A: App>(
             event,
             Context {
               audio_manager: &mut audio_manager,
-              renderer: RendererRef::new(&mut vk_renderer),
+              renderer: RendererRef::new(&mut vk_renderer, &mut model_ids),
+              window_size: size,
               window_content_scale,
             },
           ),
@@ -146,7 +157,8 @@ pub fn run<A: App>(
           dt,
           Context {
             audio_manager: &mut audio_manager,
-            renderer: RendererRef::new(&mut vk_renderer),
+            renderer: RendererRef::new(&mut vk_renderer, &mut model_ids),
+            window_size: size,
             window_content_scale,
           },
         );

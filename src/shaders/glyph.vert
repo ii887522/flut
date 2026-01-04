@@ -13,9 +13,10 @@ const vec2 POSITIONS[] = vec2[](
 struct Glyph {
   vec2 position;
   vec2 size;
-  vec4 color;
   vec2 atlas_position;
   vec2 atlas_size;
+  uint color;
+  float pad;
 };
 
 layout(std430, buffer_reference) readonly buffer GlyphBuffer {
@@ -29,8 +30,8 @@ layout(push_constant) uniform PushConsts {
   vec2 atlas_size;
 } push_consts;
 
-layout(location = 0) out vec4 frag_color;
-layout(location = 1) out vec2 frag_uv;
+layout(location = 0) out vec2 frag_uv;
+layout(location = 1) out vec4 frag_color;
 
 void main() {
   const Glyph glyph = push_consts.glyph_buffer.glyphs[gl_VertexIndex / POSITIONS.length()];
@@ -42,6 +43,12 @@ void main() {
     1.0
   );
 
-  frag_color = glyph.color;
   frag_uv = (position * glyph.atlas_size + glyph.atlas_position) / push_consts.atlas_size;
+
+  frag_color = vec4(
+    (glyph.color >> 24) / 255.0,
+    ((glyph.color >> 16) & 0xFF) / 255.0,
+    ((glyph.color >> 8) & 0xFF) / 255.0,
+    (glyph.color & 0xFF) / 255.0
+  );
 }
