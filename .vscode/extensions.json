@@ -1,0 +1,18 @@
+{
+  "recommendations": [
+    "aaron-bond.better-comments",
+    "christian-kohler.path-intellisense",
+    "eamodio.gitlens",
+    "EditorConfig.EditorConfig",
+    "esbenp.prettier-vscode",
+    "filippofracascia.glsl-language-support",
+    "github.vscode-github-actions",
+    "mhutchie.git-graph",
+    "rust-lang.rust-analyzer",
+    "tamasfe.even-better-toml",
+    "usernamehw.errorlens",
+    "VisualStudioExptTeam.intellicode-api-usage-examples",
+    "VisualStudioExptTeam.vscodeintellicode",
+    "yzhang.markdown-all-in-one"
+  ]
+}
