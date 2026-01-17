@@ -1,0 +1,8 @@
+{
+  "editor.formatOnSave": true,
+  "rust-analyzer.cachePriming.enable": false,
+  "rust-analyzer.cargo.features": "all",
+  "rust-analyzer.check.command": "clippy",
+  "rust-analyzer.checkOnSave": true,
+  "rust-analyzer.lru.capacity": 40
+}

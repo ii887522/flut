@@ -1,0 +1,29 @@
+[package]
+name = "flut"
+description = "A 2D cross platform graphical user interface (GUI) framework that can be used to develop apps/games easily."
+version = "0.1.0"
+categories = ["game-development", "graphics", "gui", "multimedia", "rendering"]
+edition = "2024"
+keywords = ["gui", "2d", "cross-platform", "game", "app"]
+license = "Unlicensed"
+publish = false
+repository = "https://github.com/ii887522/flut"
+rust-version = "1.92"
+
+[profile.dev]
+split-debuginfo = "unpacked"
+
+[profile.release]
+codegen-units = 1
+lto = true
+split-debuginfo = "unpacked"
+strip = true
+
+[dependencies]
+vk-mem = { version = "0.5", default-features = false, features = ["loaded"] }
+winit = { version = "0.30", default-features = false, features = ["rwh_06"] }
+
+[dependencies.ash]
+version = "0.38"
+default-features = false
+features = ["loaded", "std"]
