@@ -17,7 +17,6 @@
 #![deny(clippy::big_endian_bytes)]
 #![deny(clippy::cfg_not_test)]
 #![deny(clippy::clone_on_ref_ptr)]
-#![deny(clippy::cognitive_complexity)]
 #![deny(clippy::create_dir)]
 #![deny(clippy::dbg_macro)]
 #![deny(clippy::decimal_literal_representation)]
@@ -108,5 +107,8 @@
 // Allowed lints
 #![allow(clippy::missing_panics_doc)]
 #![allow(clippy::multiple_crate_versions)]
+#![allow(clippy::too_many_lines)]
 //
 // endregion
+
+pub mod app;

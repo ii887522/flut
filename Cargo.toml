@@ -20,6 +20,7 @@ split-debuginfo = "unpacked"
 strip = true
 
 [dependencies]
+mimalloc = { version = "0.1", default-features = false, features = ["v3"] }
 vk-mem = { version = "0.5", default-features = false, features = ["loaded"] }
 winit = { version = "0.30", default-features = false, features = ["rwh_06"] }
 
