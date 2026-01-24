@@ -20,6 +20,7 @@ split-debuginfo = "unpacked"
 strip = true
 
 [dependencies]
+ash-window = { version = "0.13", default-features = false }
 mimalloc = { version = "0.1", default-features = false, features = ["v3"] }
 vk-mem = { version = "0.5", default-features = false, features = ["loaded"] }
 winit = { version = "0.30", default-features = false, features = ["rwh_06"] }
@@ -28,3 +29,11 @@ winit = { version = "0.30", default-features = false, features = ["rwh_06"] }
 version = "0.38"
 default-features = false
 features = ["loaded", "std"]
+
+[dependencies.rustc-hash]
+version = "2.1"
+default-features = false
+features = ["std"]
+
+[build-dependencies]
+shaderc = { version = "0.10", default-features = false }
