@@ -111,5 +111,70 @@
 //
 // endregion
 
-pub mod app;
-mod renderer;
+use shaderc::{CompileOptions, Compiler, EnvVersion, OptimizationLevel, ShaderKind, TargetEnv};
+use std::{env, fs, path::Path};
+
+fn main() {
+  let out_dir = env::var("OUT_DIR").unwrap();
+  let shader_dir = Path::new("src/shaders");
+  let shader_compiler = Compiler::new().unwrap();
+  let mut shader_compile_options = CompileOptions::new().unwrap();
+  shader_compile_options.set_target_env(TargetEnv::Vulkan, EnvVersion::Vulkan1_3 as u32);
+  shader_compile_options.set_optimization_level(OptimizationLevel::Performance);
+  shader_compile_options.set_warnings_as_errors();
+
+  compile_shaders(
+    &shader_compiler,
+    &shader_compile_options,
+    shader_dir,
+    &out_dir,
+  );
+}
+
+fn compile_shaders(compiler: &Compiler, options: &CompileOptions, dir: &Path, out_dir: &str) {
+  let dir = fs::read_dir(dir).unwrap();
+
+  for entry in dir {
+    let entry = entry.unwrap();
+    let path = entry.path();
+
+    if path.is_dir() {
+      compile_shaders(compiler, options, &path, out_dir);
+    } else if let Some(shader_kind) = get_shader_kind(&path) {
+      compile_shader(compiler, options, &path, shader_kind, out_dir);
+    } else {
+      // Skip non-shader files
+    }
+  }
+}
+
+fn get_shader_kind(path: &Path) -> Option<ShaderKind> {
+  match path.extension()?.to_str()? {
+    "vert" => Some(ShaderKind::Vertex),
+    "frag" => Some(ShaderKind::Fragment),
+    "comp" => Some(ShaderKind::Compute),
+    "geom" => Some(ShaderKind::Geometry),
+    "tesc" => Some(ShaderKind::TessControl),
+    "tese" => Some(ShaderKind::TessEvaluation),
+    _ => None,
+  }
+}
+
+fn compile_shader(
+  compiler: &Compiler,
+  options: &CompileOptions,
+  path: &Path,
+  kind: ShaderKind,
+  out_dir: &str,
+) {
+  println!("cargo:rerun-if-changed={}", path.display());
+  let source = fs::read_to_string(path).unwrap();
+  let filename = path.file_name().unwrap().to_string_lossy();
+
+  let binary = compiler
+    .compile_into_spirv(&source, kind, &filename, "main", Some(options))
+    .unwrap();
+
+  let out_path = Path::new(out_dir).join(format!("{filename}.spv"));
+  fs::write(&out_path, binary.as_binary_u8()).unwrap();
+}

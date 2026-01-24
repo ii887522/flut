@@ -10,14 +10,12 @@
 #![deny(clippy::absolute_paths)]
 #![deny(clippy::alloc_instead_of_core)]
 #![deny(clippy::arithmetic_side_effects)]
-#![deny(clippy::as_conversions)]
 #![deny(clippy::as_pointer_underscore)]
 #![deny(clippy::as_underscore)]
 #![deny(clippy::assertions_on_result_states)]
 #![deny(clippy::big_endian_bytes)]
 #![deny(clippy::cfg_not_test)]
 #![deny(clippy::clone_on_ref_ptr)]
-#![deny(clippy::cognitive_complexity)]
 #![deny(clippy::create_dir)]
 #![deny(clippy::dbg_macro)]
 #![deny(clippy::decimal_literal_representation)]
@@ -41,12 +39,10 @@
 #![deny(clippy::host_endian_bytes)]
 #![deny(clippy::if_then_some_else_none)]
 #![deny(clippy::impl_trait_in_params)]
-#![deny(clippy::indexing_slicing)]
 #![deny(clippy::infinite_loop)]
 #![deny(clippy::inline_asm_x86_att_syntax)]
 #![deny(clippy::inline_asm_x86_intel_syntax)]
 #![deny(clippy::integer_division)]
-#![deny(clippy::integer_division_remainder_used)]
 #![deny(clippy::iter_over_hash_type)]
 #![deny(clippy::large_include_file)]
 #![deny(clippy::let_underscore_must_use)]
@@ -66,7 +62,6 @@
 #![deny(clippy::mutex_integer)]
 #![deny(clippy::needless_raw_strings)]
 #![deny(clippy::non_zero_suggestions)]
-#![deny(clippy::panic_in_result_fn)]
 #![deny(clippy::partial_pub_fields)]
 #![deny(clippy::pathbuf_init_then_push)]
 #![deny(clippy::pattern_type_mismatch)]
@@ -101,14 +96,31 @@
 #![deny(clippy::unseparated_literal_suffix)]
 #![deny(clippy::unused_result_ok)]
 #![deny(clippy::unused_trait_names)]
-#![deny(clippy::unwrap_used)]
 #![deny(clippy::use_debug)]
 #![deny(clippy::verbose_file_reads)]
 //
 // Allowed lints
+#![allow(clippy::cast_precision_loss)]
+#![allow(clippy::missing_errors_doc)]
 #![allow(clippy::missing_panics_doc)]
 #![allow(clippy::multiple_crate_versions)]
+#![allow(clippy::result_large_err)]
+#![allow(clippy::struct_field_names)]
+#![allow(clippy::too_many_arguments)]
+#![allow(clippy::too_many_lines)]
 //
 // endregion
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-fn main() {}
+mod game;
+
+use crate::game::Game;
+use flut::app;
+use mimalloc::MiMalloc;
+
+#[global_allocator]
+static GLOBAL: MiMalloc = MiMalloc;
+
+fn main() {
+  app::run(Game::default());
+}
