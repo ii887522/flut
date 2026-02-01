@@ -1,9 +1,11 @@
+use crate::{consts, models::push_consts::PushConsts, storage_buffer::StorageBuffer};
 use ash::{khr, vk};
 use rustc_hash::FxHashSet;
 use std::{
   ffi::{CStr, CString, c_char},
-  iter,
+  iter, mem, ptr, slice,
 };
+use vk_mem::Alloc as _;
 use winit::{
   dpi::{LogicalPosition, LogicalSize, PhysicalPosition, PhysicalSize, Position, Size},
   event_loop::ActiveEventLoop,
@@ -12,15 +14,16 @@ use winit::{
 };
 
 const VK_INSTANCE_EXT_NAMES: &[*const c_char] = &[
-  vk::KHR_PORTABILITY_ENUMERATION_NAME.as_ptr(),
   #[cfg(debug_assertions)]
   vk::EXT_LAYER_SETTINGS_NAME.as_ptr(),
+  vk::KHR_PORTABILITY_ENUMERATION_NAME.as_ptr(),
 ];
 
 const VK_DEVICE_EXT_NAMES: &[&CStr] = &[
-  vk::KHR_PORTABILITY_SUBSET_NAME,
-  vk::EXT_PAGEABLE_DEVICE_LOCAL_MEMORY_NAME,
+  vk::EXT_MEMORY_BUDGET_NAME,
   vk::EXT_MEMORY_PRIORITY_NAME,
+  vk::EXT_PAGEABLE_DEVICE_LOCAL_MEMORY_NAME,
+  vk::KHR_PORTABILITY_SUBSET_NAME,
   vk::KHR_SWAPCHAIN_NAME,
 ];
 
@@ -28,7 +31,6 @@ const VERT_SHADER_CODE: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/shader
 const FRAG_SHADER_CODE: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/shader.frag.spv"));
 const DYNAMIC_STATES: &[vk::DynamicState] =
   &[vk::DynamicState::VIEWPORT, vk::DynamicState::SCISSOR];
-const MAX_IN_FLIGHT_FRAME_COUNT: usize = 2;
 
 struct WindowMinimized;
 
@@ -49,6 +51,9 @@ struct Shared {
   pipeline_layout: vk::PipelineLayout,
   render_pass: vk::RenderPass,
   graphics_pipeline: vk::Pipeline,
+  vk_allocator: vk_mem::Allocator,
+  instance_buffer: StorageBuffer,
+  msaa_sample_count: vk::SampleCountFlags,
   graphics_command_pools: Box<[vk::CommandPool]>,
   graphics_command_buffers: Box<[vk::CommandBuffer]>,
   image_avail_semaphores: Box<[vk::Semaphore]>,
@@ -100,7 +105,7 @@ impl Shared {
     let vk_entry = unsafe { ash::Entry::load().unwrap() };
 
     let vk_app_info = vk::ApplicationInfo {
-      api_version: vk::make_api_version(0, 1, 3, 0),
+      api_version: vk::API_VERSION_1_3,
       ..Default::default()
     };
 
@@ -342,7 +347,7 @@ impl Shared {
 
     let vk_physical_devices = unsafe { vk_instance.enumerate_physical_devices().unwrap() };
 
-    let Some((vk_physical_device, graphics_queue_family_index, present_queue_family_index)) =
+    let Some((vk_physical_device, vk_physical_device_props, graphics_queue_family_index, present_queue_family_index)) =
       vk_physical_devices
         .into_iter()
         .filter_map(|vk_physical_device| {
@@ -390,23 +395,22 @@ impl Shared {
             }
           )?;
 
+          let mut vk_physical_device_props = vk::PhysicalDeviceProperties2::default();
+
+          unsafe {
+            vk_instance
+              .get_physical_device_properties2(vk_physical_device, &mut vk_physical_device_props);
+          }
+
           Some((
             vk_physical_device,
+            vk_physical_device_props,
             graphics_queue_family_index,
             present_queue_family_index,
           ))
         })
         .max_by_key(
-          |&(vk_physical_device, _graphics_queue_family_index, _present_queue_family_index)| {
-            let mut vk_physical_device_props = vk::PhysicalDeviceProperties2::default();
-
-            unsafe {
-              vk_instance
-                .get_physical_device_properties2(vk_physical_device, &mut vk_physical_device_props);
-            }
-
-            let vk_physical_device_props = vk_physical_device_props;
-
+          |&(_vk_physical_device, vk_physical_device_props, _graphics_queue_family_index, _present_queue_family_index)| {
             match vk_physical_device_props.properties.device_type {
               vk::PhysicalDeviceType::INTEGRATED_GPU => 4_u32,
               vk::PhysicalDeviceType::DISCRETE_GPU => 3_u32,
@@ -449,14 +453,50 @@ impl Shared {
           return None;
         };
 
-        VK_DEVICE_EXT_NAMES.iter().find_map(|&req_vk_ext_name| {
-          (req_vk_ext_name == vk_ext_name).then_some(req_vk_ext_name.as_ptr())
-        })
+        VK_DEVICE_EXT_NAMES
+          .iter()
+          .find_map(|&req_vk_ext_name| (req_vk_ext_name == vk_ext_name).then_some(req_vk_ext_name))
       })
       .collect::<Box<_>>();
 
+    let allocator_create_flags = vk_mem::AllocatorCreateFlags::EXTERNALLY_SYNCHRONIZED
+      | vk_mem::AllocatorCreateFlags::BUFFER_DEVICE_ADDRESS
+      | vk_mem::AllocatorCreateFlags::KHR_DEDICATED_ALLOCATION
+      | vk_device_ext_names
+        .iter()
+        .fold(vk_mem::AllocatorCreateFlags::empty(), |acc, &ext_name| {
+          let allocator_create_flag = if ext_name == vk::EXT_MEMORY_BUDGET_NAME {
+            vk_mem::AllocatorCreateFlags::EXT_MEMORY_BUDGET
+          } else if ext_name == vk::EXT_MEMORY_PRIORITY_NAME {
+            vk_mem::AllocatorCreateFlags::EXT_MEMORY_PRIORITY
+          } else {
+            vk_mem::AllocatorCreateFlags::empty()
+          };
+
+          acc | allocator_create_flag
+        });
+
+    let vk_device_ext_names = vk_device_ext_names
+      .into_iter()
+      .map(CStr::as_ptr)
+      .collect::<Box<_>>();
+
+    let mut vk_multisampled_render_to_single_sampled_features =
+      vk::PhysicalDeviceMultisampledRenderToSingleSampledFeaturesEXT {
+        multisampled_render_to_single_sampled: vk::TRUE,
+        ..Default::default()
+      };
+
+    let mut vk_separate_depth_stencil_layouts_features =
+      vk::PhysicalDeviceSeparateDepthStencilLayoutsFeatures {
+        separate_depth_stencil_layouts: vk::TRUE,
+        p_next: (&raw mut vk_multisampled_render_to_single_sampled_features).cast(),
+        ..Default::default()
+      };
+
     let mut vk_physical_device_8_bit_storage_features = vk::PhysicalDevice8BitStorageFeatures {
       uniform_and_storage_buffer8_bit_access: vk::TRUE,
+      p_next: (&raw mut vk_separate_depth_stencil_layouts_features).cast(),
       ..Default::default()
     };
 
@@ -494,6 +534,7 @@ impl Shared {
         fragment_stores_and_atomics: vk::TRUE,
         vertex_pipeline_stores_and_atomics: vk::TRUE,
         shader_int64: vk::TRUE,
+        alpha_to_one: vk::TRUE,
         ..Default::default()
       },
       p_next: (&raw mut vk_physical_device_pageable_device_local_memory_features).cast(),
@@ -542,6 +583,23 @@ impl Shared {
       .unwrap_or_else(|| &vk_surface_formats[0]);
 
     let vk_swapchain_device = khr::swapchain::Device::new(&vk_instance, &vk_device);
+
+    let max_msaa_sample_count = vk_physical_device_props
+      .properties
+      .limits
+      .framebuffer_color_sample_counts
+      & vk_physical_device_props
+        .properties
+        .limits
+        .framebuffer_depth_sample_counts;
+
+    let msaa_sample_count = if max_msaa_sample_count.contains(vk::SampleCountFlags::TYPE_4) {
+      vk::SampleCountFlags::TYPE_4
+    } else if max_msaa_sample_count.contains(vk::SampleCountFlags::TYPE_2) {
+      vk::SampleCountFlags::TYPE_2
+    } else {
+      vk::SampleCountFlags::TYPE_1
+    };
 
     let vert_shader_module_create_info = vk::ShaderModuleCreateInfo {
       code_size: VERT_SHADER_CODE.len(),
@@ -604,7 +662,16 @@ impl Shared {
     };
 
     let multisample_state_create_info = vk::PipelineMultisampleStateCreateInfo {
-      rasterization_samples: vk::SampleCountFlags::TYPE_1,
+      rasterization_samples: msaa_sample_count,
+      alpha_to_coverage_enable: vk::TRUE,
+      alpha_to_one_enable: vk::TRUE,
+      ..Default::default()
+    };
+
+    let depth_stencil_state_create_info = vk::PipelineDepthStencilStateCreateInfo {
+      depth_test_enable: vk::TRUE,
+      depth_write_enable: vk::TRUE,
+      depth_compare_op: vk::CompareOp::LESS_OR_EQUAL,
       ..Default::default()
     };
 
@@ -625,7 +692,17 @@ impl Shared {
       ..Default::default()
     };
 
-    let pipeline_layout_create_info = vk::PipelineLayoutCreateInfo::default();
+    let push_const_ranges = [vk::PushConstantRange {
+      stage_flags: vk::ShaderStageFlags::VERTEX,
+      offset: 0,
+      size: mem::size_of::<PushConsts>().try_into().unwrap(),
+    }];
+
+    let pipeline_layout_create_info = vk::PipelineLayoutCreateInfo {
+      push_constant_range_count: push_const_ranges.len().try_into().unwrap(),
+      p_push_constant_ranges: push_const_ranges.as_ptr(),
+      ..Default::default()
+    };
 
     let pipeline_layout = unsafe {
       vk_device
@@ -633,20 +710,81 @@ impl Shared {
         .unwrap()
     };
 
-    let attachment_descs = [vk::AttachmentDescription2 {
-      format: swapchain_format.format,
+    // Attachment 0: MSAA color attachment (or direct if 1x)
+    // Attachment 1: Depth attachment
+    // Attachment 2: Resolve attachment (swapchain image) - only used when MSAA > 1x
+    let mut attachment_descs = vec![if msaa_sample_count == vk::SampleCountFlags::TYPE_1 {
+      // Color attachment
+      vk::AttachmentDescription2 {
+        format: swapchain_format.format,
+        samples: vk::SampleCountFlags::TYPE_1,
+        load_op: vk::AttachmentLoadOp::CLEAR,
+        store_op: vk::AttachmentStoreOp::STORE,
+        stencil_load_op: vk::AttachmentLoadOp::DONT_CARE,
+        stencil_store_op: vk::AttachmentStoreOp::DONT_CARE,
+        initial_layout: vk::ImageLayout::UNDEFINED,
+        final_layout: vk::ImageLayout::PRESENT_SRC_KHR,
+        ..Default::default()
+      }
+    } else {
+      // MSAA color attachment
+      vk::AttachmentDescription2 {
+        format: swapchain_format.format,
+        samples: msaa_sample_count,
+        load_op: vk::AttachmentLoadOp::CLEAR,
+        store_op: vk::AttachmentStoreOp::DONT_CARE,
+        stencil_load_op: vk::AttachmentLoadOp::DONT_CARE,
+        stencil_store_op: vk::AttachmentStoreOp::DONT_CARE,
+        initial_layout: vk::ImageLayout::UNDEFINED,
+        final_layout: vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
+        ..Default::default()
+      }
+    }];
+
+    // Depth attachment
+    attachment_descs.push(vk::AttachmentDescription2 {
+      format: vk::Format::D16_UNORM,
       samples: vk::SampleCountFlags::TYPE_1,
       load_op: vk::AttachmentLoadOp::CLEAR,
-      store_op: vk::AttachmentStoreOp::STORE,
+      store_op: vk::AttachmentStoreOp::DONT_CARE,
       stencil_load_op: vk::AttachmentLoadOp::DONT_CARE,
       stencil_store_op: vk::AttachmentStoreOp::DONT_CARE,
       initial_layout: vk::ImageLayout::UNDEFINED,
-      final_layout: vk::ImageLayout::PRESENT_SRC_KHR,
+      final_layout: vk::ImageLayout::DEPTH_ATTACHMENT_OPTIMAL,
       ..Default::default()
-    }];
+    });
+
+    if msaa_sample_count != vk::SampleCountFlags::TYPE_1 {
+      // Resolve attachment (swapchain image)
+      attachment_descs.push(vk::AttachmentDescription2 {
+        format: swapchain_format.format,
+        samples: vk::SampleCountFlags::TYPE_1,
+        load_op: vk::AttachmentLoadOp::DONT_CARE,
+        store_op: vk::AttachmentStoreOp::STORE,
+        stencil_load_op: vk::AttachmentLoadOp::DONT_CARE,
+        stencil_store_op: vk::AttachmentStoreOp::DONT_CARE,
+        initial_layout: vk::ImageLayout::UNDEFINED,
+        final_layout: vk::ImageLayout::PRESENT_SRC_KHR,
+        ..Default::default()
+      });
+    }
+
+    let attachment_descs = attachment_descs;
 
     let color_attachment_refs = [vk::AttachmentReference2 {
       attachment: 0,
+      layout: vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
+      ..Default::default()
+    }];
+
+    let depth_attachment_ref = vk::AttachmentReference2 {
+      attachment: 1,
+      layout: vk::ImageLayout::DEPTH_ATTACHMENT_OPTIMAL,
+      ..Default::default()
+    };
+
+    let resolve_attachment_refs = [vk::AttachmentReference2 {
+      attachment: 2,
       layout: vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
       ..Default::default()
     }];
@@ -655,16 +793,26 @@ impl Shared {
       pipeline_bind_point: vk::PipelineBindPoint::GRAPHICS,
       color_attachment_count: color_attachment_refs.len().try_into().unwrap(),
       p_color_attachments: color_attachment_refs.as_ptr(),
+      p_depth_stencil_attachment: &raw const depth_attachment_ref,
+      p_resolve_attachments: if msaa_sample_count == vk::SampleCountFlags::TYPE_1 {
+        ptr::null()
+      } else {
+        resolve_attachment_refs.as_ptr()
+      },
       ..Default::default()
     }];
 
     let subpass_deps = [vk::SubpassDependency2 {
       src_subpass: vk::SUBPASS_EXTERNAL,
       dst_subpass: 0,
-      src_stage_mask: vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
-      dst_stage_mask: vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
-      src_access_mask: vk::AccessFlags::empty(),
-      dst_access_mask: vk::AccessFlags::COLOR_ATTACHMENT_WRITE,
+      src_stage_mask: vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT
+        | vk::PipelineStageFlags::LATE_FRAGMENT_TESTS,
+      dst_stage_mask: vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT
+        | vk::PipelineStageFlags::EARLY_FRAGMENT_TESTS,
+      src_access_mask: vk::AccessFlags::COLOR_ATTACHMENT_WRITE
+        | vk::AccessFlags::DEPTH_STENCIL_ATTACHMENT_WRITE,
+      dst_access_mask: vk::AccessFlags::COLOR_ATTACHMENT_WRITE
+        | vk::AccessFlags::DEPTH_STENCIL_ATTACHMENT_WRITE,
       dependency_flags: vk::DependencyFlags::BY_REGION,
       ..Default::default()
     }];
@@ -693,6 +841,7 @@ impl Shared {
       p_viewport_state: &raw const viewport_state_create_info,
       p_rasterization_state: &raw const rasterization_state_create_info,
       p_multisample_state: &raw const multisample_state_create_info,
+      p_depth_stencil_state: &raw const depth_stencil_state_create_info,
       p_color_blend_state: &raw const color_blend_state_create_info,
       p_dynamic_state: &raw const dynamic_state_create_info,
       layout: pipeline_layout,
@@ -719,6 +868,17 @@ impl Shared {
       vk_device.destroy_shader_module(vert_shader_module, None);
     }
 
+    let mut vk_allocator_create_info =
+      vk_mem::AllocatorCreateInfo::new(&vk_instance, &vk_device, vk_physical_device);
+
+    vk_allocator_create_info.flags = allocator_create_flags;
+    vk_allocator_create_info.preferred_large_heap_block_size =
+      (consts::MAX_IN_FLIGHT_FRAME_COUNT * 1024 * 1024) as u64; // 2MB
+    vk_allocator_create_info.vulkan_api_version = vk::API_VERSION_1_3;
+
+    let vk_allocator = unsafe { vk_mem::Allocator::new(vk_allocator_create_info).unwrap() };
+    let instance_buffer = StorageBuffer::new(&vk_device, &vk_allocator);
+
     let graphics_command_pools = iter::repeat_with(|| {
       let graphics_command_pool_create_info = vk::CommandPoolCreateInfo {
         flags: vk::CommandPoolCreateFlags::TRANSIENT,
@@ -732,7 +892,7 @@ impl Shared {
           .unwrap()
       }
     })
-    .take(MAX_IN_FLIGHT_FRAME_COUNT)
+    .take(consts::MAX_IN_FLIGHT_FRAME_COUNT)
     .collect::<Box<_>>();
 
     let graphics_command_buffers = graphics_command_pools
@@ -765,7 +925,7 @@ impl Shared {
         .create_semaphore(&semaphore_create_info, None)
         .unwrap()
     })
-    .take(MAX_IN_FLIGHT_FRAME_COUNT)
+    .take(consts::MAX_IN_FLIGHT_FRAME_COUNT)
     .collect::<Box<_>>();
 
     let render_done_semaphores = iter::repeat_with(|| unsafe {
@@ -773,12 +933,12 @@ impl Shared {
         .create_semaphore(&semaphore_create_info, None)
         .unwrap()
     })
-    .take(MAX_IN_FLIGHT_FRAME_COUNT)
+    .take(consts::MAX_IN_FLIGHT_FRAME_COUNT)
     .collect::<Box<_>>();
 
     let in_flight_fences =
       iter::repeat_with(|| unsafe { vk_device.create_fence(&fence_create_info, None).unwrap() })
-        .take(MAX_IN_FLIGHT_FRAME_COUNT)
+        .take(consts::MAX_IN_FLIGHT_FRAME_COUNT)
         .collect::<Box<_>>();
 
     Self {
@@ -798,6 +958,9 @@ impl Shared {
       pipeline_layout,
       render_pass,
       graphics_pipeline,
+      vk_allocator,
+      instance_buffer,
+      msaa_sample_count,
       graphics_command_pools,
       graphics_command_buffers,
       image_avail_semaphores,
@@ -832,6 +995,10 @@ impl Shared {
         .iter()
         .for_each(|&command_pool| self.vk_device.destroy_command_pool(command_pool, None));
     }
+
+    self.instance_buffer.drop(&self.vk_allocator);
+    drop(self.vk_allocator);
+
     unsafe {
       self
         .vk_device
@@ -865,6 +1032,12 @@ pub struct Created {
   swapchain: vk::SwapchainKHR,
   _swapchain_images: Box<[vk::Image]>,
   swapchain_image_views: Box<[vk::ImageView]>,
+  msaa_image: Option<vk::Image>,
+  msaa_image_alloc: Option<vk_mem::Allocation>,
+  msaa_image_view: Option<vk::ImageView>,
+  depth_image: vk::Image,
+  depth_image_alloc: vk_mem::Allocation,
+  depth_image_view: vk::ImageView,
   swapchain_extent: vk::Extent2D,
   swapchain_framebuffers: Box<[vk::Framebuffer]>,
 }
@@ -979,13 +1152,139 @@ impl Created {
       })
       .collect::<Box<_>>();
 
+    // Create MSAA image if using multisampling
+    let (msaa_image, msaa_image_alloc, msaa_image_view) =
+      if shared.msaa_sample_count == vk::SampleCountFlags::TYPE_1 {
+        (None, None, None)
+      } else {
+        let msaa_image_create_info = vk::ImageCreateInfo {
+          image_type: vk::ImageType::TYPE_2D,
+          format: shared.swapchain_format.format,
+          extent: vk::Extent3D {
+            width: swapchain_extent.width,
+            height: swapchain_extent.height,
+            depth: 1,
+          },
+          mip_levels: 1,
+          array_layers: 1,
+          samples: shared.msaa_sample_count,
+          tiling: vk::ImageTiling::OPTIMAL,
+          usage: vk::ImageUsageFlags::COLOR_ATTACHMENT | vk::ImageUsageFlags::TRANSIENT_ATTACHMENT,
+          sharing_mode: vk::SharingMode::EXCLUSIVE,
+          initial_layout: vk::ImageLayout::UNDEFINED,
+          ..Default::default()
+        };
+
+        let msaa_image_alloc_create_info = vk_mem::AllocationCreateInfo {
+          flags: vk_mem::AllocationCreateFlags::DEDICATED_MEMORY,
+          usage: vk_mem::MemoryUsage::AutoPreferDevice,
+          preferred_flags: vk::MemoryPropertyFlags::LAZILY_ALLOCATED,
+          priority: 1.0,
+          ..Default::default()
+        };
+
+        let (msaa_image, msaa_image_alloc) = unsafe {
+          shared
+            .vk_allocator
+            .create_image(&msaa_image_create_info, &msaa_image_alloc_create_info)
+            .unwrap()
+        };
+
+        let msaa_image_view_create_info = vk::ImageViewCreateInfo {
+          image: msaa_image,
+          view_type: vk::ImageViewType::TYPE_2D,
+          format: shared.swapchain_format.format,
+          subresource_range: vk::ImageSubresourceRange {
+            aspect_mask: vk::ImageAspectFlags::COLOR,
+            base_mip_level: 0,
+            level_count: 1,
+            base_array_layer: 0,
+            layer_count: 1,
+          },
+          ..Default::default()
+        };
+
+        let msaa_image_view = unsafe {
+          shared
+            .vk_device
+            .create_image_view(&msaa_image_view_create_info, None)
+            .unwrap()
+        };
+
+        (
+          Some(msaa_image),
+          Some(msaa_image_alloc),
+          Some(msaa_image_view),
+        )
+      };
+
+    let depth_image_create_info = vk::ImageCreateInfo {
+      image_type: vk::ImageType::TYPE_2D,
+      format: vk::Format::D16_UNORM,
+      extent: vk::Extent3D {
+        width: swapchain_extent.width,
+        height: swapchain_extent.height,
+        depth: 1,
+      },
+      mip_levels: 1,
+      array_layers: 1,
+      samples: vk::SampleCountFlags::TYPE_1,
+      tiling: vk::ImageTiling::OPTIMAL,
+      usage: vk::ImageUsageFlags::DEPTH_STENCIL_ATTACHMENT
+        | vk::ImageUsageFlags::TRANSIENT_ATTACHMENT,
+      sharing_mode: vk::SharingMode::EXCLUSIVE,
+      initial_layout: vk::ImageLayout::UNDEFINED,
+      ..Default::default()
+    };
+
+    let depth_image_alloc_create_info = vk_mem::AllocationCreateInfo {
+      flags: vk_mem::AllocationCreateFlags::DEDICATED_MEMORY,
+      usage: vk_mem::MemoryUsage::AutoPreferDevice,
+      preferred_flags: vk::MemoryPropertyFlags::LAZILY_ALLOCATED,
+      priority: 1.0,
+      ..Default::default()
+    };
+
+    let (depth_image, depth_image_alloc) = unsafe {
+      shared
+        .vk_allocator
+        .create_image(&depth_image_create_info, &depth_image_alloc_create_info)
+        .unwrap()
+    };
+
+    let depth_image_view_create_info = vk::ImageViewCreateInfo {
+      image: depth_image,
+      view_type: vk::ImageViewType::TYPE_2D,
+      format: vk::Format::D16_UNORM,
+      subresource_range: vk::ImageSubresourceRange {
+        aspect_mask: vk::ImageAspectFlags::DEPTH,
+        base_mip_level: 0,
+        level_count: 1,
+        base_array_layer: 0,
+        layer_count: 1,
+      },
+      ..Default::default()
+    };
+
+    let depth_image_view = unsafe {
+      shared
+        .vk_device
+        .create_image_view(&depth_image_view_create_info, None)
+        .unwrap()
+    };
+
     let swapchain_framebuffers = swapchain_image_views
       .iter()
-      .map(|&image_view| {
+      .map(|&swapchain_image_view| {
+        let attachments = msaa_image_view.map_or_else(
+          || vec![swapchain_image_view, depth_image_view],
+          |msaa_view| vec![msaa_view, depth_image_view, swapchain_image_view],
+        );
+
         let framebuffer_create_info = vk::FramebufferCreateInfo {
           render_pass: shared.render_pass,
-          attachment_count: 1,
-          p_attachments: &raw const image_view,
+          attachment_count: attachments.len().try_into().unwrap(),
+          p_attachments: attachments.as_ptr(),
           width: swapchain_extent.width,
           height: swapchain_extent.height,
           layers: 1,
@@ -1007,6 +1306,12 @@ impl Created {
       swapchain,
       _swapchain_images: swapchain_images,
       swapchain_image_views,
+      msaa_image,
+      msaa_image_view,
+      msaa_image_alloc,
+      depth_image,
+      depth_image_view,
+      depth_image_alloc,
       swapchain_extent,
       swapchain_framebuffers,
     })
@@ -1023,13 +1328,41 @@ impl Created {
     result
   }
 
-  fn drop(self, shared: &Shared) {
+  fn drop(mut self, shared: &Shared) {
     unsafe {
       self
         .swapchain_framebuffers
         .iter()
         .for_each(|&framebuffer| shared.vk_device.destroy_framebuffer(framebuffer, None));
     }
+
+    unsafe {
+      shared
+        .vk_device
+        .destroy_image_view(self.depth_image_view, None);
+    }
+
+    unsafe {
+      shared
+        .vk_allocator
+        .destroy_image(self.depth_image, &mut self.depth_image_alloc);
+    }
+
+    if let Some(msaa_image_view) = self.msaa_image_view {
+      unsafe {
+        shared.vk_device.destroy_image_view(msaa_image_view, None);
+      }
+    }
+
+    if let (Some(msaa_image), Some(mut msaa_image_alloc)) = (self.msaa_image, self.msaa_image_alloc)
+    {
+      unsafe {
+        shared
+          .vk_allocator
+          .destroy_image(msaa_image, &mut msaa_image_alloc);
+      }
+    }
+
     unsafe {
       self
         .swapchain_image_views
@@ -1149,11 +1482,19 @@ impl Renderer<Created> {
         .unwrap();
     }
 
-    let clear_values = [vk::ClearValue {
-      color: vk::ClearColorValue {
-        float32: [0.0, 0.0, 0.0, 1.0],
+    let clear_values = [
+      vk::ClearValue {
+        color: vk::ClearColorValue {
+          float32: [0.0, 0.0, 0.0, 1.0],
+        },
       },
-    }];
+      vk::ClearValue {
+        depth_stencil: vk::ClearDepthStencilValue {
+          depth: 1.0,
+          ..Default::default()
+        },
+      },
+    ];
 
     let render_pass_begin_info = vk::RenderPassBeginInfo {
       render_pass: shared.render_pass,
@@ -1211,6 +1552,36 @@ impl Renderer<Created> {
       shared
         .vk_device
         .cmd_set_scissor(graphics_command_buffer, 0, &scissors);
+    }
+
+    let LogicalSize {
+      width: cam_width,
+      height: cam_height,
+    } = shared
+      .window
+      .inner_size()
+      .to_logical(shared.window.scale_factor());
+
+    let push_consts = PushConsts {
+      round_rect_buffer: shared.instance_buffer.get_addr(),
+      cam_size: (cam_width, cam_height),
+    };
+
+    let raw_push_consts = unsafe {
+      slice::from_raw_parts(
+        (&raw const push_consts).cast(),
+        mem::size_of::<PushConsts>(),
+      )
+    };
+
+    unsafe {
+      shared.vk_device.cmd_push_constants(
+        graphics_command_buffer,
+        shared.pipeline_layout,
+        vk::ShaderStageFlags::VERTEX,
+        0,
+        raw_push_consts,
+      );
     }
 
     unsafe {
@@ -1292,7 +1663,7 @@ impl Renderer<Created> {
 
     Ok(Self {
       shared: Shared {
-        frame_index: shared.frame_index.wrapping_add(1) % MAX_IN_FLIGHT_FRAME_COUNT,
+        frame_index: shared.frame_index.wrapping_add(1) % consts::MAX_IN_FLIGHT_FRAME_COUNT,
         ..shared
       },
       state,
