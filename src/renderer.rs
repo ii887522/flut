@@ -1,4 +1,11 @@
-use crate::{consts, models::push_consts::PushConsts, storage_buffer::StorageBuffer};
+use crate::{
+  consts,
+  model_sync::ModelSync,
+  models::{
+    Model as _, model_capacities::ModelCapacities, push_consts::PushConsts, round_rect::RoundRect,
+  },
+  storage_buffer::StorageBuffer,
+};
 use ash::{khr, vk};
 use rustc_hash::FxHashSet;
 use std::{
@@ -46,25 +53,36 @@ struct Shared {
   vk_device: ash::Device,
   graphics_queue: vk::Queue,
   present_queue: vk::Queue,
+  transfer_queue: vk::Queue,
   swapchain_format: vk::SurfaceFormatKHR,
   vk_swapchain_device: khr::swapchain::Device,
   pipeline_layout: vk::PipelineLayout,
   render_pass: vk::RenderPass,
   graphics_pipeline: vk::Pipeline,
   vk_allocator: vk_mem::Allocator,
-  instance_buffer: StorageBuffer,
+  model_buffer: StorageBuffer,
+  round_rect_sync: ModelSync<RoundRect>,
   msaa_sample_count: vk::SampleCountFlags,
   graphics_command_pools: Box<[vk::CommandPool]>,
   graphics_command_buffers: Box<[vk::CommandBuffer]>,
   image_avail_semaphores: Box<[vk::Semaphore]>,
   render_done_semaphores: Box<[vk::Semaphore]>,
+  transfer_done_semaphores: Box<[vk::Semaphore]>,
   in_flight_fences: Box<[vk::Fence]>,
   frame_index: usize,
 }
 
 impl Shared {
-  fn new(event_loop: &ActiveEventLoop, title: &str, size: (f64, f64)) -> Self {
+  fn new(
+    event_loop: &ActiveEventLoop,
+    title: &str,
+    size: (f64, f64),
+    model_capacities: ModelCapacities,
+  ) -> Self {
     let (width, height) = size;
+    let ModelCapacities {
+      round_rect_capacity,
+    } = model_capacities;
 
     let window = event_loop
       .create_window(
@@ -347,7 +365,13 @@ impl Shared {
 
     let vk_physical_devices = unsafe { vk_instance.enumerate_physical_devices().unwrap() };
 
-    let Some((vk_physical_device, vk_physical_device_props, graphics_queue_family_index, present_queue_family_index)) =
+    let Some((
+      vk_physical_device,
+      vk_physical_device_props,
+      graphics_queue_family_index,
+      present_queue_family_index,
+      transfer_queue_family_index,
+    )) =
       vk_physical_devices
         .into_iter()
         .filter_map(|vk_physical_device| {
@@ -370,14 +394,20 @@ impl Shared {
           let graphics_queue_family_index = queue_family_props
             .iter()
             .enumerate()
-            .find_map(|(index, queue_family_props)| {
+            .filter(|&(_index, queue_family_props)| {
               queue_family_props
                 .queue_family_properties
                 .queue_flags
                 .contains(vk::QueueFlags::GRAPHICS)
-                .then_some(index)
-            })?
-            .try_into().unwrap();
+            })
+            .min_by_key(|&(_index, queue_family_props)| {
+              queue_family_props
+                .queue_family_properties
+                .queue_flags
+                .as_raw()
+                .count_ones()
+            })
+            .map(|(index, _queue_family_props)| index.try_into().unwrap())?;
 
           let present_queue_family_index = queue_family_props.iter().enumerate().find_map(
             |(index, _queue_family_props)| {
@@ -395,6 +425,27 @@ impl Shared {
             }
           )?;
 
+          let transfer_queue_family_index = queue_family_props
+            .iter()
+            .enumerate()
+            .filter(|&(_index, queue_family_props)| {
+              queue_family_props
+                .queue_family_properties
+                .queue_flags
+                .contains(vk::QueueFlags::TRANSFER)
+            })
+            .min_by_key(|&(_index, queue_family_props)| {
+              queue_family_props
+                .queue_family_properties
+                .queue_flags
+                .as_raw()
+                .count_ones()
+            })
+            .map_or(
+              graphics_queue_family_index,
+              |(index, _queue_family_props)| index.try_into().unwrap()
+            );
+
           let mut vk_physical_device_props = vk::PhysicalDeviceProperties2::default();
 
           unsafe {
@@ -407,10 +458,17 @@ impl Shared {
             vk_physical_device_props,
             graphics_queue_family_index,
             present_queue_family_index,
+            transfer_queue_family_index,
           ))
         })
         .max_by_key(
-          |&(_vk_physical_device, vk_physical_device_props, _graphics_queue_family_index, _present_queue_family_index)| {
+          |&(
+            _vk_physical_device,
+            vk_physical_device_props,
+            _graphics_queue_family_index,
+            _present_queue_family_index,
+            _transfer_queue_family_index
+          )| {
             match vk_physical_device_props.properties.device_type {
               vk::PhysicalDeviceType::INTEGRATED_GPU => 4_u32,
               vk::PhysicalDeviceType::DISCRETE_GPU => 3_u32,
@@ -426,16 +484,19 @@ impl Shared {
 
     let queue_priorities = [1.0];
 
-    let vk_queue_create_infos =
-      FxHashSet::from_iter([graphics_queue_family_index, present_queue_family_index])
-        .into_iter()
-        .map(|queue_family_index| vk::DeviceQueueCreateInfo {
-          queue_family_index,
-          queue_count: queue_priorities.len().try_into().unwrap(),
-          p_queue_priorities: queue_priorities.as_ptr(),
-          ..Default::default()
-        })
-        .collect::<Box<_>>();
+    let vk_queue_create_infos = FxHashSet::from_iter([
+      graphics_queue_family_index,
+      present_queue_family_index,
+      transfer_queue_family_index,
+    ])
+    .into_iter()
+    .map(|queue_family_index| vk::DeviceQueueCreateInfo {
+      queue_family_index,
+      queue_count: queue_priorities.len().try_into().unwrap(),
+      p_queue_priorities: queue_priorities.as_ptr(),
+      ..Default::default()
+    })
+    .collect::<Box<_>>();
 
     let vk_ext_props = unsafe {
       vk_instance
@@ -568,8 +629,15 @@ impl Shared {
       ..Default::default()
     };
 
+    let transfer_queue_info = vk::DeviceQueueInfo2 {
+      queue_family_index: transfer_queue_family_index,
+      queue_index: 0,
+      ..Default::default()
+    };
+
     let graphics_queue = unsafe { vk_device.get_device_queue2(&graphics_queue_info) };
     let present_queue = unsafe { vk_device.get_device_queue2(&present_queue_info) };
+    let transfer_queue = unsafe { vk_device.get_device_queue2(&transfer_queue_info) };
 
     let vk_surface_formats = unsafe {
       vk_surface_instance
@@ -868,19 +936,30 @@ impl Shared {
       vk_device.destroy_shader_module(vert_shader_module, None);
     }
 
+    let total_model_capacity_bytes = model_capacities.calc_bytes();
+
     let mut vk_allocator_create_info =
       vk_mem::AllocatorCreateInfo::new(&vk_instance, &vk_device, vk_physical_device);
 
     vk_allocator_create_info.flags = allocator_create_flags;
     vk_allocator_create_info.preferred_large_heap_block_size =
-      (consts::MAX_IN_FLIGHT_FRAME_COUNT * 1024 * 1024) as u64; // 2MB
+      (consts::MAX_IN_FLIGHT_FRAME_COUNT * total_model_capacity_bytes).max(2 * 1024 * 1024) as u64; // Min 2 MB
     vk_allocator_create_info.vulkan_api_version = vk::API_VERSION_1_3;
 
     let vk_allocator = unsafe { vk_mem::Allocator::new(vk_allocator_create_info).unwrap() };
-    let instance_buffer = StorageBuffer::new(&vk_device, &vk_allocator);
+
+    let model_buffer = StorageBuffer::new(
+      &vk_device,
+      &vk_allocator,
+      graphics_queue_family_index,
+      transfer_queue_family_index,
+      total_model_capacity_bytes,
+    );
+
+    let round_rect_sync = ModelSync::new(round_rect_capacity);
 
     let graphics_command_pools = iter::repeat_with(|| {
-      let graphics_command_pool_create_info = vk::CommandPoolCreateInfo {
+      let command_pool_create_info = vk::CommandPoolCreateInfo {
         flags: vk::CommandPoolCreateFlags::TRANSIENT,
         queue_family_index: graphics_queue_family_index,
         ..Default::default()
@@ -888,7 +967,7 @@ impl Shared {
 
       unsafe {
         vk_device
-          .create_command_pool(&graphics_command_pool_create_info, None)
+          .create_command_pool(&command_pool_create_info, None)
           .unwrap()
       }
     })
@@ -936,6 +1015,14 @@ impl Shared {
     .take(consts::MAX_IN_FLIGHT_FRAME_COUNT)
     .collect::<Box<_>>();
 
+    let transfer_done_semaphores = iter::repeat_with(|| unsafe {
+      vk_device
+        .create_semaphore(&semaphore_create_info, None)
+        .unwrap()
+    })
+    .take(consts::MAX_IN_FLIGHT_FRAME_COUNT)
+    .collect::<Box<_>>();
+
     let in_flight_fences =
       iter::repeat_with(|| unsafe { vk_device.create_fence(&fence_create_info, None).unwrap() })
         .take(consts::MAX_IN_FLIGHT_FRAME_COUNT)
@@ -953,18 +1040,21 @@ impl Shared {
       vk_device,
       graphics_queue,
       present_queue,
+      transfer_queue,
       swapchain_format,
       vk_swapchain_device,
       pipeline_layout,
       render_pass,
       graphics_pipeline,
       vk_allocator,
-      instance_buffer,
+      model_buffer,
+      round_rect_sync,
       msaa_sample_count,
       graphics_command_pools,
       graphics_command_buffers,
       image_avail_semaphores,
       render_done_semaphores,
+      transfer_done_semaphores,
       in_flight_fences,
       frame_index: 0,
     }
@@ -976,6 +1066,12 @@ impl Shared {
         .in_flight_fences
         .iter()
         .for_each(|&fence| self.vk_device.destroy_fence(fence, None));
+    }
+    unsafe {
+      self
+        .transfer_done_semaphores
+        .iter()
+        .for_each(|&semaphore| self.vk_device.destroy_semaphore(semaphore, None));
     }
     unsafe {
       self
@@ -996,7 +1092,7 @@ impl Shared {
         .for_each(|&command_pool| self.vk_device.destroy_command_pool(command_pool, None));
     }
 
-    self.instance_buffer.drop(&self.vk_allocator);
+    self.model_buffer.drop(&self.vk_device, &self.vk_allocator);
     drop(self.vk_allocator);
 
     unsafe {
@@ -1072,7 +1168,7 @@ impl Created {
       return Err(WindowMinimized);
     }
 
-    let swapchain_image_count = vk_surface_caps.min_image_count.saturating_add(1);
+    let swapchain_image_count = vk_surface_caps.min_image_count + 1;
 
     let swapchain_image_count = if vk_surface_caps.max_image_count > 0 {
       swapchain_image_count.min(vk_surface_caps.max_image_count)
@@ -1383,9 +1479,14 @@ pub struct Renderer<State> {
 }
 
 impl Renderer<Creating> {
-  pub(super) fn new(event_loop: &ActiveEventLoop, title: &str, size: (f64, f64)) -> Self {
+  pub(super) fn new(
+    event_loop: &ActiveEventLoop,
+    title: &str,
+    size: (f64, f64),
+    model_capacities: ModelCapacities,
+  ) -> Self {
     Self {
-      shared: Shared::new(event_loop, title, size),
+      shared: Shared::new(event_loop, title, size, model_capacities),
       state: Creating,
     }
   }
@@ -1417,10 +1518,11 @@ impl TryFrom<Renderer<Creating>> for Renderer<Created> {
 
 impl Renderer<Created> {
   pub(super) fn render(self) -> Result<Self, Renderer<Creating>> {
-    let Self { shared, state } = self;
+    let Self { mut shared, state } = self;
 
     let image_avail_semaphore = shared.image_avail_semaphores[shared.frame_index];
     let render_done_semaphore = shared.render_done_semaphores[shared.frame_index];
+    let transfer_done_semaphore = shared.transfer_done_semaphores[shared.frame_index];
     let in_flight_fence = shared.in_flight_fences[shared.frame_index];
     let graphics_command_pool = shared.graphics_command_pools[shared.frame_index];
     let graphics_command_buffer = shared.graphics_command_buffers[shared.frame_index];
@@ -1430,6 +1532,31 @@ impl Renderer<Created> {
         .vk_device
         .wait_for_fences(&[in_flight_fence], true, u64::MAX)
         .unwrap();
+    }
+
+    let transfer_command_buffer = shared
+      .round_rect_sync
+      .sync_to(&mut shared.model_buffer, &shared.vk_device);
+
+    if let Some(transfer_command_buffer) = transfer_command_buffer {
+      let queue_submit_info = vk::SubmitInfo {
+        command_buffer_count: 1,
+        p_command_buffers: &raw const transfer_command_buffer,
+        signal_semaphore_count: 1,
+        p_signal_semaphores: &raw const transfer_done_semaphore,
+        ..Default::default()
+      };
+
+      unsafe {
+        shared
+          .vk_device
+          .queue_submit(
+            shared.transfer_queue,
+            &[queue_submit_info],
+            vk::Fence::null(),
+          )
+          .unwrap();
+      }
     }
 
     let acquire_next_image_info = vk::AcquireNextImageInfoKHR {
@@ -1563,7 +1690,7 @@ impl Renderer<Created> {
       .to_logical(shared.window.scale_factor());
 
     let push_consts = PushConsts {
-      round_rect_buffer: shared.instance_buffer.get_addr(),
+      round_rect_buffer: shared.model_buffer.get_addr(),
       cam_size: (cam_width, cam_height),
     };
 
@@ -1584,10 +1711,14 @@ impl Renderer<Created> {
       );
     }
 
+    let vertex_count = (shared.round_rect_sync.get_model_count() * RoundRect::get_vertex_count())
+      .try_into()
+      .unwrap();
+
     unsafe {
       shared
         .vk_device
-        .cmd_draw(graphics_command_buffer, 6, 1, 0, 0);
+        .cmd_draw(graphics_command_buffer, vertex_count, 1, 0, 0);
     }
 
     let subpass_end_info = vk::SubpassEndInfo::default();
@@ -1605,12 +1736,21 @@ impl Renderer<Created> {
         .unwrap();
     }
 
-    let wait_dst_stage_mask = vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT;
+    let mut wait_semaphores = vec![image_avail_semaphore];
+    let mut wait_dst_stage_masks = vec![vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT];
+
+    if transfer_command_buffer.is_some() {
+      wait_semaphores.push(transfer_done_semaphore);
+      wait_dst_stage_masks.push(vk::PipelineStageFlags::VERTEX_SHADER);
+    }
+
+    let wait_semaphores = wait_semaphores;
+    let wait_dst_stage_masks = wait_dst_stage_masks;
 
     let queue_submit_info = vk::SubmitInfo {
-      wait_semaphore_count: 1,
-      p_wait_semaphores: &raw const image_avail_semaphore,
-      p_wait_dst_stage_mask: &raw const wait_dst_stage_mask,
+      wait_semaphore_count: wait_semaphores.len().try_into().unwrap(),
+      p_wait_semaphores: wait_semaphores.as_ptr(),
+      p_wait_dst_stage_mask: wait_dst_stage_masks.as_ptr(),
       command_buffer_count: 1,
       p_command_buffers: &raw const graphics_command_buffer,
       signal_semaphore_count: 1,
@@ -1663,7 +1803,7 @@ impl Renderer<Created> {
 
     Ok(Self {
       shared: Shared {
-        frame_index: shared.frame_index.wrapping_add(1) % consts::MAX_IN_FLIGHT_FRAME_COUNT,
+        frame_index: (shared.frame_index + 1) % consts::MAX_IN_FLIGHT_FRAME_COUNT,
         ..shared
       },
       state,
@@ -1679,5 +1819,12 @@ impl Renderer<Created> {
 
     state.drop(&shared);
     shared.drop();
+  }
+}
+
+impl<State> Renderer<State> {
+  #[inline]
+  pub(super) const fn get_round_rect_sync(&mut self) -> &mut ModelSync<RoundRect> {
+    &mut self.shared.round_rect_sync
   }
 }

@@ -301,6 +301,7 @@ dependencies = [
  "rustc-hash",
  "shaderc",
  "vk-mem",
+ "voracious_radix_sort",
  "winit",
 ]
 
@@ -1146,6 +1147,12 @@ dependencies = [
  "bitflags 2.10.0",
  "cc",
 ]
+
+[[package]]
+name = "voracious_radix_sort"
+version = "1.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "446e7ffcb6c27a71d05af7e51ef2ee5b71c48424b122a832f2439651e1914899"
 
 [[package]]
 name = "walkdir"
