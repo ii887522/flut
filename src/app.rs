@@ -1,4 +1,8 @@
-use crate::renderer::{Created, Creating, Renderer};
+use crate::{
+  models::model_capacities::ModelCapacities,
+  renderer::{Created, Creating, Renderer},
+  renderer_ref::RendererRef,
+};
 use winit::{
   application::ApplicationHandler,
   event_loop::{ActiveEventLoop, EventLoop},
@@ -15,10 +19,21 @@ pub struct App {
 }
 
 impl App {
-  pub fn new(event_loop: &ActiveEventLoop, title: &str, size: (f64, f64)) -> Self {
+  pub fn new(
+    event_loop: &ActiveEventLoop,
+    title: &str,
+    size: (f64, f64),
+    model_capacities: ModelCapacities,
+  ) -> Self {
     Self {
-      renderer: Renderer::new(event_loop, title, size).try_into(),
+      renderer: Renderer::new(event_loop, title, size, model_capacities).try_into(),
     }
+  }
+
+  #[must_use]
+  #[inline]
+  pub const fn get_renderer(&mut self) -> RendererRef<'_> {
+    RendererRef::new(&mut self.renderer)
   }
 
   pub fn render(self) -> Self {

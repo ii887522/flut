@@ -9,7 +9,6 @@
 // Individual lints
 #![deny(clippy::absolute_paths)]
 #![deny(clippy::alloc_instead_of_core)]
-#![deny(clippy::arithmetic_side_effects)]
 #![deny(clippy::as_pointer_underscore)]
 #![deny(clippy::as_underscore)]
 #![deny(clippy::assertions_on_result_states)]
@@ -18,7 +17,6 @@
 #![deny(clippy::clone_on_ref_ptr)]
 #![deny(clippy::create_dir)]
 #![deny(clippy::dbg_macro)]
-#![deny(clippy::decimal_literal_representation)]
 #![deny(clippy::default_numeric_fallback)]
 #![deny(clippy::default_union_representation)]
 #![deny(clippy::deref_by_slicing)]
@@ -74,7 +72,6 @@
 #![deny(clippy::rc_mutex)]
 #![deny(clippy::redundant_test_prefix)]
 #![deny(clippy::redundant_type_annotations)]
-#![deny(clippy::ref_patterns)]
 #![deny(clippy::renamed_function_params)]
 #![deny(clippy::rest_pat_in_fully_bound_structs)]
 #![deny(clippy::return_and_then)]

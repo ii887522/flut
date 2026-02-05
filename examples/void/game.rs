@@ -1,4 +1,4 @@
-use flut::app::App;
+use flut::{app::App, models::model_capacities::ModelCapacities};
 use winit::{
   application::ApplicationHandler, event::WindowEvent, event_loop::ActiveEventLoop,
   window::WindowId,
@@ -12,7 +12,12 @@ pub struct Game {
 impl ApplicationHandler for Game {
   fn resumed(&mut self, event_loop: &ActiveEventLoop) {
     if self.app.is_none() {
-      self.app = Some(App::new(event_loop, "Void", (1280_f64, 720_f64)));
+      self.app = Some(App::new(
+        event_loop,
+        "Void",
+        (1280_f64, 720_f64),
+        ModelCapacities::default(),
+      ));
     }
   }
 
