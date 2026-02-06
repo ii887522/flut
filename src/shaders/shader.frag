@@ -18,5 +18,6 @@ float sd_round_rect(const vec2 position, const vec2 half_size, const float radiu
 
 void main() {
   const float d = sd_round_rect(local_position, half_size, radius);
-  out_color = vec4(color, 1.0 - d);
+  const float a = 1.0 - smoothstep(-0.75, 0.75, d);
+  out_color = vec4(color, a);
 }

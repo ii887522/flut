@@ -1,6 +1,6 @@
 use crate::{
   consts,
-  model_sync::ModelSync,
+  model_sync::{ModelSync, SyncStatus},
   models::{
     Model as _, model_capacities::ModelCapacities, push_consts::PushConsts, round_rect::RoundRect,
   },
@@ -542,16 +542,9 @@ impl Shared {
       .map(CStr::as_ptr)
       .collect::<Box<_>>();
 
-    let mut vk_multisampled_render_to_single_sampled_features =
-      vk::PhysicalDeviceMultisampledRenderToSingleSampledFeaturesEXT {
-        multisampled_render_to_single_sampled: vk::TRUE,
-        ..Default::default()
-      };
-
     let mut vk_separate_depth_stencil_layouts_features =
       vk::PhysicalDeviceSeparateDepthStencilLayoutsFeatures {
         separate_depth_stencil_layouts: vk::TRUE,
-        p_next: (&raw mut vk_multisampled_render_to_single_sampled_features).cast(),
         ..Default::default()
       };
 
@@ -812,7 +805,7 @@ impl Shared {
     // Depth attachment
     attachment_descs.push(vk::AttachmentDescription2 {
       format: vk::Format::D16_UNORM,
-      samples: vk::SampleCountFlags::TYPE_1,
+      samples: msaa_sample_count,
       load_op: vk::AttachmentLoadOp::CLEAR,
       store_op: vk::AttachmentStoreOp::DONT_CARE,
       stencil_load_op: vk::AttachmentLoadOp::DONT_CARE,
@@ -1324,7 +1317,7 @@ impl Created {
       },
       mip_levels: 1,
       array_layers: 1,
-      samples: vk::SampleCountFlags::TYPE_1,
+      samples: shared.msaa_sample_count,
       tiling: vk::ImageTiling::OPTIMAL,
       usage: vk::ImageUsageFlags::DEPTH_STENCIL_ATTACHMENT
         | vk::ImageUsageFlags::TRANSIENT_ATTACHMENT,
@@ -1534,30 +1527,38 @@ impl Renderer<Created> {
         .unwrap();
     }
 
-    let transfer_command_buffer = shared
+    let sync_status = shared
       .round_rect_sync
       .sync_to(&mut shared.model_buffer, &shared.vk_device);
 
-    if let Some(transfer_command_buffer) = transfer_command_buffer {
-      let queue_submit_info = vk::SubmitInfo {
-        command_buffer_count: 1,
-        p_command_buffers: &raw const transfer_command_buffer,
-        signal_semaphore_count: 1,
-        p_signal_semaphores: &raw const transfer_done_semaphore,
-        ..Default::default()
-      };
+    let transfer_command_buffer = if let SyncStatus::Changed(transfer_command_buffer) = sync_status
+    {
+      if let Some(transfer_command_buffer) = transfer_command_buffer {
+        let queue_submit_info = vk::SubmitInfo {
+          command_buffer_count: 1,
+          p_command_buffers: &raw const transfer_command_buffer,
+          signal_semaphore_count: 1,
+          p_signal_semaphores: &raw const transfer_done_semaphore,
+          ..Default::default()
+        };
 
-      unsafe {
-        shared
-          .vk_device
-          .queue_submit(
-            shared.transfer_queue,
-            &[queue_submit_info],
-            vk::Fence::null(),
-          )
-          .unwrap();
+        unsafe {
+          shared
+            .vk_device
+            .queue_submit(
+              shared.transfer_queue,
+              &[queue_submit_info],
+              vk::Fence::null(),
+            )
+            .unwrap();
+        }
       }
-    }
+
+      shared.window.request_redraw();
+      transfer_command_buffer
+    } else {
+      None
+    };
 
     let acquire_next_image_info = vk::AcquireNextImageInfoKHR {
       swapchain: state.swapchain,
@@ -1690,7 +1691,7 @@ impl Renderer<Created> {
       .to_logical(shared.window.scale_factor());
 
     let push_consts = PushConsts {
-      round_rect_buffer: shared.model_buffer.get_addr(),
+      round_rect_buffer: shared.model_buffer.get_read_addr(),
       cam_size: (cam_width, cam_height),
     };
 
