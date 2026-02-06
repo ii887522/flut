@@ -149,8 +149,8 @@ impl StorageBuffer {
   }
 
   #[inline]
-  pub(super) const fn get_addr(&self) -> vk::DeviceAddress {
-    self.addr
+  pub(super) const fn get_read_addr(&self) -> vk::DeviceAddress {
+    self.addr + (self.read_index * self.size) as vk::DeviceAddress
   }
 
   pub(super) fn write<T>(
