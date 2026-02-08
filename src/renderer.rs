@@ -542,13 +542,21 @@ impl Shared {
       .map(CStr::as_ptr)
       .collect::<Box<_>>();
 
+    let mut vk_physical_device_scalar_block_layout_features =
+      vk::PhysicalDeviceScalarBlockLayoutFeatures {
+        scalar_block_layout: vk::TRUE,
+        ..Default::default()
+      };
+
     let mut vk_separate_depth_stencil_layouts_features =
       vk::PhysicalDeviceSeparateDepthStencilLayoutsFeatures {
         separate_depth_stencil_layouts: vk::TRUE,
+        p_next: (&raw mut vk_physical_device_scalar_block_layout_features).cast(),
         ..Default::default()
       };
 
     let mut vk_physical_device_8_bit_storage_features = vk::PhysicalDevice8BitStorageFeatures {
+      storage_buffer8_bit_access: vk::TRUE,
       uniform_and_storage_buffer8_bit_access: vk::TRUE,
       p_next: (&raw mut vk_separate_depth_stencil_layouts_features).cast(),
       ..Default::default()
