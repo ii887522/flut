@@ -1,6 +1,6 @@
 use crate::{
   consts,
-  model_sync::{ModelSync, SyncStatus},
+  model_sync::ModelSync,
   models::{
     Model as _, model_capacities::ModelCapacities, push_consts::PushConsts, round_rect::RoundRect,
   },
@@ -1115,7 +1115,9 @@ impl Shared {
   }
 }
 
-pub struct Creating;
+pub struct Creating {
+  old_swapchain: vk::SwapchainKHR,
+}
 
 pub struct Created {
   swapchain: vk::SwapchainKHR,
@@ -1132,7 +1134,7 @@ pub struct Created {
 }
 
 impl Created {
-  fn new(shared: &Shared) -> Result<Self, WindowMinimized> {
+  fn new(shared: &Shared, old_swapchain: vk::SwapchainKHR) -> Result<Self, WindowMinimized> {
     let vk_surface_caps = unsafe {
       shared
         .vk_surface_instance
@@ -1196,6 +1198,7 @@ impl Created {
       composite_alpha: vk::CompositeAlphaFlagsKHR::OPAQUE,
       present_mode: vk::PresentModeKHR::FIFO,
       clipped: vk::TRUE,
+      old_swapchain,
       ..Default::default()
     };
 
@@ -1407,17 +1410,17 @@ impl Created {
   }
 
   fn on_swapchain_suboptimal(self, shared: &Shared) -> Result<Self, WindowMinimized> {
-    let result = Self::new(shared);
+    let result = Self::new(shared, self.swapchain);
 
     unsafe {
       shared.vk_device.device_wait_idle().unwrap();
     }
 
-    self.drop(shared);
+    self.drop(shared, matches!(result, Err(WindowMinimized)));
     result
   }
 
-  fn drop(mut self, shared: &Shared) {
+  fn drop(mut self, shared: &Shared, skip_swapchain: bool) {
     unsafe {
       self
         .swapchain_framebuffers
@@ -1458,10 +1461,13 @@ impl Created {
         .iter()
         .for_each(|&image_view| shared.vk_device.destroy_image_view(image_view, None));
     }
-    unsafe {
-      shared
-        .vk_swapchain_device
-        .destroy_swapchain(self.swapchain, None);
+
+    if !skip_swapchain {
+      unsafe {
+        shared
+          .vk_swapchain_device
+          .destroy_swapchain(self.swapchain, None);
+      }
     }
   }
 }
@@ -1480,7 +1486,9 @@ impl Renderer<Creating> {
   ) -> Self {
     Self {
       shared: Shared::new(event_loop, title, size, model_capacities),
-      state: Creating,
+      state: Creating {
+        old_swapchain: vk::SwapchainKHR::null(),
+      },
     }
   }
 
@@ -1499,12 +1507,22 @@ impl TryFrom<Renderer<Creating>> for Renderer<Created> {
   type Error = Renderer<Creating>;
 
   fn try_from(renderer: Renderer<Creating>) -> Result<Self, Self::Error> {
-    match Created::new(&renderer.shared) {
-      Ok(created) => Ok(Self {
-        shared: renderer.shared,
-        state: created,
-      }),
-      Err(WindowMinimized) => Err(renderer),
+    let Renderer { shared, state } = renderer;
+
+    match Created::new(&shared, state.old_swapchain) {
+      Ok(created) => {
+        unsafe {
+          shared
+            .vk_swapchain_device
+            .destroy_swapchain(state.old_swapchain, None);
+        }
+
+        Ok(Self {
+          shared,
+          state: created,
+        })
+      }
+      Err(WindowMinimized) => Err(Renderer { shared, state }),
     }
   }
 }
@@ -1527,38 +1545,30 @@ impl Renderer<Created> {
         .unwrap();
     }
 
-    let sync_status = shared
+    let transfer_command_buffer = shared
       .round_rect_sync
       .sync_to(&mut shared.model_buffer, &shared.vk_device);
 
-    let transfer_command_buffer = if let SyncStatus::Changed(transfer_command_buffer) = sync_status
-    {
-      if let Some(transfer_command_buffer) = transfer_command_buffer {
-        let queue_submit_info = vk::SubmitInfo {
-          command_buffer_count: 1,
-          p_command_buffers: &raw const transfer_command_buffer,
-          signal_semaphore_count: 1,
-          p_signal_semaphores: &raw const transfer_done_semaphore,
-          ..Default::default()
-        };
+    if let Some(transfer_command_buffer) = transfer_command_buffer {
+      let queue_submit_info = vk::SubmitInfo {
+        command_buffer_count: 1,
+        p_command_buffers: &raw const transfer_command_buffer,
+        signal_semaphore_count: 1,
+        p_signal_semaphores: &raw const transfer_done_semaphore,
+        ..Default::default()
+      };
 
-        unsafe {
-          shared
-            .vk_device
-            .queue_submit(
-              shared.transfer_queue,
-              &[queue_submit_info],
-              vk::Fence::null(),
-            )
-            .unwrap();
-        }
+      unsafe {
+        shared
+          .vk_device
+          .queue_submit(
+            shared.transfer_queue,
+            &[queue_submit_info],
+            vk::Fence::null(),
+          )
+          .unwrap();
       }
-
-      shared.window.request_redraw();
-      transfer_command_buffer
-    } else {
-      None
-    };
+    }
 
     let acquire_next_image_info = vk::AcquireNextImageInfoKHR {
       swapchain: state.swapchain,
@@ -1575,6 +1585,8 @@ impl Renderer<Created> {
     } {
       Ok((swapchain_image_index, _swapchain_suboptimal)) => swapchain_image_index,
       Err(vk::Result::ERROR_OUT_OF_DATE_KHR) => {
+        let old_swapchain = state.swapchain;
+
         return match state.on_swapchain_suboptimal(&shared) {
           Ok(new_state) => Ok(Self {
             shared,
@@ -1582,7 +1594,7 @@ impl Renderer<Created> {
           }),
           Err(WindowMinimized) => Err(Renderer {
             shared,
-            state: Creating,
+            state: Creating { old_swapchain },
           }),
         };
       }
@@ -1691,7 +1703,7 @@ impl Renderer<Created> {
       .to_logical(shared.window.scale_factor());
 
     let push_consts = PushConsts {
-      round_rect_buffer: shared.model_buffer.get_read_addr(),
+      round_rect_buffer: shared.model_buffer.calc_read_addr(),
       cam_size: (cam_width, cam_height),
     };
 
@@ -1788,6 +1800,8 @@ impl Renderer<Created> {
     } {
       Ok(false) => (),
       Ok(true) | Err(vk::Result::ERROR_OUT_OF_DATE_KHR) => {
+        let old_swapchain = state.swapchain;
+
         return match state.on_swapchain_suboptimal(&shared) {
           Ok(new_state) => Ok(Self {
             shared,
@@ -1795,7 +1809,7 @@ impl Renderer<Created> {
           }),
           Err(WindowMinimized) => Err(Renderer {
             shared,
-            state: Creating,
+            state: Creating { old_swapchain },
           }),
         };
       }
@@ -1818,12 +1832,17 @@ impl Renderer<Created> {
       shared.vk_device.device_wait_idle().unwrap();
     }
 
-    state.drop(&shared);
+    state.drop(&shared, false);
     shared.drop();
   }
 }
 
 impl<State> Renderer<State> {
+  #[inline]
+  pub(super) const fn get_window(&self) -> &Window {
+    &self.shared.window
+  }
+
   #[inline]
   pub(super) const fn get_round_rect_sync(&mut self) -> &mut ModelSync<RoundRect> {
     &mut self.shared.round_rect_sync

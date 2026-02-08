@@ -119,5 +119,5 @@ use mimalloc::MiMalloc;
 static GLOBAL: MiMalloc = MiMalloc;
 
 fn main() {
-  app::run(Game::default());
+  app::run(Game::new());
 }

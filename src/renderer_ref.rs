@@ -2,6 +2,7 @@ use crate::{
   models::Model,
   renderer::{Created, Creating, Renderer},
 };
+use winit::window::Window;
 
 pub struct RendererRef<'render>(&'render mut Result<Renderer<Created>, Renderer<Creating>>);
 
@@ -11,6 +12,15 @@ impl<'render> RendererRef<'render> {
     renderer: &'render mut Result<Renderer<Created>, Renderer<Creating>>,
   ) -> Self {
     Self(renderer)
+  }
+
+  #[must_use]
+  #[inline]
+  pub const fn get_window(&self) -> &Window {
+    match *self.0 {
+      Ok(ref renderer) => renderer.get_window(),
+      Err(ref renderer) => renderer.get_window(),
+    }
   }
 
   pub fn add_model<M: Model>(&mut self, model: M) -> u32 {

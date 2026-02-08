@@ -21,6 +21,7 @@ strip = true
 
 [dependencies]
 ash-window = { version = "0.13", default-features = false }
+fastrand = { version = "2.3", default-features = false, features = ["std"] }
 mimalloc = { version = "0.1", default-features = false, features = ["v3"] }
 vk-mem = { version = "0.5", default-features = false, features = ["loaded"] }
 voracious_radix_sort = { version = "1.2", default-features = false }

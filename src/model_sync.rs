@@ -10,11 +10,6 @@ use crate::{
 use ash::vk;
 use std::collections::VecDeque;
 
-pub enum SyncStatus {
-  Unchanged,
-  Changed(Option<vk::CommandBuffer>),
-}
-
 pub struct ModelSync<Model> {
   models: SparseSet<Model>,
   changeset_queue: VecDeque<Vec<Range>>,
@@ -37,7 +32,7 @@ impl<Model> ModelSync<Model> {
     &mut self,
     model_buffer: &mut StorageBuffer,
     vk_device: &ash::Device,
-  ) -> SyncStatus {
+  ) -> Option<vk::CommandBuffer> {
     let changeset = self.changeset_queue.back_mut().unwrap();
     utils::coalesce_ranges(changeset);
 
@@ -50,10 +45,6 @@ impl<Model> ModelSync<Model> {
 
     utils::coalesce_ranges(&mut all_changeset);
 
-    if all_changeset.is_empty() {
-      return SyncStatus::Unchanged;
-    }
-
     let transfer_command_buffer =
       model_buffer.write(vk_device, self.models.get_items(), &all_changeset);
 
@@ -62,7 +53,7 @@ impl<Model> ModelSync<Model> {
     }
 
     self.changeset_queue.push_back(vec![]);
-    SyncStatus::Changed(transfer_command_buffer)
+    transfer_command_buffer
   }
 
   pub(super) fn add_model(&mut self, model: Model) -> u32 {
