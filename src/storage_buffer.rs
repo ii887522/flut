@@ -1,11 +1,11 @@
 use crate::{consts, models::range::Range};
 use ash::vk;
-use std::{ffi::c_void, mem, ptr};
+use std::{ffi::c_void, iter, mem, ptr};
 use vk_mem::Alloc as _;
 
 struct StagingBuffer {
-  transfer_command_pool: vk::CommandPool,
-  transfer_command_buffer: vk::CommandBuffer,
+  transfer_command_pools: Box<[vk::CommandPool]>,
+  transfer_command_buffers: Box<[vk::CommandBuffer]>,
   buffer: vk::Buffer,
   alloc: vk_mem::Allocation,
   data: *mut c_void,
@@ -78,30 +78,39 @@ impl StorageBuffer {
     let data = alloc_info.allocation_info.mapped_data;
 
     let buffer_data = if data.is_null() {
-      let transfer_command_pool_create_info = vk::CommandPoolCreateInfo {
-        flags: vk::CommandPoolCreateFlags::TRANSIENT,
-        queue_family_index: transfer_queue_family_index,
-        ..Default::default()
-      };
+      let transfer_command_pools = iter::repeat_with(|| {
+        let command_pool_create_info = vk::CommandPoolCreateInfo {
+          flags: vk::CommandPoolCreateFlags::TRANSIENT,
+          queue_family_index: transfer_queue_family_index,
+          ..Default::default()
+        };
 
-      let transfer_command_pool = unsafe {
-        vk_device
-          .create_command_pool(&transfer_command_pool_create_info, None)
-          .unwrap()
-      };
+        unsafe {
+          vk_device
+            .create_command_pool(&command_pool_create_info, None)
+            .unwrap()
+        }
+      })
+      .take(consts::MAX_IN_FLIGHT_FRAME_COUNT)
+      .collect::<Box<_>>();
 
-      let transfer_command_buffer_alloc_info = vk::CommandBufferAllocateInfo {
-        command_pool: transfer_command_pool,
-        level: vk::CommandBufferLevel::PRIMARY,
-        command_buffer_count: 1,
-        ..Default::default()
-      };
+      let transfer_command_buffers = transfer_command_pools
+        .iter()
+        .map(|&command_pool| {
+          let command_buffer_alloc_info = vk::CommandBufferAllocateInfo {
+            command_pool,
+            level: vk::CommandBufferLevel::PRIMARY,
+            command_buffer_count: 1,
+            ..Default::default()
+          };
 
-      let transfer_command_buffer = unsafe {
-        vk_device
-          .allocate_command_buffers(&transfer_command_buffer_alloc_info)
-          .unwrap()[0]
-      };
+          unsafe {
+            vk_device
+              .allocate_command_buffers(&command_buffer_alloc_info)
+              .unwrap()[0]
+          }
+        })
+        .collect::<Box<_>>();
 
       let staging_buffer_create_info = vk::BufferCreateInfo {
         size: (consts::MAX_IN_FLIGHT_FRAME_COUNT * size) as u64,
@@ -128,8 +137,8 @@ impl StorageBuffer {
       let staging_data = staging_alloc_info.allocation_info.mapped_data;
 
       BufferData::Staging(StagingBuffer {
-        transfer_command_pool,
-        transfer_command_buffer,
+        transfer_command_pools,
+        transfer_command_buffers,
         buffer: staging_buffer,
         alloc: staging_alloc,
         data: staging_data,
@@ -149,7 +158,7 @@ impl StorageBuffer {
   }
 
   #[inline]
-  pub(super) const fn get_read_addr(&self) -> vk::DeviceAddress {
+  pub(super) const fn calc_read_addr(&self) -> vk::DeviceAddress {
     self.addr + (self.read_index * self.size) as vk::DeviceAddress
   }
 
@@ -160,6 +169,7 @@ impl StorageBuffer {
     regions: &[Range],
   ) -> Option<vk::CommandBuffer> {
     let write_index = (self.read_index + 1) % consts::MAX_IN_FLIGHT_FRAME_COUNT;
+    let write_offset = write_index * self.size;
 
     let data = match self.data {
       BufferData::Device(data) => data,
@@ -172,7 +182,7 @@ impl StorageBuffer {
 
       let dst = unsafe {
         data
-          .byte_add(write_index * self.size + start * mem::size_of::<T>())
+          .byte_add(write_offset + start * mem::size_of::<T>())
           .cast()
       };
 
@@ -183,13 +193,25 @@ impl StorageBuffer {
 
     let transfer_command_buffer = if !regions.is_empty()
       && let BufferData::Staging(StagingBuffer {
-        transfer_command_pool,
-        transfer_command_buffer,
+        ref transfer_command_pools,
+        ref transfer_command_buffers,
         buffer: staging_buffer,
         alloc: _,
         data: _,
       }) = self.data
     {
+      let transfer_command_pool = transfer_command_pools[write_index];
+      let transfer_command_buffer = transfer_command_buffers[write_index];
+      let &Range {
+        start: first_start,
+        end: _,
+      } = regions.first().unwrap();
+      let &Range {
+        start: _,
+        end: last_end,
+      } = regions.last().unwrap();
+      let (first_start, last_end) = (first_start as usize, last_end as usize);
+
       unsafe {
         vk_device
           .reset_command_pool(transfer_command_pool, vk::CommandPoolResetFlags::empty())
@@ -207,11 +229,34 @@ impl StorageBuffer {
           .unwrap();
       }
 
+      let buffer_memory_barrier = vk::BufferMemoryBarrier {
+        src_access_mask: vk::AccessFlags::TRANSFER_WRITE,
+        dst_access_mask: vk::AccessFlags::TRANSFER_WRITE,
+        src_queue_family_index: vk::QUEUE_FAMILY_IGNORED,
+        dst_queue_family_index: vk::QUEUE_FAMILY_IGNORED,
+        buffer: self.buffer,
+        offset: (write_offset + first_start * mem::size_of::<T>()) as u64,
+        size: ((last_end - first_start) * mem::size_of::<T>()) as u64,
+        ..Default::default()
+      };
+
+      unsafe {
+        vk_device.cmd_pipeline_barrier(
+          transfer_command_buffer,
+          vk::PipelineStageFlags::TRANSFER,
+          vk::PipelineStageFlags::TRANSFER,
+          vk::DependencyFlags::BY_REGION,
+          &[],
+          &[buffer_memory_barrier],
+          &[],
+        );
+      }
+
       let regions = regions
         .iter()
         .map(|&Range { start, end }| {
           let (start, end) = (start as usize, end as usize);
-          let offset = (write_index * self.size + start * mem::size_of::<T>()) as u64;
+          let offset = (write_offset + start * mem::size_of::<T>()) as u64;
           let size = ((end - start) * mem::size_of::<T>()) as u64;
 
           vk::BufferCopy2 {
@@ -252,8 +297,8 @@ impl StorageBuffer {
 
   pub(super) fn drop(mut self, vk_device: &ash::Device, vk_allocator: &vk_mem::Allocator) {
     if let BufferData::Staging(StagingBuffer {
-      transfer_command_pool,
-      transfer_command_buffer: _,
+      transfer_command_pools,
+      transfer_command_buffers: _,
       buffer: staging_buffer,
       alloc: mut staging_alloc,
       data: _,
@@ -263,7 +308,9 @@ impl StorageBuffer {
         vk_allocator.destroy_buffer(staging_buffer, &mut staging_alloc);
       }
       unsafe {
-        vk_device.destroy_command_pool(transfer_command_pool, None);
+        transfer_command_pools
+          .iter()
+          .for_each(|&command_pool| vk_device.destroy_command_pool(command_pool, None));
       }
     }
 

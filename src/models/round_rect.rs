@@ -1,5 +1,6 @@
 use crate::{model_sync::ModelSync, models::Model, renderer::Renderer};
 
+#[derive(Clone, Copy)]
 #[repr(C, align(16))]
 pub struct RoundRect {
   pub position: (f32, f32, f32),

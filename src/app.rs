@@ -40,8 +40,22 @@ impl App {
     Self {
       renderer: match self.renderer {
         Ok(renderer) => renderer.render(),
-        Err(renderer) => renderer.try_into(),
+        Err(renderer) => match Renderer::<Created>::try_from(renderer) {
+          Ok(renderer) => renderer.render(),
+          Err(renderer) => Err(renderer),
+        },
       },
+    }
+  }
+
+  pub fn request_redraw_if_visible(&self) {
+    let window = match self.renderer {
+      Ok(ref renderer) => renderer.get_window(),
+      Err(ref renderer) => renderer.get_window(),
+    };
+
+    if !window.is_minimized().unwrap_or_default() && window.is_visible().unwrap_or(true) {
+      window.request_redraw();
     }
   }
 
