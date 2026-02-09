@@ -662,9 +662,7 @@ impl Shared {
         .limits
         .framebuffer_depth_sample_counts;
 
-    let msaa_sample_count = if max_msaa_sample_count.contains(vk::SampleCountFlags::TYPE_4) {
-      vk::SampleCountFlags::TYPE_4
-    } else if max_msaa_sample_count.contains(vk::SampleCountFlags::TYPE_2) {
+    let msaa_sample_count = if max_msaa_sample_count.contains(vk::SampleCountFlags::TYPE_2) {
       vk::SampleCountFlags::TYPE_2
     } else {
       vk::SampleCountFlags::TYPE_1
