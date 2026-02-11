@@ -98,6 +98,7 @@
 //
 // Allowed lints
 #![allow(clippy::cast_precision_loss)]
+#![allow(clippy::imprecise_flops)]
 #![allow(clippy::missing_errors_doc)]
 #![allow(clippy::missing_panics_doc)]
 #![allow(clippy::multiple_crate_versions)]
@@ -105,15 +106,19 @@
 #![allow(clippy::struct_field_names)]
 #![allow(clippy::too_many_arguments)]
 #![allow(clippy::too_many_lines)]
+#![allow(clippy::while_float)]
 //
 // endregion
 
 pub mod app;
+mod app_loop;
 pub mod collections;
 mod consts;
 mod model_sync;
 pub mod models;
 mod renderer;
 pub mod renderer_ref;
+pub mod sdf;
 mod storage_buffer;
 pub mod utils;
+pub mod widgets;

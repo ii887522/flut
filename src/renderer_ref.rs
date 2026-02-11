@@ -2,7 +2,7 @@ use crate::{
   models::Model,
   renderer::{Created, Creating, Renderer},
 };
-use winit::window::Window;
+use winit::{dpi::LogicalSize, window::Window};
 
 pub struct RendererRef<'render>(&'render mut Result<Renderer<Created>, Renderer<Creating>>);
 
@@ -21,6 +21,13 @@ impl<'render> RendererRef<'render> {
       Ok(ref renderer) => renderer.get_window(),
       Err(ref renderer) => renderer.get_window(),
     }
+  }
+
+  #[must_use]
+  pub fn get_size(&self) -> (f32, f32) {
+    let window = self.get_window();
+    let LogicalSize { width, height } = window.inner_size().to_logical(window.scale_factor());
+    (width, height)
   }
 
   pub fn add_model<M: Model>(&mut self, model: M) -> u32 {

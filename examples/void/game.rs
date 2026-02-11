@@ -1,21 +1,18 @@
-use flut::{
-  app::App,
-  models::{model_capacities::ModelCapacities, round_rect::RoundRect},
-  utils,
-};
-use std::{iter, time::Instant};
+use flut::{app::App, models::model_capacities::ModelCapacities, widgets::button::Button};
 use winit::{
-  application::ApplicationHandler, event::WindowEvent, event_loop::ActiveEventLoop,
+  application::ApplicationHandler,
+  dpi::LogicalPosition,
+  event::{MouseButton, WindowEvent},
+  event_loop::ActiveEventLoop,
   window::WindowId,
 };
 
+// Settings
+const APP_SIZE: (f32, f32) = (1280.0, 720.0);
+
 pub struct Game {
   app: Option<App>,
-  prev: Instant,
-  total_frame_time: f32,
-  frame_count: usize,
-  round_rect_ids: Box<[u32]>,
-  round_rects: Box<[RoundRect]>,
+  button: Button,
 }
 
 impl Game {
@@ -23,11 +20,7 @@ impl Game {
   pub(super) fn new() -> Self {
     Self {
       app: None,
-      prev: Instant::now(),
-      total_frame_time: 0.0,
-      frame_count: 0,
-      round_rect_ids: Box::new([]),
-      round_rects: Box::new([]),
+      button: Button::new().call(),
     }
   }
 }
@@ -40,37 +33,15 @@ impl ApplicationHandler for Game {
 
     let mut app = App::new(
       event_loop,
-      "Void",
-      (1280_f64, 720_f64),
+      "Void".into(),
+      (APP_SIZE.0.into(), APP_SIZE.1.into()),
       ModelCapacities::default(),
+      true,
     );
 
-    let mut renderer = app.get_renderer();
-
-    let round_rects = iter::repeat_with(|| RoundRect {
-      position: (
-        fastrand::f32() * 1280.0,
-        fastrand::f32() * 720.0,
-        fastrand::f32(),
-      ),
-      radius: fastrand::f32() * 32.0,
-      size: (fastrand::f32() * 320.0, fastrand::f32() * 180.0),
-      color: utils::pack_color(
-        fastrand::u8(..=255),
-        fastrand::u8(..=255),
-        fastrand::u8(..=255),
-        255,
-      ),
-    })
-    .take(1000)
-    .collect::<Box<_>>();
-
-    let round_rect_ids = renderer.bulk_add_models(round_rects.clone());
-
+    let renderer = app.get_renderer();
+    self.button.init(renderer);
     self.app = Some(app);
-    self.prev = Instant::now();
-    self.round_rect_ids = round_rect_ids;
-    self.round_rects = round_rects;
   }
 
   fn window_event(
@@ -81,49 +52,30 @@ impl ApplicationHandler for Game {
   ) {
     match event {
       WindowEvent::CloseRequested => event_loop.exit(),
+      WindowEvent::CursorMoved {
+        device_id: _,
+        position: cursor_position,
+      } => {
+        let Some(app) = self.app.as_mut() else {
+          return;
+        };
+
+        let renderer = app.get_renderer();
+        let window = renderer.get_window();
+        let LogicalPosition { x, y } = cursor_position.to_logical(window.scale_factor());
+        self.button.on_cursor_moved((x, y), &renderer);
+      }
+      WindowEvent::MouseInput {
+        device_id: _,
+        state: input_state,
+        button: MouseButton::Left,
+      } => self.button.on_mouse_input(input_state),
       WindowEvent::RedrawRequested => {
         let Some(mut app) = self.app.take() else {
           return;
         };
 
-        let frame_time = self.prev.elapsed();
-        self.prev = Instant::now();
-        self.total_frame_time += frame_time.as_secs_f32();
-        self.frame_count += 1;
-
-        let mut renderer = app.get_renderer();
-
-        if self.total_frame_time >= 1.0 {
-          let window = renderer.get_window();
-
-          window.set_title(&format!(
-            "Void: {:.2} FPS",
-            1.0 / (self.total_frame_time / self.frame_count as f32)
-          ));
-
-          self.total_frame_time = 0.0;
-          self.frame_count = 0;
-        }
-
-        renderer.bulk_update_models(
-          &self.round_rect_ids,
-          self
-            .round_rects
-            .iter()
-            .map(|&round_rect| RoundRect {
-              position: (
-                fastrand::f32().mul_add(20.0, round_rect.position.0) - 10.0,
-                fastrand::f32().mul_add(20.0, round_rect.position.1) - 10.0,
-                round_rect.position.2,
-              ),
-              size: (
-                fastrand::f32().mul_add(20.0, round_rect.size.0) - 10.0,
-                fastrand::f32().mul_add(20.0, round_rect.size.1) - 10.0,
-              ),
-              ..round_rect
-            })
-            .collect(),
-        );
+        app.update(|dt, renderer| self.button.update(dt, renderer));
 
         let app = app.render();
         app.request_redraw_if_visible();
