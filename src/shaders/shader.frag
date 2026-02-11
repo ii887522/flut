@@ -7,10 +7,10 @@ layout(location = 3) flat in float radius;
 
 layout(location = 0) out vec4 out_color;
 
-// Signed distance function for rounded rectangle
-// - position: point relative to rect center
-// - half_size: half of rect dimensions
-// - radius: corner radius
+/// Signed distance function for rounded rectangle
+/// - `position`: point relative to rect center
+/// - `half_size`: half of rect dimensions
+/// - `radius`: corner radius
 float sd_round_rect(const vec2 position, const vec2 half_size, const float radius) {
   const vec2 q = abs(position) - half_size + vec2(radius);
   return length(max(q, vec2(0.0))) - radius;
