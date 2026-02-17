@@ -1,6 +1,7 @@
 use crate::{
   collections::sparse_set::{
-    AddResp, BulkAddResp, BulkRemoveResp, BulkUpdateResp, RemoveResp, SparseSet, UpdateResp,
+    AddResp, BulkAddResp, BulkRemoveResp, BulkUpdateResp, RemoveResp, SortResp, SparseSet,
+    UpdateResp,
   },
   consts,
   models::range::Range,
@@ -9,6 +10,7 @@ use crate::{
 };
 use ash::vk;
 use std::collections::VecDeque;
+use voracious_radix_sort::Radixable;
 
 pub struct ModelSync<Model> {
   models: SparseSet<Model>,
@@ -26,34 +28,6 @@ impl<Model> ModelSync<Model> {
   #[inline]
   pub(super) const fn get_model_count(&self) -> usize {
     self.models.len()
-  }
-
-  pub(super) fn sync_to(
-    &mut self,
-    model_buffer: &mut StorageBuffer,
-    vk_device: &ash::Device,
-  ) -> Option<vk::CommandBuffer> {
-    let changeset = self.changeset_queue.back_mut().unwrap();
-    utils::coalesce_ranges(changeset);
-
-    let mut all_changeset = self
-      .changeset_queue
-      .iter()
-      .flatten()
-      .copied()
-      .collect::<Vec<_>>();
-
-    utils::coalesce_ranges(&mut all_changeset);
-
-    let transfer_command_buffer =
-      model_buffer.write(vk_device, self.models.get_items(), &all_changeset);
-
-    if self.changeset_queue.len() >= consts::MAX_IN_FLIGHT_FRAME_COUNT {
-      self.changeset_queue.pop_front();
-    }
-
-    self.changeset_queue.push_back(vec![]);
-    transfer_command_buffer
   }
 
   pub(super) fn add_model(&mut self, model: Model) -> u32 {
@@ -129,5 +103,51 @@ impl<Model: Clone> ModelSync<Model> {
     }));
 
     items
+  }
+}
+
+impl<Model: Radixable<f32, Key = f32>> ModelSync<Model> {
+  pub(super) fn sync_to(
+    &mut self,
+    model_buffer: &StorageBuffer,
+    vk_device: &ash::Device,
+    model_buffer_offset: usize,
+    sort_models: bool,
+  ) -> Option<vk::CommandBuffer> {
+    let changeset = self.changeset_queue.back_mut().unwrap();
+
+    if sort_models && !changeset.is_empty() {
+      let SortResp { indices } = self.models.sort();
+
+      changeset.extend(indices.into_iter().map(|index| Range {
+        start: index,
+        end: index + 1,
+      }));
+    }
+
+    utils::coalesce_ranges(changeset);
+
+    let mut all_changeset = self
+      .changeset_queue
+      .iter()
+      .flatten()
+      .copied()
+      .collect::<Vec<_>>();
+
+    utils::coalesce_ranges(&mut all_changeset);
+
+    let transfer_command_buffer = model_buffer.write(
+      vk_device,
+      self.models.get_items(),
+      &all_changeset,
+      model_buffer_offset,
+    );
+
+    if self.changeset_queue.len() >= consts::MAX_IN_FLIGHT_FRAME_COUNT {
+      self.changeset_queue.pop_front();
+    }
+
+    self.changeset_queue.push_back(vec![]);
+    transfer_command_buffer
   }
 }

@@ -1,4 +1,5 @@
 use crate::{
+  model_sync::ModelSync,
   models::Model,
   renderer::{Created, Creating, Renderer},
 };
@@ -30,57 +31,47 @@ impl<'render> RendererRef<'render> {
     (width, height)
   }
 
-  pub fn add_model<M: Model>(&mut self, model: M) -> u32 {
-    let model_sync = match *self.0 {
-      Ok(ref mut renderer) => M::get_sync(renderer),
-      Err(ref mut renderer) => M::get_sync(renderer),
-    };
-
-    model_sync.add_model(model)
+  fn get_model_sync<M: Model>(&mut self, clipped: bool) -> &mut ModelSync<M> {
+    if clipped {
+      match *self.0 {
+        Ok(ref mut renderer) => M::get_clipped_sync(renderer),
+        Err(ref mut renderer) => M::get_clipped_sync(renderer),
+      }
+    } else {
+      match *self.0 {
+        Ok(ref mut renderer) => M::get_sync(renderer),
+        Err(ref mut renderer) => M::get_sync(renderer),
+      }
+    }
   }
 
-  pub fn update_model<M: Model>(&mut self, id: u32, model: M) {
-    let model_sync = match *self.0 {
-      Ok(ref mut renderer) => M::get_sync(renderer),
-      Err(ref mut renderer) => M::get_sync(renderer),
-    };
-
-    model_sync.update_model(id, model);
+  #[inline]
+  pub fn add_model<M: Model>(&mut self, model: M, clipped: bool) -> u32 {
+    self.get_model_sync(clipped).add_model(model)
   }
 
-  pub fn remove_model<M: Model>(&mut self, id: u32) {
-    let model_sync = match *self.0 {
-      Ok(ref mut renderer) => M::get_sync(renderer),
-      Err(ref mut renderer) => M::get_sync(renderer),
-    };
-
-    model_sync.remove_model(id);
+  #[inline]
+  pub fn update_model<M: Model>(&mut self, id: u32, model: M, clipped: bool) {
+    self.get_model_sync(clipped).update_model(id, model);
   }
 
-  pub fn bulk_add_models<M: Model>(&mut self, models: Box<[M]>) -> Box<[u32]> {
-    let model_sync = match *self.0 {
-      Ok(ref mut renderer) => M::get_sync(renderer),
-      Err(ref mut renderer) => M::get_sync(renderer),
-    };
-
-    model_sync.bulk_add_models(models)
+  #[inline]
+  pub fn remove_model<M: Model>(&mut self, id: u32, clipped: bool) -> M {
+    self.get_model_sync(clipped).remove_model(id)
   }
 
-  pub fn bulk_update_models<M: Model>(&mut self, ids: &[u32], models: Box<[M]>) {
-    let model_sync = match *self.0 {
-      Ok(ref mut renderer) => M::get_sync(renderer),
-      Err(ref mut renderer) => M::get_sync(renderer),
-    };
-
-    model_sync.bulk_update_models(ids, models);
+  #[inline]
+  pub fn bulk_add_models<M: Model>(&mut self, models: Box<[M]>, clipped: bool) -> Box<[u32]> {
+    self.get_model_sync(clipped).bulk_add_models(models)
   }
 
-  pub fn bulk_remove_models<M: Model + Clone>(&mut self, ids: &[u32]) -> Box<[M]> {
-    let model_sync = match *self.0 {
-      Ok(ref mut renderer) => M::get_sync(renderer),
-      Err(ref mut renderer) => M::get_sync(renderer),
-    };
+  #[inline]
+  pub fn bulk_update_models<M: Model>(&mut self, ids: &[u32], models: Box<[M]>, clipped: bool) {
+    self.get_model_sync(clipped).bulk_update_models(ids, models);
+  }
 
-    model_sync.bulk_remove_models(ids)
+  #[inline]
+  pub fn bulk_remove_models<M: Model + Clone>(&mut self, ids: &[u32], clipped: bool) -> Box<[M]> {
+    self.get_model_sync(clipped).bulk_remove_models(ids)
   }
 }
