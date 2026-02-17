@@ -11,4 +11,8 @@ pub trait Model {
   fn get_sync<State>(renderer: &mut Renderer<State>) -> &mut ModelSync<Self>
   where
     Self: Sized;
+
+  fn get_clipped_sync<State>(renderer: &mut Renderer<State>) -> &mut ModelSync<Self>
+  where
+    Self: Sized;
 }

@@ -158,18 +158,19 @@ impl StorageBuffer {
   }
 
   #[inline]
-  pub(super) const fn calc_read_addr(&self) -> vk::DeviceAddress {
-    self.addr + (self.read_index * self.size) as vk::DeviceAddress
+  pub(super) const fn calc_read_addr(&self, offset: usize) -> vk::DeviceAddress {
+    self.addr + (self.read_index * self.size + offset) as vk::DeviceAddress
   }
 
   pub(super) fn write<T>(
-    &mut self,
+    &self,
     vk_device: &ash::Device,
     items: &[T],
     regions: &[Range],
+    offset: usize,
   ) -> Option<vk::CommandBuffer> {
     let write_index = (self.read_index + 1) % consts::MAX_IN_FLIGHT_FRAME_COUNT;
-    let write_offset = write_index * self.size;
+    let write_offset = write_index * self.size + offset;
 
     let data = match self.data {
       BufferData::Device(data) => data,
@@ -177,7 +178,12 @@ impl StorageBuffer {
     };
 
     for &Range { start, end } in regions {
-      let (start, end) = (start as usize, end as usize);
+      let (start, end) = (start as usize, (end as usize).min(items.len()));
+
+      if start >= end {
+        continue;
+      }
+
       let src = items[start..end].as_ptr();
 
       let dst = unsafe {
@@ -191,7 +197,7 @@ impl StorageBuffer {
       }
     }
 
-    let transfer_command_buffer = if !regions.is_empty()
+    if !regions.is_empty()
       && let BufferData::Staging(StagingBuffer {
         ref transfer_command_pools,
         ref transfer_command_buffers,
@@ -289,10 +295,12 @@ impl StorageBuffer {
       Some(transfer_command_buffer)
     } else {
       None
-    };
+    }
+  }
 
-    self.read_index = write_index;
-    transfer_command_buffer
+  #[inline]
+  pub(super) const fn done_write(&mut self) {
+    self.read_index = (self.read_index + 1) % consts::MAX_IN_FLIGHT_FRAME_COUNT;
   }
 
   pub(super) fn drop(mut self, vk_device: &ash::Device, vk_allocator: &vk_mem::Allocator) {

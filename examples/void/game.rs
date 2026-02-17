@@ -39,8 +39,8 @@ impl ApplicationHandler for Game {
       true,
     );
 
-    let renderer = app.get_renderer();
-    self.button.init(renderer);
+    let mut renderer = app.get_renderer();
+    self.button.init(&mut renderer);
     self.app = Some(app);
   }
 
@@ -60,16 +60,23 @@ impl ApplicationHandler for Game {
           return;
         };
 
-        let renderer = app.get_renderer();
+        let mut renderer = app.get_renderer();
         let window = renderer.get_window();
         let LogicalPosition { x, y } = cursor_position.to_logical(window.scale_factor());
-        self.button.on_cursor_moved((x, y), &renderer);
+        self.button.on_cursor_moved((x, y), &mut renderer);
       }
       WindowEvent::MouseInput {
         device_id: _,
         state: input_state,
         button: MouseButton::Left,
-      } => self.button.on_mouse_input(input_state),
+      } => {
+        let Some(app) = self.app.as_mut() else {
+          return;
+        };
+
+        let mut renderer = app.get_renderer();
+        self.button.on_mouse_input(input_state, &mut renderer);
+      }
       WindowEvent::RedrawRequested => {
         let Some(mut app) = self.app.take() else {
           return;

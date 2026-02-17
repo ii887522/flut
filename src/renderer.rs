@@ -36,8 +36,13 @@ const VK_DEVICE_EXT_NAMES: &[&CStr] = &[
 
 const VERT_SHADER_CODE: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/shader.vert.spv"));
 const FRAG_SHADER_CODE: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/shader.frag.spv"));
-const DYNAMIC_STATES: &[vk::DynamicState] =
-  &[vk::DynamicState::VIEWPORT, vk::DynamicState::SCISSOR];
+
+const DYNAMIC_STATES: &[vk::DynamicState] = &[
+  vk::DynamicState::VIEWPORT,
+  vk::DynamicState::SCISSOR,
+  vk::DynamicState::DEPTH_WRITE_ENABLE,
+  vk::DynamicState::DEPTH_COMPARE_OP,
+];
 
 struct WindowMinimized;
 
@@ -62,7 +67,9 @@ struct Shared {
   vk_allocator: vk_mem::Allocator,
   model_buffer: StorageBuffer,
   round_rect_sync: ModelSync<RoundRect>,
+  clipped_round_rect_sync: ModelSync<RoundRect>,
   msaa_sample_count: vk::SampleCountFlags,
+  model_capacities: ModelCapacities,
   graphics_command_pools: Box<[vk::CommandPool]>,
   graphics_command_buffers: Box<[vk::CommandBuffer]>,
   image_avail_semaphores: Box<[vk::Semaphore]>,
@@ -82,6 +89,7 @@ impl Shared {
     let (width, height) = size;
     let ModelCapacities {
       round_rect_capacity,
+      clipped_round_rect_capacity,
     } = model_capacities;
 
     let window = event_loop
@@ -737,8 +745,6 @@ impl Shared {
 
     let depth_stencil_state_create_info = vk::PipelineDepthStencilStateCreateInfo {
       depth_test_enable: vk::TRUE,
-      depth_write_enable: vk::TRUE,
-      depth_compare_op: vk::CompareOp::LESS_OR_EQUAL,
       ..Default::default()
     };
 
@@ -956,6 +962,7 @@ impl Shared {
     );
 
     let round_rect_sync = ModelSync::new(round_rect_capacity);
+    let clipped_round_rect_sync = ModelSync::new(clipped_round_rect_capacity);
 
     let graphics_command_pools = iter::repeat_with(|| {
       let command_pool_create_info = vk::CommandPoolCreateInfo {
@@ -1048,7 +1055,9 @@ impl Shared {
       vk_allocator,
       model_buffer,
       round_rect_sync,
+      clipped_round_rect_sync,
       msaa_sample_count,
+      model_capacities,
       graphics_command_pools,
       graphics_command_buffers,
       image_avail_semaphores,
@@ -1551,14 +1560,27 @@ impl Renderer<Created> {
         .unwrap();
     }
 
-    let transfer_command_buffer = shared
-      .round_rect_sync
-      .sync_to(&mut shared.model_buffer, &shared.vk_device);
+    let transfer_command_buffers = [
+      shared
+        .round_rect_sync
+        .sync_to(&shared.model_buffer, &shared.vk_device, 0, false),
+      shared.clipped_round_rect_sync.sync_to(
+        &shared.model_buffer,
+        &shared.vk_device,
+        shared.model_capacities.round_rect_capacity * mem::size_of::<RoundRect>(),
+        true,
+      ),
+    ]
+    .into_iter()
+    .flatten()
+    .collect::<Box<_>>();
 
-    if let Some(transfer_command_buffer) = transfer_command_buffer {
+    shared.model_buffer.done_write();
+
+    if !transfer_command_buffers.is_empty() {
       let queue_submit_info = vk::SubmitInfo {
-        command_buffer_count: 1,
-        p_command_buffers: &raw const transfer_command_buffer,
+        command_buffer_count: transfer_command_buffers.len().try_into().unwrap(),
+        p_command_buffers: transfer_command_buffers.as_ptr(),
         signal_semaphore_count: 1,
         p_signal_semaphores: &raw const transfer_done_semaphore,
         ..Default::default()
@@ -1708,36 +1730,99 @@ impl Renderer<Created> {
       .inner_size()
       .to_logical(shared.window.scale_factor());
 
-    let push_consts = PushConsts {
-      round_rect_buffer: shared.model_buffer.calc_read_addr(),
-      cam_size: (cam_width, cam_height),
-    };
-
-    let raw_push_consts = unsafe {
-      slice::from_raw_parts(
-        (&raw const push_consts).cast(),
-        mem::size_of::<PushConsts>(),
-      )
-    };
-
-    unsafe {
-      shared.vk_device.cmd_push_constants(
-        graphics_command_buffer,
-        shared.pipeline_layout,
-        vk::ShaderStageFlags::VERTEX,
-        0,
-        raw_push_consts,
-      );
-    }
-
     let vertex_count = (shared.round_rect_sync.get_model_count() * RoundRect::get_vertex_count())
       .try_into()
       .unwrap();
 
-    unsafe {
-      shared
-        .vk_device
-        .cmd_draw(graphics_command_buffer, vertex_count, 1, 0, 0);
+    if vertex_count > 0 {
+      unsafe {
+        shared
+          .vk_device
+          .cmd_set_depth_write_enable(graphics_command_buffer, true);
+      }
+
+      unsafe {
+        shared
+          .vk_device
+          .cmd_set_depth_compare_op(graphics_command_buffer, vk::CompareOp::LESS_OR_EQUAL);
+      }
+
+      let push_consts = PushConsts {
+        round_rect_buffer: shared.model_buffer.calc_read_addr(0),
+        cam_size: (cam_width, cam_height),
+      };
+
+      let raw_push_consts = unsafe {
+        slice::from_raw_parts(
+          (&raw const push_consts).cast(),
+          mem::size_of::<PushConsts>(),
+        )
+      };
+
+      unsafe {
+        shared.vk_device.cmd_push_constants(
+          graphics_command_buffer,
+          shared.pipeline_layout,
+          vk::ShaderStageFlags::VERTEX,
+          0,
+          raw_push_consts,
+        );
+      }
+
+      unsafe {
+        shared
+          .vk_device
+          .cmd_draw(graphics_command_buffer, vertex_count, 1, 0, 0);
+      }
+    }
+
+    let vertex_count = (shared.clipped_round_rect_sync.get_model_count()
+      * RoundRect::get_vertex_count())
+    .try_into()
+    .unwrap();
+
+    if vertex_count > 0 {
+      unsafe {
+        shared
+          .vk_device
+          .cmd_set_depth_write_enable(graphics_command_buffer, false);
+      }
+
+      unsafe {
+        shared
+          .vk_device
+          .cmd_set_depth_compare_op(graphics_command_buffer, vk::CompareOp::EQUAL);
+      }
+
+      let push_consts = PushConsts {
+        round_rect_buffer: shared.model_buffer.calc_read_addr(
+          shared.model_capacities.round_rect_capacity * mem::size_of::<RoundRect>(),
+        ),
+        cam_size: (cam_width, cam_height),
+      };
+
+      let raw_push_consts = unsafe {
+        slice::from_raw_parts(
+          (&raw const push_consts).cast(),
+          mem::size_of::<PushConsts>(),
+        )
+      };
+
+      unsafe {
+        shared.vk_device.cmd_push_constants(
+          graphics_command_buffer,
+          shared.pipeline_layout,
+          vk::ShaderStageFlags::VERTEX,
+          0,
+          raw_push_consts,
+        );
+      }
+
+      unsafe {
+        shared
+          .vk_device
+          .cmd_draw(graphics_command_buffer, vertex_count, 1, 0, 0);
+      }
     }
 
     let subpass_end_info = vk::SubpassEndInfo::default();
@@ -1758,7 +1843,7 @@ impl Renderer<Created> {
     let mut wait_semaphores = vec![image_avail_semaphore];
     let mut wait_dst_stage_masks = vec![vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT];
 
-    if transfer_command_buffer.is_some() {
+    if !transfer_command_buffers.is_empty() {
       wait_semaphores.push(transfer_done_semaphore);
       wait_dst_stage_masks.push(vk::PipelineStageFlags::VERTEX_SHADER);
     }
@@ -1852,5 +1937,10 @@ impl<State> Renderer<State> {
   #[inline]
   pub(super) const fn get_round_rect_sync(&mut self) -> &mut ModelSync<RoundRect> {
     &mut self.shared.round_rect_sync
+  }
+
+  #[inline]
+  pub(super) const fn get_clipped_round_rect_sync(&mut self) -> &mut ModelSync<RoundRect> {
+    &mut self.shared.clipped_round_rect_sync
   }
 }
