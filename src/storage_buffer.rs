@@ -4,11 +4,11 @@ use std::{ffi::c_void, iter, mem, ptr};
 use vk_mem::Alloc as _;
 
 struct StagingBuffer {
-  transfer_command_pools: Box<[vk::CommandPool]>,
-  transfer_command_buffers: Box<[vk::CommandBuffer]>,
   buffer: vk::Buffer,
   alloc: vk_mem::Allocation,
   data: *mut c_void,
+  transfer_command_pools: Box<[vk::CommandPool]>,
+  transfer_command_buffers: Box<[vk::CommandBuffer]>,
 }
 
 enum BufferData {
@@ -137,11 +137,11 @@ impl StorageBuffer {
       let staging_data = staging_alloc_info.allocation_info.mapped_data;
 
       BufferData::Staging(StagingBuffer {
-        transfer_command_pools,
-        transfer_command_buffers,
         buffer: staging_buffer,
         alloc: staging_alloc,
         data: staging_data,
+        transfer_command_pools,
+        transfer_command_buffers,
       })
     } else {
       BufferData::Device(data)
@@ -199,11 +199,11 @@ impl StorageBuffer {
 
     if !regions.is_empty()
       && let BufferData::Staging(StagingBuffer {
-        ref transfer_command_pools,
-        ref transfer_command_buffers,
         buffer: staging_buffer,
         alloc: _,
         data: _,
+        ref transfer_command_pools,
+        ref transfer_command_buffers,
       }) = self.data
     {
       let transfer_command_pool = transfer_command_pools[write_index];
@@ -305,11 +305,11 @@ impl StorageBuffer {
 
   pub(super) fn drop(mut self, vk_device: &ash::Device, vk_allocator: &vk_mem::Allocator) {
     if let BufferData::Staging(StagingBuffer {
-      transfer_command_pools,
-      transfer_command_buffers: _,
       buffer: staging_buffer,
       alloc: mut staging_alloc,
       data: _,
+      transfer_command_pools,
+      transfer_command_buffers: _,
     }) = self.data
     {
       unsafe {

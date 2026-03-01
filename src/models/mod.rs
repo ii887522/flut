@@ -1,7 +1,10 @@
+pub mod align;
+pub(super) mod glyph;
 pub mod model_capacities;
 pub(super) mod push_consts;
 pub mod range;
 pub mod round_rect;
+pub mod text;
 
 use crate::{model_sync::ModelSync, renderer::Renderer};
 

@@ -48,6 +48,7 @@ impl Model for RoundRect {
     renderer.get_round_rect_sync()
   }
 
+  #[inline]
   fn get_clipped_sync<State>(renderer: &mut Renderer<State>) -> &mut ModelSync<Self>
   where
     Self: Sized,

@@ -9,6 +9,8 @@ pub fn sd_round_rect(position: (f32, f32), half_size: (f32, f32), radius: f32) -
     position.1.abs() - half_size.1 + radius,
   );
 
+  let inner_dist = qx.max(qy).min(0.0);
   let (qx, qy) = (qx.max(0.0), qy.max(0.0));
-  (qx * qx + qy * qy).sqrt() - radius
+  let outer_dist = (qx * qx + qy * qy).sqrt();
+  outer_dist + inner_dist - radius
 }

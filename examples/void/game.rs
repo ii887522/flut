@@ -1,4 +1,4 @@
-use flut::{app::App, models::model_capacities::ModelCapacities, widgets::button::Button};
+use flut::{app::App, widgets::button::Button};
 use winit::{
   application::ApplicationHandler,
   dpi::LogicalPosition,
@@ -20,7 +20,7 @@ impl Game {
   pub(super) fn new() -> Self {
     Self {
       app: None,
-      button: Button::new().call(),
+      button: Button::new().text("Hello").call(),
     }
   }
 }
@@ -31,13 +31,11 @@ impl ApplicationHandler for Game {
       return;
     }
 
-    let mut app = App::new(
-      event_loop,
-      "Void".into(),
-      (APP_SIZE.0.into(), APP_SIZE.1.into()),
-      ModelCapacities::default(),
-      true,
-    );
+    let mut app = App::new(event_loop)
+      .title("Void")
+      .size((APP_SIZE.0.into(), APP_SIZE.1.into()))
+      .show_fps(true)
+      .call();
 
     let mut renderer = app.get_renderer();
     self.button.init(&mut renderer);
