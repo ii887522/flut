@@ -4,6 +4,7 @@ use crate::{
   renderer::{Created, Creating, Renderer},
   renderer_ref::RendererRef,
 };
+use optarg2chain::optarg_impl;
 use std::borrow::Cow;
 use winit::{
   application::ApplicationHandler,
@@ -21,17 +22,20 @@ pub struct App {
   renderer: Result<Renderer<Created>, Renderer<Creating>>,
 }
 
+#[optarg_impl]
 impl App {
-  #[inline]
-  pub fn new(
-    event_loop: &ActiveEventLoop,
-    title: Cow<'static, str>,
-    size: (f64, f64),
-    model_capacities: ModelCapacities,
-    show_fps: bool,
+  #[optarg_method(AppNewBuilder, call)]
+  pub fn new<'event_loop>(
+    event_loop: &'event_loop ActiveEventLoop,
+    #[optarg_default] title: Cow<'static, str>,
+    #[optarg((800_f64, 600_f64))] size: (f64, f64),
+    #[optarg_default] model_capacities: ModelCapacities,
+    #[optarg((512, 512))] glyph_atlas_size: (u16, u16),
+    #[optarg_default] show_fps: bool,
   ) -> Self {
     Self {
-      renderer: Renderer::new(event_loop, &title, size, model_capacities).try_into(),
+      renderer: Renderer::new(event_loop, &title, size, model_capacities, glyph_atlas_size)
+        .try_into(),
       app_loop: AppLoop::new(title, show_fps),
     }
   }

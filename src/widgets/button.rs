@@ -1,12 +1,31 @@
 use crate::{
-  models::round_rect::RoundRect, renderer_ref::RendererRef, sdf, utils, widgets::ripple::Ripple,
+  models::{align::Align, round_rect::RoundRect, text::Text},
+  renderer_ref::RendererRef,
+  sdf,
+  text_renderer::TextId,
+  utils,
+  widgets::ripple::Ripple,
+};
+use font_kit::{
+  family_name::FamilyName,
+  properties::{Properties, Weight},
 };
 use optarg2chain::optarg_impl;
-use std::collections::VecDeque;
+use std::{borrow::Cow, collections::VecDeque};
 use winit::{
   event::ElementState,
   window::{Cursor, CursorIcon},
 };
+
+// Settings
+const SCALE_SPEED: f32 = 2.0;
+const MIN_SCALE: f32 = 0.9;
+const COLOR_SCALE_SPEED: f32 = 2.0;
+const MIN_COLOR_SCALE: f32 = 0.8;
+const ROUND_RECT_Z: f32 = 0.1;
+
+// Computed settings
+const TEXT_Z: f32 = ROUND_RECT_Z - 0.1;
 
 enum State {
   Initial,
@@ -19,9 +38,11 @@ pub struct Button {
   radius: f32,
   color: (u8, u8, u8, u8),
   text_color: (u8, u8, u8, u8),
+  text: Cow<'static, str>,
   on_click: Option<Box<dyn FnMut()>>,
   round_rect_render_id: u32,
   ripples: VecDeque<Ripple>,
+  text_render_id: Option<TextId>,
   scale: f32,
   color_scale: f32,
   cursor_position: (f32, f32),
@@ -32,10 +53,11 @@ pub struct Button {
 impl Button {
   #[optarg_method(ButtonNewBuilder, call)]
   pub fn new(
-    #[optarg((96.0, 48.0))] size: (f32, f32),
+    #[optarg((80.0, 40.0))] size: (f32, f32),
     #[optarg(8.0)] radius: f32,
     #[optarg((255, 255, 255, 255))] color: (u8, u8, u8, u8),
     #[optarg((0, 0, 0, 255))] text_color: (u8, u8, u8, u8),
+    #[optarg_default] text: Cow<'static, str>,
     #[optarg_default] on_click: Option<Box<dyn FnMut()>>,
   ) -> Self {
     Self {
@@ -43,9 +65,11 @@ impl Button {
       radius,
       color,
       text_color,
+      text,
       on_click,
       round_rect_render_id: u32::MAX,
       ripples: VecDeque::new(),
+      text_render_id: None,
       scale: 1.0,
       color_scale: 1.0,
       cursor_position: (0.0, 0.0),
@@ -56,17 +80,40 @@ impl Button {
   pub fn init(&mut self, renderer: &mut RendererRef<'_>) {
     let (width, height) = self.size;
     let (app_width, app_height) = renderer.get_size();
-    let position = ((app_width - width) * 0.5, (app_height - height) * 0.5, 0.0);
+
+    let (x, y, z) = (
+      (app_width - width) * 0.5,
+      (app_height - height) * 0.5,
+      ROUND_RECT_Z,
+    );
 
     self.round_rect_render_id = renderer.add_model(
       RoundRect {
-        position,
+        position: (x, y, z),
         radius: self.radius,
         size: self.size,
         color: utils::pack_color(self.color),
       },
       false,
     );
+
+    if !self.text.is_empty() {
+      self.text_render_id = Some(renderer.add_text(
+        Text {
+          position: (width.mul_add(0.5, x), height.mul_add(0.65, y), TEXT_Z),
+          color: utils::pack_color(self.text_color),
+          font_size: height * 0.4,
+          font_family: (&[FamilyName::SansSerif]).into(),
+          font_props: Properties {
+            weight: Weight::SEMIBOLD,
+            ..Default::default()
+          },
+          align: Align::Center,
+          text: self.text.clone(),
+        },
+        false,
+      ));
+    }
   }
 
   pub fn on_cursor_moved(&mut self, cursor_position: (f32, f32), renderer: &mut RendererRef<'_>) {
@@ -112,7 +159,7 @@ impl Button {
           let (width, height) = self.size;
 
           let mut ripple = Ripple::new()
-            .position((cursor_x, cursor_y, 0.0))
+            .position((cursor_x, cursor_y, ROUND_RECT_Z))
             .start_color(utils::mix_color(self.color, self.text_color))
             .end_color(self.color)
             .end_radius((width * width + height * height).sqrt())
@@ -134,12 +181,6 @@ impl Button {
   }
 
   pub fn update(&mut self, dt: f32, renderer: &mut RendererRef<'_>) {
-    // Settings
-    const SCALE_SPEED: f32 = 2.0;
-    const MIN_SCALE: f32 = 0.9;
-    const COLOR_SCALE_SPEED: f32 = 2.0;
-    const MIN_COLOR_SCALE: f32 = 0.8;
-
     let old_scale = self.scale;
     let old_color_scale = self.color_scale;
     let (width, height) = self.size;
@@ -153,18 +194,43 @@ impl Button {
 
         if self.scale > old_scale || self.color_scale > old_color_scale {
           let (width, height) = (width * self.scale, height * self.scale);
-          let position = ((app_width - width) * 0.5, (app_height - height) * 0.5, 0.0);
+
+          let (x, y, z) = (
+            (app_width - width) * 0.5,
+            (app_height - height) * 0.5,
+            ROUND_RECT_Z,
+          );
 
           renderer.update_model(
             self.round_rect_render_id,
             RoundRect {
-              position,
+              position: (x, y, z),
               radius: self.radius * self.scale,
               size: (width, height),
               color: utils::pack_color(color),
             },
             false,
           );
+
+          if let Some(text_render_id) = self.text_render_id.take() {
+            renderer.remove_text(text_render_id);
+
+            self.text_render_id = Some(renderer.add_text(
+              Text {
+                position: (width.mul_add(0.5, x), height.mul_add(0.65, y), TEXT_Z),
+                color: utils::pack_color(self.text_color),
+                font_size: height * 0.4,
+                font_family: (&[FamilyName::SansSerif]).into(),
+                font_props: Properties {
+                  weight: Weight::SEMIBOLD,
+                  ..Default::default()
+                },
+                align: Align::Center,
+                text: self.text.clone(),
+              },
+              false,
+            ));
+          }
         }
 
         color
@@ -178,18 +244,43 @@ impl Button {
 
         if self.scale > old_scale || self.color_scale < old_color_scale {
           let (width, height) = (width * self.scale, height * self.scale);
-          let position = ((app_width - width) * 0.5, (app_height - height) * 0.5, 0.0);
+
+          let (x, y, z) = (
+            (app_width - width) * 0.5,
+            (app_height - height) * 0.5,
+            ROUND_RECT_Z,
+          );
 
           renderer.update_model(
             self.round_rect_render_id,
             RoundRect {
-              position,
+              position: (x, y, z),
               radius: self.radius * self.scale,
               size: (width, height),
               color: utils::pack_color(color),
             },
             false,
           );
+
+          if let Some(text_render_id) = self.text_render_id.take() {
+            renderer.remove_text(text_render_id);
+
+            self.text_render_id = Some(renderer.add_text(
+              Text {
+                position: (width.mul_add(0.5, x), height.mul_add(0.65, y), TEXT_Z),
+                color: utils::pack_color(self.text_color),
+                font_size: height * 0.4,
+                font_family: (&[FamilyName::SansSerif]).into(),
+                font_props: Properties {
+                  weight: Weight::SEMIBOLD,
+                  ..Default::default()
+                },
+                align: Align::Center,
+                text: self.text.clone(),
+              },
+              false,
+            ));
+          }
         }
 
         color
@@ -203,18 +294,43 @@ impl Button {
 
         if self.scale < old_scale || self.color_scale < old_color_scale {
           let (width, height) = (width * self.scale, height * self.scale);
-          let position = ((app_width - width) * 0.5, (app_height - height) * 0.5, 0.0);
+
+          let (x, y, z) = (
+            (app_width - width) * 0.5,
+            (app_height - height) * 0.5,
+            ROUND_RECT_Z,
+          );
 
           renderer.update_model(
             self.round_rect_render_id,
             RoundRect {
-              position,
+              position: (x, y, z),
               radius: self.radius * self.scale,
               size: (width, height),
               color: utils::pack_color(color),
             },
             false,
           );
+
+          if let Some(text_render_id) = self.text_render_id.take() {
+            renderer.remove_text(text_render_id);
+
+            self.text_render_id = Some(renderer.add_text(
+              Text {
+                position: (width.mul_add(0.5, x), height.mul_add(0.65, y), TEXT_Z),
+                color: utils::pack_color(self.text_color),
+                font_size: height * 0.4,
+                font_family: (&[FamilyName::SansSerif]).into(),
+                font_props: Properties {
+                  weight: Weight::SEMIBOLD,
+                  ..Default::default()
+                },
+                align: Align::Center,
+                text: self.text.clone(),
+              },
+              false,
+            ));
+          }
         }
 
         color

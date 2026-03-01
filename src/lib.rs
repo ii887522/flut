@@ -89,7 +89,6 @@
 #![deny(clippy::unnecessary_safety_comment)]
 #![deny(clippy::unnecessary_safety_doc)]
 #![deny(clippy::unnecessary_self_imports)]
-#![deny(clippy::unreachable)]
 #![deny(clippy::unseparated_literal_suffix)]
 #![deny(clippy::unused_result_ok)]
 #![deny(clippy::unused_trait_names)]
@@ -120,7 +119,9 @@ mod model_sync;
 pub mod models;
 mod renderer;
 pub mod renderer_ref;
+mod sampled_image;
 pub mod sdf;
 mod storage_buffer;
+mod text_renderer;
 pub mod utils;
 pub mod widgets;

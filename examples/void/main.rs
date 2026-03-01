@@ -89,7 +89,6 @@
 #![deny(clippy::unnecessary_safety_comment)]
 #![deny(clippy::unnecessary_safety_doc)]
 #![deny(clippy::unnecessary_self_imports)]
-#![deny(clippy::unreachable)]
 #![deny(clippy::unseparated_literal_suffix)]
 #![deny(clippy::unused_result_ok)]
 #![deny(clippy::unused_trait_names)]

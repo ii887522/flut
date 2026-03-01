@@ -2,9 +2,11 @@ use crate::{
   consts,
   model_sync::ModelSync,
   models::{
-    Model as _, model_capacities::ModelCapacities, push_consts::PushConsts, round_rect::RoundRect,
+    Model as _, glyph::Glyph, model_capacities::ModelCapacities, push_consts::PushConsts,
+    round_rect::RoundRect,
   },
   storage_buffer::StorageBuffer,
+  text_renderer::TextRenderer,
 };
 use ash::{khr, vk};
 use rustc_hash::FxHashSet;
@@ -55,21 +57,29 @@ struct Shared {
   vk_physical_device: vk::PhysicalDevice,
   graphics_queue_family_index: u32,
   present_queue_family_index: u32,
+  transfer_queue_family_index: u32,
   vk_device: ash::Device,
   graphics_queue: vk::Queue,
   present_queue: vk::Queue,
   transfer_queue: vk::Queue,
   swapchain_format: vk::SurfaceFormatKHR,
   vk_swapchain_device: khr::swapchain::Device,
+  sampler: vk::Sampler,
+  descriptor_set_layout: vk::DescriptorSetLayout,
   pipeline_layout: vk::PipelineLayout,
   render_pass: vk::RenderPass,
   graphics_pipeline: vk::Pipeline,
+  descriptor_pool: vk::DescriptorPool,
+  descriptor_sets: Box<[vk::DescriptorSet]>,
+  init_done_semaphore: vk::Semaphore,
   vk_allocator: vk_mem::Allocator,
   model_buffer: StorageBuffer,
   round_rect_sync: ModelSync<RoundRect>,
   clipped_round_rect_sync: ModelSync<RoundRect>,
+  text_renderer: TextRenderer,
   msaa_sample_count: vk::SampleCountFlags,
   model_capacities: ModelCapacities,
+  glyph_atlas_size: (u16, u16),
   graphics_command_pools: Box<[vk::CommandPool]>,
   graphics_command_buffers: Box<[vk::CommandBuffer]>,
   image_avail_semaphores: Box<[vk::Semaphore]>,
@@ -85,11 +95,14 @@ impl Shared {
     title: &str,
     size: (f64, f64),
     model_capacities: ModelCapacities,
+    glyph_atlas_size: (u16, u16),
   ) -> Self {
     let (width, height) = size;
     let ModelCapacities {
       round_rect_capacity,
       clipped_round_rect_capacity,
+      glyph_capacity,
+      clipped_glyph_capacity,
     } = model_capacities;
 
     let window = event_loop
@@ -146,9 +159,6 @@ impl Shared {
       CString::new("syncval_shader_accesses_heuristic").unwrap();
 
     #[cfg(debug_assertions)]
-    let printf_enable_name = CString::new("printf_enable").unwrap();
-
-    #[cfg(debug_assertions)]
     let gpuav_enable_name = CString::new("gpuav_enable").unwrap();
 
     #[cfg(debug_assertions)]
@@ -178,9 +188,6 @@ impl Shared {
 
     #[cfg(debug_assertions)]
     let syncval_shader_accesses_heuristic_value = vk::TRUE;
-
-    #[cfg(debug_assertions)]
-    let printf_enable_value = vk::TRUE;
 
     #[cfg(debug_assertions)]
     let gpuav_enable_value = vk::TRUE;
@@ -233,14 +240,6 @@ impl Shared {
         ty: vk::LayerSettingTypeEXT::BOOL32,
         value_count: 1,
         p_values: (&raw const syncval_shader_accesses_heuristic_value).cast(),
-        ..Default::default()
-      },
-      vk::LayerSettingEXT {
-        p_layer_name: vk_validation_layer_name.as_ptr(),
-        p_setting_name: printf_enable_name.as_ptr(),
-        ty: vk::LayerSettingTypeEXT::BOOL32,
-        value_count: 1,
-        p_values: (&raw const printf_enable_value).cast(),
         ..Default::default()
       },
       vk::LayerSettingEXT {
@@ -599,6 +598,12 @@ impl Shared {
         ..Default::default()
       };
 
+    let mut vk_physical_device_vulkan_11_features = vk::PhysicalDeviceVulkan11Features {
+      shader_draw_parameters: vk::TRUE,
+      p_next: (&raw mut vk_physical_device_pageable_device_local_memory_features).cast(),
+      ..Default::default()
+    };
+
     let vk_physical_device_features = vk::PhysicalDeviceFeatures2 {
       features: vk::PhysicalDeviceFeatures {
         fragment_stores_and_atomics: vk::TRUE,
@@ -607,7 +612,7 @@ impl Shared {
         alpha_to_one: vk::TRUE,
         ..Default::default()
       },
-      p_next: (&raw mut vk_physical_device_pageable_device_local_memory_features).cast(),
+      p_next: (&raw mut vk_physical_device_vulkan_11_features).cast(),
       ..Default::default()
     };
 
@@ -670,7 +675,9 @@ impl Shared {
         .limits
         .framebuffer_depth_sample_counts;
 
-    let msaa_sample_count = if max_msaa_sample_count.contains(vk::SampleCountFlags::TYPE_2) {
+    let msaa_sample_count = if max_msaa_sample_count.contains(vk::SampleCountFlags::TYPE_4) {
+      vk::SampleCountFlags::TYPE_4
+    } else if max_msaa_sample_count.contains(vk::SampleCountFlags::TYPE_2) {
       vk::SampleCountFlags::TYPE_2
     } else {
       vk::SampleCountFlags::TYPE_1
@@ -765,6 +772,45 @@ impl Shared {
       ..Default::default()
     };
 
+    let sampler_create_info = vk::SamplerCreateInfo {
+      mag_filter: vk::Filter::LINEAR,
+      min_filter: vk::Filter::LINEAR,
+      address_mode_u: vk::SamplerAddressMode::CLAMP_TO_BORDER,
+      address_mode_v: vk::SamplerAddressMode::CLAMP_TO_BORDER,
+      address_mode_w: vk::SamplerAddressMode::CLAMP_TO_BORDER,
+      min_lod: 0.0,
+      max_lod: vk::LOD_CLAMP_NONE,
+      border_color: vk::BorderColor::FLOAT_TRANSPARENT_BLACK,
+      ..Default::default()
+    };
+
+    let sampler = unsafe {
+      vk_device
+        .create_sampler(&sampler_create_info, None)
+        .unwrap()
+    };
+
+    let descriptor_set_layout_bindings = [vk::DescriptorSetLayoutBinding {
+      binding: 0,
+      descriptor_type: vk::DescriptorType::COMBINED_IMAGE_SAMPLER,
+      descriptor_count: 1,
+      stage_flags: vk::ShaderStageFlags::FRAGMENT,
+      p_immutable_samplers: &raw const sampler,
+      ..Default::default()
+    }];
+
+    let descriptor_set_layout_create_info = vk::DescriptorSetLayoutCreateInfo {
+      binding_count: descriptor_set_layout_bindings.len().try_into().unwrap(),
+      p_bindings: descriptor_set_layout_bindings.as_ptr(),
+      ..Default::default()
+    };
+
+    let descriptor_set_layout = unsafe {
+      vk_device
+        .create_descriptor_set_layout(&descriptor_set_layout_create_info, None)
+        .unwrap()
+    };
+
     let push_const_ranges = [vk::PushConstantRange {
       stage_flags: vk::ShaderStageFlags::VERTEX,
       offset: 0,
@@ -772,6 +818,8 @@ impl Shared {
     }];
 
     let pipeline_layout_create_info = vk::PipelineLayoutCreateInfo {
+      set_layout_count: 1,
+      p_set_layouts: &raw const descriptor_set_layout,
       push_constant_range_count: push_const_ranges.len().try_into().unwrap(),
       p_push_constant_ranges: push_const_ranges.as_ptr(),
       ..Default::default()
@@ -941,6 +989,57 @@ impl Shared {
       vk_device.destroy_shader_module(vert_shader_module, None);
     }
 
+    let descriptor_pool_sizes = [vk::DescriptorPoolSize {
+      ty: vk::DescriptorType::COMBINED_IMAGE_SAMPLER,
+      descriptor_count: consts::MAX_IN_FLIGHT_FRAME_COUNT as u32,
+    }];
+
+    let descriptor_pool_create_info = vk::DescriptorPoolCreateInfo {
+      max_sets: consts::MAX_IN_FLIGHT_FRAME_COUNT as u32,
+      pool_size_count: descriptor_pool_sizes.len().try_into().unwrap(),
+      p_pool_sizes: descriptor_pool_sizes.as_ptr(),
+      ..Default::default()
+    };
+
+    let descriptor_pool = unsafe {
+      vk_device
+        .create_descriptor_pool(&descriptor_pool_create_info, None)
+        .unwrap()
+    };
+
+    let descriptor_set_layouts = [descriptor_set_layout; consts::MAX_IN_FLIGHT_FRAME_COUNT];
+
+    let descriptor_set_alloc_info = vk::DescriptorSetAllocateInfo {
+      descriptor_pool,
+      descriptor_set_count: descriptor_set_layouts.len().try_into().unwrap(),
+      p_set_layouts: descriptor_set_layouts.as_ptr(),
+      ..Default::default()
+    };
+
+    let descriptor_sets = unsafe {
+      vk_device
+        .allocate_descriptor_sets(&descriptor_set_alloc_info)
+        .unwrap()
+        .into_boxed_slice()
+    };
+
+    let timeline_semaphore_type_create_info = vk::SemaphoreTypeCreateInfo {
+      semaphore_type: vk::SemaphoreType::TIMELINE,
+      initial_value: 0,
+      ..Default::default()
+    };
+
+    let timeline_semaphore_create_info = vk::SemaphoreCreateInfo {
+      p_next: (&raw const timeline_semaphore_type_create_info).cast(),
+      ..Default::default()
+    };
+
+    let init_done_semaphore = unsafe {
+      vk_device
+        .create_semaphore(&timeline_semaphore_create_info, None)
+        .unwrap()
+    };
+
     let total_model_capacity_bytes = model_capacities.calc_bytes();
 
     let mut vk_allocator_create_info =
@@ -963,6 +1062,70 @@ impl Shared {
 
     let round_rect_sync = ModelSync::new(round_rect_capacity);
     let clipped_round_rect_sync = ModelSync::new(clipped_round_rect_capacity);
+
+    let (mut text_renderer, transfer_command_buffer) = TextRenderer::new(
+      &vk_device,
+      &vk_allocator,
+      graphics_queue_family_index,
+      transfer_queue_family_index,
+      glyph_capacity,
+      clipped_glyph_capacity,
+      glyph_atlas_size,
+    );
+
+    let signal_semaphore_value = 1;
+
+    let timeline_semaphore_submit_info = vk::TimelineSemaphoreSubmitInfo {
+      signal_semaphore_value_count: 1,
+      p_signal_semaphore_values: &raw const signal_semaphore_value,
+      ..Default::default()
+    };
+
+    let queue_submit_info = vk::SubmitInfo {
+      command_buffer_count: 1,
+      p_command_buffers: &raw const transfer_command_buffer,
+      signal_semaphore_count: 1,
+      p_signal_semaphores: &raw const init_done_semaphore,
+      p_next: (&raw const timeline_semaphore_submit_info).cast(),
+      ..Default::default()
+    };
+
+    unsafe {
+      vk_device
+        .queue_submit(transfer_queue, &[queue_submit_info], vk::Fence::null())
+        .unwrap();
+    }
+
+    let descriptor_image_infos = text_renderer
+      .get_glyph_atlas()
+      .get_image_views()
+      .iter()
+      .map(|&image_view| vk::DescriptorImageInfo {
+        sampler,
+        image_view,
+        image_layout: vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
+      })
+      .collect::<Box<_>>();
+
+    let descriptor_set_writes = descriptor_sets
+      .iter()
+      .zip(descriptor_image_infos.iter())
+      .map(
+        |(&descriptor_set, descriptor_image_info)| vk::WriteDescriptorSet {
+          dst_set: descriptor_set,
+          dst_binding: 0,
+          dst_array_element: 0,
+          descriptor_count: 1,
+          descriptor_type: vk::DescriptorType::COMBINED_IMAGE_SAMPLER,
+          p_image_info: descriptor_image_info,
+          ..Default::default()
+        },
+      )
+      .collect::<Box<_>>();
+
+    unsafe {
+      vk_device.update_descriptor_sets(&descriptor_set_writes, &[]);
+    }
 
     let graphics_command_pools = iter::repeat_with(|| {
       let command_pool_create_info = vk::CommandPoolCreateInfo {
@@ -1043,21 +1206,29 @@ impl Shared {
       vk_physical_device,
       graphics_queue_family_index,
       present_queue_family_index,
+      transfer_queue_family_index,
       vk_device,
       graphics_queue,
       present_queue,
       transfer_queue,
       swapchain_format,
       vk_swapchain_device,
+      sampler,
+      descriptor_set_layout,
       pipeline_layout,
       render_pass,
       graphics_pipeline,
+      descriptor_pool,
+      descriptor_sets,
+      init_done_semaphore,
       vk_allocator,
       model_buffer,
       round_rect_sync,
       clipped_round_rect_sync,
+      text_renderer,
       msaa_sample_count,
       model_capacities,
+      glyph_atlas_size,
       graphics_command_pools,
       graphics_command_buffers,
       image_avail_semaphores,
@@ -1100,9 +1271,20 @@ impl Shared {
         .for_each(|&command_pool| self.vk_device.destroy_command_pool(command_pool, None));
     }
 
+    self.text_renderer.drop(&self.vk_device, &self.vk_allocator);
     self.model_buffer.drop(&self.vk_device, &self.vk_allocator);
     drop(self.vk_allocator);
 
+    unsafe {
+      self
+        .vk_device
+        .destroy_semaphore(self.init_done_semaphore, None);
+    }
+    unsafe {
+      self
+        .vk_device
+        .destroy_descriptor_pool(self.descriptor_pool, None);
+    }
     unsafe {
       self
         .vk_device
@@ -1115,6 +1297,14 @@ impl Shared {
       self
         .vk_device
         .destroy_pipeline_layout(self.pipeline_layout, None);
+    }
+    unsafe {
+      self
+        .vk_device
+        .destroy_descriptor_set_layout(self.descriptor_set_layout, None);
+    }
+    unsafe {
+      self.vk_device.destroy_sampler(self.sampler, None);
     }
     unsafe {
       self.vk_device.destroy_device(None);
@@ -1498,9 +1688,10 @@ impl Renderer<Creating> {
     title: &str,
     size: (f64, f64),
     model_capacities: ModelCapacities,
+    glyph_atlas_size: (u16, u16),
   ) -> Self {
     Self {
-      shared: Shared::new(event_loop, title, size, model_capacities),
+      shared: Shared::new(event_loop, title, size, model_capacities, glyph_atlas_size),
       state: Creating {
         old_swapchain: vk::SwapchainKHR::null(),
       },
@@ -1560,29 +1751,74 @@ impl Renderer<Created> {
         .unwrap();
     }
 
+    let round_rect_buffer_offset = 0;
+
+    let glyph_buffer_offset =
+      shared.model_capacities.round_rect_capacity * mem::size_of::<RoundRect>();
+
+    let clipped_round_rect_buffer_offset =
+      glyph_buffer_offset + shared.model_capacities.glyph_capacity * mem::size_of::<Glyph>();
+
+    let clipped_glyph_buffer_offset = clipped_round_rect_buffer_offset
+      + shared.model_capacities.clipped_round_rect_capacity * mem::size_of::<RoundRect>();
+
+    let round_rect_transfer_command_buffer = shared.round_rect_sync.sync_to(
+      &shared.model_buffer,
+      &shared.vk_device,
+      round_rect_buffer_offset,
+      false,
+    );
+
+    let glyph_transfer_command_buffers = shared.text_renderer.sync_to(
+      &shared.model_buffer,
+      &shared.vk_device,
+      glyph_buffer_offset,
+      clipped_glyph_buffer_offset,
+      shared.graphics_queue_family_index,
+      shared.transfer_queue_family_index,
+    );
+
+    let clipped_round_rect_transfer_command_buffer = shared.clipped_round_rect_sync.sync_to(
+      &shared.model_buffer,
+      &shared.vk_device,
+      clipped_round_rect_buffer_offset,
+      true,
+    );
+
     let transfer_command_buffers = [
-      shared
-        .round_rect_sync
-        .sync_to(&shared.model_buffer, &shared.vk_device, 0, false),
-      shared.clipped_round_rect_sync.sync_to(
-        &shared.model_buffer,
-        &shared.vk_device,
-        shared.model_capacities.round_rect_capacity * mem::size_of::<RoundRect>(),
-        true,
-      ),
+      round_rect_transfer_command_buffer,
+      clipped_round_rect_transfer_command_buffer,
     ]
     .into_iter()
     .flatten()
+    .chain(glyph_transfer_command_buffers)
     .collect::<Box<_>>();
 
+    let glyph_atlas = shared.text_renderer.get_glyph_atlas();
     shared.model_buffer.done_write();
+    glyph_atlas.done_write();
+    let descriptor_set = shared.descriptor_sets[glyph_atlas.get_read_index()];
 
     if !transfer_command_buffers.is_empty() {
+      let wait_semaphore_value = 1;
+
+      let timeline_semaphore_submit_info = vk::TimelineSemaphoreSubmitInfo {
+        wait_semaphore_value_count: 1,
+        p_wait_semaphore_values: &raw const wait_semaphore_value,
+        ..Default::default()
+      };
+
+      let wait_dst_stage_mask = vk::PipelineStageFlags::TRANSFER;
+
       let queue_submit_info = vk::SubmitInfo {
         command_buffer_count: transfer_command_buffers.len().try_into().unwrap(),
         p_command_buffers: transfer_command_buffers.as_ptr(),
+        wait_semaphore_count: 1,
+        p_wait_semaphores: &raw const shared.init_done_semaphore,
+        p_wait_dst_stage_mask: &raw const wait_dst_stage_mask,
         signal_semaphore_count: 1,
         p_signal_semaphores: &raw const transfer_done_semaphore,
+        p_next: (&raw const timeline_semaphore_submit_info).cast(),
         ..Default::default()
       };
 
@@ -1722,6 +1958,17 @@ impl Renderer<Created> {
         .cmd_set_scissor(graphics_command_buffer, 0, &scissors);
     }
 
+    unsafe {
+      shared.vk_device.cmd_bind_descriptor_sets(
+        graphics_command_buffer,
+        vk::PipelineBindPoint::GRAPHICS,
+        shared.pipeline_layout,
+        0,
+        &[descriptor_set],
+        &[],
+      );
+    }
+
     let LogicalSize {
       width: cam_width,
       height: cam_height,
@@ -1730,11 +1977,30 @@ impl Renderer<Created> {
       .inner_size()
       .to_logical(shared.window.scale_factor());
 
-    let vertex_count = (shared.round_rect_sync.get_model_count() * RoundRect::get_vertex_count())
+    let (glyph_atlas_width, glyph_atlas_height) = shared.glyph_atlas_size;
+    let (glyph_atlas_width, glyph_atlas_height) =
+      (f32::from(glyph_atlas_width), f32::from(glyph_atlas_height));
+
+    let round_rect_vertex_count = (shared.round_rect_sync.get_model_count()
+      * RoundRect::get_vertex_count())
+    .try_into()
+    .unwrap();
+
+    let glyph_vertex_count = (shared.text_renderer.get_glyph_count() * Glyph::get_vertex_count())
       .try_into()
       .unwrap();
 
-    if vertex_count > 0 {
+    let clipped_round_rect_vertex_count = (shared.clipped_round_rect_sync.get_model_count()
+      * RoundRect::get_vertex_count())
+    .try_into()
+    .unwrap();
+
+    let clipped_glyph_vertex_count = (shared.text_renderer.get_clipped_glyph_count()
+      * Glyph::get_vertex_count())
+    .try_into()
+    .unwrap();
+
+    if round_rect_vertex_count > 0 || glyph_vertex_count > 0 {
       unsafe {
         shared
           .vk_device
@@ -1748,8 +2014,10 @@ impl Renderer<Created> {
       }
 
       let push_consts = PushConsts {
-        round_rect_buffer: shared.model_buffer.calc_read_addr(0),
+        round_rect_buffer: shared.model_buffer.calc_read_addr(round_rect_buffer_offset),
+        glyph_buffer: shared.model_buffer.calc_read_addr(glyph_buffer_offset),
         cam_size: (cam_width, cam_height),
+        glyph_atlas_size: (glyph_atlas_width, glyph_atlas_height),
       };
 
       let raw_push_consts = unsafe {
@@ -1768,20 +2036,25 @@ impl Renderer<Created> {
           raw_push_consts,
         );
       }
+    }
 
+    if round_rect_vertex_count > 0 {
       unsafe {
         shared
           .vk_device
-          .cmd_draw(graphics_command_buffer, vertex_count, 1, 0, 0);
+          .cmd_draw(graphics_command_buffer, round_rect_vertex_count, 1, 0, 0);
       }
     }
 
-    let vertex_count = (shared.clipped_round_rect_sync.get_model_count()
-      * RoundRect::get_vertex_count())
-    .try_into()
-    .unwrap();
+    if glyph_vertex_count > 0 {
+      unsafe {
+        shared
+          .vk_device
+          .cmd_draw(graphics_command_buffer, glyph_vertex_count, 1, 0, 1);
+      }
+    }
 
-    if vertex_count > 0 {
+    if clipped_round_rect_vertex_count > 0 || clipped_glyph_vertex_count > 0 {
       unsafe {
         shared
           .vk_device
@@ -1795,10 +2068,14 @@ impl Renderer<Created> {
       }
 
       let push_consts = PushConsts {
-        round_rect_buffer: shared.model_buffer.calc_read_addr(
-          shared.model_capacities.round_rect_capacity * mem::size_of::<RoundRect>(),
-        ),
+        round_rect_buffer: shared
+          .model_buffer
+          .calc_read_addr(clipped_round_rect_buffer_offset),
+        glyph_buffer: shared
+          .model_buffer
+          .calc_read_addr(clipped_glyph_buffer_offset),
         cam_size: (cam_width, cam_height),
+        glyph_atlas_size: (glyph_atlas_width, glyph_atlas_height),
       };
 
       let raw_push_consts = unsafe {
@@ -1817,11 +2094,25 @@ impl Renderer<Created> {
           raw_push_consts,
         );
       }
+    }
 
+    if clipped_round_rect_vertex_count > 0 {
+      unsafe {
+        shared.vk_device.cmd_draw(
+          graphics_command_buffer,
+          clipped_round_rect_vertex_count,
+          1,
+          0,
+          0,
+        );
+      }
+    }
+
+    if clipped_glyph_vertex_count > 0 {
       unsafe {
         shared
           .vk_device
-          .cmd_draw(graphics_command_buffer, vertex_count, 1, 0, 0);
+          .cmd_draw(graphics_command_buffer, clipped_glyph_vertex_count, 1, 0, 1);
       }
     }
 
@@ -1840,16 +2131,29 @@ impl Renderer<Created> {
         .unwrap();
     }
 
-    let mut wait_semaphores = vec![image_avail_semaphore];
-    let mut wait_dst_stage_masks = vec![vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT];
+    let mut wait_semaphore_values = vec![0, 1];
+    let mut wait_semaphores = vec![image_avail_semaphore, shared.init_done_semaphore];
+
+    let mut wait_dst_stage_masks = vec![
+      vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
+      vk::PipelineStageFlags::FRAGMENT_SHADER,
+    ];
 
     if !transfer_command_buffers.is_empty() {
+      wait_semaphore_values.push(0);
       wait_semaphores.push(transfer_done_semaphore);
       wait_dst_stage_masks.push(vk::PipelineStageFlags::VERTEX_SHADER);
     }
 
+    let wait_semaphore_values = wait_semaphore_values;
     let wait_semaphores = wait_semaphores;
     let wait_dst_stage_masks = wait_dst_stage_masks;
+
+    let timeline_semaphore_submit_info = vk::TimelineSemaphoreSubmitInfo {
+      wait_semaphore_value_count: wait_semaphore_values.len().try_into().unwrap(),
+      p_wait_semaphore_values: wait_semaphore_values.as_ptr(),
+      ..Default::default()
+    };
 
     let queue_submit_info = vk::SubmitInfo {
       wait_semaphore_count: wait_semaphores.len().try_into().unwrap(),
@@ -1859,6 +2163,7 @@ impl Renderer<Created> {
       p_command_buffers: &raw const graphics_command_buffer,
       signal_semaphore_count: 1,
       p_signal_semaphores: &raw const render_done_semaphore,
+      p_next: (&raw const timeline_semaphore_submit_info).cast(),
       ..Default::default()
     };
 
@@ -1942,5 +2247,10 @@ impl<State> Renderer<State> {
   #[inline]
   pub(super) const fn get_clipped_round_rect_sync(&mut self) -> &mut ModelSync<RoundRect> {
     &mut self.shared.clipped_round_rect_sync
+  }
+
+  #[inline]
+  pub(super) const fn get_text_renderer(&mut self) -> &mut TextRenderer {
+    &mut self.shared.text_renderer
   }
 }

@@ -1,7 +1,8 @@
 use crate::{
   model_sync::ModelSync,
-  models::Model,
+  models::{Model, text::Text},
   renderer::{Created, Creating, Renderer},
+  text_renderer::{TextId, TextRenderer},
 };
 use winit::{dpi::LogicalSize, window::Window};
 
@@ -25,12 +26,14 @@ impl<'render> RendererRef<'render> {
   }
 
   #[must_use]
+  #[inline]
   pub fn get_size(&self) -> (f32, f32) {
     let window = self.get_window();
     let LogicalSize { width, height } = window.inner_size().to_logical(window.scale_factor());
     (width, height)
   }
 
+  #[inline]
   fn get_model_sync<M: Model>(&mut self, clipped: bool) -> &mut ModelSync<M> {
     if clipped {
       match *self.0 {
@@ -42,6 +45,14 @@ impl<'render> RendererRef<'render> {
         Ok(ref mut renderer) => M::get_sync(renderer),
         Err(ref mut renderer) => M::get_sync(renderer),
       }
+    }
+  }
+
+  #[inline]
+  const fn get_text_renderer(&mut self) -> &mut TextRenderer {
+    match *self.0 {
+      Ok(ref mut renderer) => renderer.get_text_renderer(),
+      Err(ref mut renderer) => renderer.get_text_renderer(),
     }
   }
 
@@ -73,5 +84,15 @@ impl<'render> RendererRef<'render> {
   #[inline]
   pub fn bulk_remove_models<M: Model + Clone>(&mut self, ids: &[u32], clipped: bool) -> Box<[M]> {
     self.get_model_sync(clipped).bulk_remove_models(ids)
+  }
+
+  #[inline]
+  pub fn add_text(&mut self, text: Text, clipped: bool) -> TextId {
+    self.get_text_renderer().add_text(text, clipped)
+  }
+
+  #[inline]
+  pub fn remove_text(&mut self, text_id: TextId) {
+    self.get_text_renderer().remove_text(text_id);
   }
 }
