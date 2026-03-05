@@ -28,7 +28,7 @@ use std::{
 };
 
 // Settings
-const GLYPH_MARGIN: i32 = 1;
+const GLYPH_MARGIN: i32 = 2;
 const RESOLUTION_SCALE: f32 = 2.0;
 
 #[derive(Clone, PartialEq)]
@@ -115,6 +115,7 @@ pub struct TextRenderer {
   glyph_metrics_cache: FxHashMap<GlyphKey, GlyphMetrics>,
   unused_glyph_metrics_cache: LruCache<GlyphKey, GlyphMetrics>,
   changeset_queue: VecDeque<Vec<GlyphKey>>,
+  window_scale_factor: f32,
 }
 
 impl TextRenderer {
@@ -124,6 +125,7 @@ impl TextRenderer {
     vk_allocator: &vk_mem::Allocator,
     graphics_queue_family_index: u32,
     transfer_queue_family_index: u32,
+    window_scale_factor: f32,
     glyph_capacity: usize,
     clipped_glyph_capacity: usize,
     glyph_atlas_size: (u16, u16),
@@ -163,6 +165,7 @@ impl TextRenderer {
         ),
         unused_glyph_metrics_cache: LruCache::with_capacity(glyph_metrics_cache_capacity),
         changeset_queue: VecDeque::from_iter([vec![]]),
+        window_scale_factor,
       },
       transfer_command_buffer,
     )
@@ -252,12 +255,12 @@ impl TextRenderer {
           .rasterize_glyph(
             &mut canvas,
             glyph_id,
-            font_size * RESOLUTION_SCALE,
+            font_size * self.window_scale_factor * RESOLUTION_SCALE,
             Transform2F::from_translation(Vector2F::new(
-              -bearing_x * RESOLUTION_SCALE,
-              -bearing_y * RESOLUTION_SCALE,
+              -bearing_x * self.window_scale_factor * RESOLUTION_SCALE,
+              -bearing_y * self.window_scale_factor * RESOLUTION_SCALE,
             )),
-            HintingOptions::Vertical(font_size),
+            HintingOptions::Vertical(font_size * self.window_scale_factor),
             RasterizationOptions::GrayscaleAa,
           )
           .unwrap();
@@ -372,9 +375,9 @@ impl TextRenderer {
           let glyph_bounds = font
             .raster_bounds(
               glyph_id,
-              text.font_size * RESOLUTION_SCALE,
+              text.font_size * self.window_scale_factor * RESOLUTION_SCALE,
               Transform2F::default(),
-              HintingOptions::Vertical(text.font_size),
+              HintingOptions::Vertical(text.font_size * self.window_scale_factor),
               RasterizationOptions::GrayscaleAa,
             )
             .unwrap();
@@ -421,8 +424,8 @@ impl TextRenderer {
                 (glyph_alloc.rectangle.height() - GLYPH_MARGIN) as u32,
               ),
               bearing: (
-                glyph_bounds.min_x() as f32 / RESOLUTION_SCALE,
-                glyph_bounds.min_y() as f32 / RESOLUTION_SCALE,
+                glyph_bounds.min_x() as f32 / self.window_scale_factor / RESOLUTION_SCALE,
+                glyph_bounds.min_y() as f32 / self.window_scale_factor / RESOLUTION_SCALE,
               ),
               advance,
               alloc_id: glyph_alloc.id,
@@ -458,8 +461,8 @@ impl TextRenderer {
                 ),
                 color: text.color,
                 size: (
-                  glyph_width as f32 / RESOLUTION_SCALE,
-                  glyph_height as f32 / RESOLUTION_SCALE,
+                  glyph_width as f32 / self.window_scale_factor / RESOLUTION_SCALE,
+                  glyph_height as f32 / self.window_scale_factor / RESOLUTION_SCALE,
                 ),
                 atlas_position: (glyph_x as f32, glyph_y as f32),
               }),
