@@ -44,6 +44,7 @@ layout(push_constant) uniform PushConsts {
   GlyphBuffer glyph_buffer;
   vec2 cam_size;
   vec2 glyph_atlas_size;
+  float window_scale_factor;
 } push_consts;
 
 layout(location = 0) flat out int model_type;
@@ -80,7 +81,7 @@ void main() {
       model_color = glyph.color;
 
       model_type = GLYPH;
-      atlas_position = (position * glyph.size * GLYPH_RESOLUTION_SCALE + glyph.atlas_position) / push_consts.glyph_atlas_size;
+      atlas_position = (position * glyph.size * push_consts.window_scale_factor * GLYPH_RESOLUTION_SCALE + glyph.atlas_position) / push_consts.glyph_atlas_size;
       break;
   }
 

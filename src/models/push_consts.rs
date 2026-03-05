@@ -7,4 +7,5 @@ pub struct PushConsts {
   pub glyph_buffer: vk::DeviceAddress,
   pub cam_size: (f32, f32),
   pub glyph_atlas_size: (f32, f32),
+  pub window_scale_factor: f32,
 }

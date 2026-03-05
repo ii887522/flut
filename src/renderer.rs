@@ -141,6 +141,7 @@ impl Shared {
       eprintln!("Failed to get current monitor to center the window");
     }
 
+    let window_scale_factor = window.scale_factor() as f32;
     let vk_entry = unsafe { ash::Entry::load().unwrap() };
 
     let vk_app_info = vk::ApplicationInfo {
@@ -675,7 +676,9 @@ impl Shared {
         .limits
         .framebuffer_depth_sample_counts;
 
-    let msaa_sample_count = if max_msaa_sample_count.contains(vk::SampleCountFlags::TYPE_4) {
+    let msaa_sample_count = if max_msaa_sample_count.contains(vk::SampleCountFlags::TYPE_4)
+      && window_scale_factor < 2.0
+    {
       vk::SampleCountFlags::TYPE_4
     } else if max_msaa_sample_count.contains(vk::SampleCountFlags::TYPE_2) {
       vk::SampleCountFlags::TYPE_2
@@ -1068,6 +1071,7 @@ impl Shared {
       &vk_allocator,
       graphics_queue_family_index,
       transfer_queue_family_index,
+      window_scale_factor,
       glyph_capacity,
       clipped_glyph_capacity,
       glyph_atlas_size,
@@ -1969,13 +1973,12 @@ impl Renderer<Created> {
       );
     }
 
+    let window_scale_factor = shared.window.scale_factor();
+
     let LogicalSize {
       width: cam_width,
       height: cam_height,
-    } = shared
-      .window
-      .inner_size()
-      .to_logical(shared.window.scale_factor());
+    } = shared.window.inner_size().to_logical(window_scale_factor);
 
     let (glyph_atlas_width, glyph_atlas_height) = shared.glyph_atlas_size;
     let (glyph_atlas_width, glyph_atlas_height) =
@@ -2018,6 +2021,7 @@ impl Renderer<Created> {
         glyph_buffer: shared.model_buffer.calc_read_addr(glyph_buffer_offset),
         cam_size: (cam_width, cam_height),
         glyph_atlas_size: (glyph_atlas_width, glyph_atlas_height),
+        window_scale_factor: window_scale_factor as f32,
       };
 
       let raw_push_consts = unsafe {
@@ -2076,6 +2080,7 @@ impl Renderer<Created> {
           .calc_read_addr(clipped_glyph_buffer_offset),
         cam_size: (cam_width, cam_height),
         glyph_atlas_size: (glyph_atlas_width, glyph_atlas_height),
+        window_scale_factor: window_scale_factor as f32,
       };
 
       let raw_push_consts = unsafe {
