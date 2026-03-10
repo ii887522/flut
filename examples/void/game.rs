@@ -1,26 +1,106 @@
 use flut::{app::App, widgets::button::Button};
+use std::{cell::RefCell, mem, rc::Rc};
 use winit::{
   application::ApplicationHandler,
   dpi::LogicalPosition,
-  event::{MouseButton, WindowEvent},
+  event::{ElementState, MouseButton, WindowEvent},
   event_loop::ActiveEventLoop,
   window::WindowId,
 };
 
 // Settings
 const APP_SIZE: (f32, f32) = (1280.0, 720.0);
+const BUTTON_SIZE: (f32, f32) = (80.0, 40.0);
+
+enum Command {
+  SetButtonRightMouseDown(bool),
+  MoveButton { cursor_position: (f32, f32) },
+  IncrementCount,
+}
 
 pub struct Game {
   app: Option<App>,
   button: Button,
+  button_right_mouse_down: bool,
+  count: usize,
+  commands: Rc<RefCell<Vec<Command>>>,
 }
 
 impl Game {
   #[inline]
   pub(super) fn new() -> Self {
+    let mut button = Button::new()
+      .position((
+        (APP_SIZE.0 - BUTTON_SIZE.0) * 0.5,
+        (APP_SIZE.1 - BUTTON_SIZE.1) * 0.5,
+      ))
+      .size(BUTTON_SIZE)
+      .text("0")
+      .call();
+
+    let commands = Rc::new(RefCell::new(vec![]));
+
+    button.set_on_mouse_input({
+      let commands = Rc::clone(&commands);
+
+      Box::new(move |input_state, button| {
+        if button != MouseButton::Right {
+          return;
+        }
+
+        commands.borrow_mut().push(Command::SetButtonRightMouseDown(
+          input_state == ElementState::Pressed,
+        ));
+      })
+    });
+
+    button.set_on_cursor_moved({
+      let commands = Rc::clone(&commands);
+
+      Box::new(move |(cursor_x, cursor_y)| {
+        commands.borrow_mut().push(Command::MoveButton {
+          cursor_position: (cursor_x, cursor_y),
+        });
+      })
+    });
+
+    button.set_on_click({
+      let commands = Rc::clone(&commands);
+      Box::new(move || commands.borrow_mut().push(Command::IncrementCount))
+    });
+
     Self {
       app: None,
-      button: Button::new().text("Hello").call(),
+      button,
+      button_right_mouse_down: false,
+      count: 0,
+      commands,
+    }
+  }
+
+  fn run_commands(&mut self) {
+    let mut commands = self.commands.borrow_mut();
+
+    for cmd in mem::take(&mut *commands) {
+      match cmd {
+        Command::SetButtonRightMouseDown(button_right_mouse_down) => {
+          self.button_right_mouse_down = button_right_mouse_down;
+        }
+        Command::MoveButton {
+          cursor_position: (cursor_x, cursor_y),
+        } => {
+          if self.button_right_mouse_down {
+            self.button.set_position((
+              BUTTON_SIZE.0.mul_add(-0.5, cursor_x),
+              BUTTON_SIZE.1.mul_add(-0.5, cursor_y),
+            ));
+          }
+        }
+        Command::IncrementCount => {
+          self.count += 1;
+          self.button.set_text(self.count.to_string().into());
+        }
+      }
     }
   }
 }
@@ -66,21 +146,28 @@ impl ApplicationHandler for Game {
       WindowEvent::MouseInput {
         device_id: _,
         state: input_state,
-        button: MouseButton::Left,
+        button,
       } => {
         let Some(app) = self.app.as_mut() else {
           return;
         };
 
         let mut renderer = app.get_renderer();
-        self.button.on_mouse_input(input_state, &mut renderer);
+
+        self
+          .button
+          .on_mouse_input(input_state, button, &mut renderer);
       }
       WindowEvent::RedrawRequested => {
         let Some(mut app) = self.app.take() else {
           return;
         };
 
-        app.update(|dt, renderer| self.button.update(dt, renderer));
+        self.run_commands();
+
+        app.update(|dt, renderer| {
+          self.button.update(dt, renderer);
+        });
 
         let app = app.render();
         app.request_redraw_if_visible();

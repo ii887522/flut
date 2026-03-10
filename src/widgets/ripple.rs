@@ -48,6 +48,13 @@ impl Ripple {
   }
 
   #[inline]
+  pub const fn translate(&mut self, translation: (f32, f32, f32)) {
+    self.position.0 += translation.0;
+    self.position.1 += translation.1;
+    self.position.2 += translation.2;
+  }
+
+  #[inline]
   pub const fn set_end_color(&mut self, end_color: (u8, u8, u8, u8)) {
     self.end_color = end_color;
   }
