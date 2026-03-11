@@ -54,6 +54,7 @@ pub struct Button {
   text_render_id: Option<TextId>,
   scale: f32,
   color_scale: f32,
+  old_cursor_position: (f32, f32),
   cursor_position: (f32, f32),
   state: State,
 }
@@ -85,7 +86,8 @@ impl Button {
       text_render_id: None,
       scale: 1.0,
       color_scale: 1.0,
-      cursor_position: (0.0, 0.0),
+      old_cursor_position: (f32::MIN, f32::MIN),
+      cursor_position: (f32::MIN, f32::MIN),
       state: State::Initial,
     }
   }
@@ -150,13 +152,13 @@ impl Button {
 
   pub fn on_cursor_moved(&mut self, cursor_position: (f32, f32), renderer: &mut RendererRef<'_>) {
     let (width, height) = self.size;
-    let (cursor_x, cursor_y) = cursor_position;
+    let (old_cursor_x, old_cursor_y) = self.old_cursor_position;
     let (x, y) = self.position;
 
     let sd = sdf::sd_round_rect(
       (
-        width.mul_add(-0.5, cursor_x - x),
-        height.mul_add(-0.5, cursor_y - y),
+        width.mul_add(-0.5, old_cursor_x - x),
+        height.mul_add(-0.5, old_cursor_y - y),
       ),
       (width * 0.5, height * 0.5),
       self.radius,
@@ -246,220 +248,73 @@ impl Button {
     let (x, y) = self.position;
     let (width, height) = self.size;
 
-    let color = match self.state {
+    match self.state {
       State::Initial => {
         self.scale = SCALE_SPEED.mul_add(dt, self.scale).min(1.0);
         self.color_scale = COLOR_SCALE_SPEED.mul_add(dt, self.color_scale).min(1.0);
-        let color = Self::scale_color(self.color, self.color_scale);
-
-        if self.position != self.old_position
-          || self.scale > old_scale
-          || self.color_scale > old_color_scale
-        {
-          let (scaled_width, scaled_height) = (width * self.scale, height * self.scale);
-          let (x, y) = (
-            (width - scaled_width).mul_add(0.5, x),
-            (height - scaled_height).mul_add(0.5, y),
-          );
-
-          renderer.update_model(
-            self.round_rect_render_id,
-            RoundRect {
-              position: (x, y, ROUND_RECT_Z),
-              radius: self.radius * self.scale,
-              size: (scaled_width, scaled_height),
-              color: utils::pack_color(color),
-            },
-            false,
-          );
-
-          if let Some(text_render_id) = self.text_render_id.take() {
-            renderer.remove_text(text_render_id);
-
-            self.text_render_id = Some(renderer.add_text(
-              Text {
-                position: (
-                  scaled_width.mul_add(0.5, x),
-                  scaled_height.mul_add(0.65, y),
-                  TEXT_Z,
-                ),
-                color: utils::pack_color(self.text_color),
-                font_size: scaled_height * 0.4,
-                font_family: (&[FamilyName::SansSerif]).into(),
-                font_props: Properties {
-                  weight: Weight::SEMIBOLD,
-                  ..Default::default()
-                },
-                align: Align::Center,
-                text: self.text.clone(),
-              },
-              false,
-            ));
-          }
-        }
-
-        color
       }
       State::Hovered => {
         self.scale = SCALE_SPEED.mul_add(dt, self.scale).min(1.0);
         self.color_scale = COLOR_SCALE_SPEED
           .mul_add(-dt, self.color_scale)
           .max(MIN_COLOR_SCALE);
-        let color = Self::scale_color(self.color, self.color_scale);
-
-        if self.position != self.old_position
-          || self.scale > old_scale
-          || self.color_scale < old_color_scale
-        {
-          let (scaled_width, scaled_height) = (width * self.scale, height * self.scale);
-          let (x, y) = (
-            (width - scaled_width).mul_add(0.5, x),
-            (height - scaled_height).mul_add(0.5, y),
-          );
-
-          renderer.update_model(
-            self.round_rect_render_id,
-            RoundRect {
-              position: (x, y, ROUND_RECT_Z),
-              radius: self.radius * self.scale,
-              size: (scaled_width, scaled_height),
-              color: utils::pack_color(color),
-            },
-            false,
-          );
-
-          if let Some(text_render_id) = self.text_render_id.take() {
-            renderer.remove_text(text_render_id);
-
-            self.text_render_id = Some(renderer.add_text(
-              Text {
-                position: (
-                  scaled_width.mul_add(0.5, x),
-                  scaled_height.mul_add(0.65, y),
-                  TEXT_Z,
-                ),
-                color: utils::pack_color(self.text_color),
-                font_size: scaled_height * 0.4,
-                font_family: (&[FamilyName::SansSerif]).into(),
-                font_props: Properties {
-                  weight: Weight::SEMIBOLD,
-                  ..Default::default()
-                },
-                align: Align::Center,
-                text: self.text.clone(),
-              },
-              false,
-            ));
-          }
-        }
-
-        color
       }
       State::LeftPressed => {
         self.scale = SCALE_SPEED.mul_add(-dt, self.scale).max(MIN_SCALE);
         self.color_scale = COLOR_SCALE_SPEED
           .mul_add(-dt, self.color_scale)
           .max(MIN_COLOR_SCALE);
-        let color = Self::scale_color(self.color, self.color_scale);
-
-        if self.position != self.old_position
-          || self.scale < old_scale
-          || self.color_scale < old_color_scale
-        {
-          let (scaled_width, scaled_height) = (width * self.scale, height * self.scale);
-
-          let (x, y) = (
-            (width - scaled_width).mul_add(0.5, x),
-            (height - scaled_height).mul_add(0.5, y),
-          );
-
-          renderer.update_model(
-            self.round_rect_render_id,
-            RoundRect {
-              position: (x, y, ROUND_RECT_Z),
-              radius: self.radius * self.scale,
-              size: (scaled_width, scaled_height),
-              color: utils::pack_color(color),
-            },
-            false,
-          );
-
-          if let Some(text_render_id) = self.text_render_id.take() {
-            renderer.remove_text(text_render_id);
-
-            self.text_render_id = Some(renderer.add_text(
-              Text {
-                position: (
-                  scaled_width.mul_add(0.5, x),
-                  scaled_height.mul_add(0.65, y),
-                  TEXT_Z,
-                ),
-                color: utils::pack_color(self.text_color),
-                font_size: scaled_height * 0.4,
-                font_family: (&[FamilyName::SansSerif]).into(),
-                font_props: Properties {
-                  weight: Weight::SEMIBOLD,
-                  ..Default::default()
-                },
-                align: Align::Center,
-                text: self.text.clone(),
-              },
-              false,
-            ));
-          }
-        }
-
-        color
       }
-      State::RightPressed => {
-        let color = Self::scale_color(self.color, self.color_scale);
+      State::RightPressed => {}
+    }
 
-        if self.position != self.old_position {
-          let (scaled_width, scaled_height) = (width * self.scale, height * self.scale);
-          let (x, y) = (
-            (width - scaled_width).mul_add(0.5, x),
-            (height - scaled_height).mul_add(0.5, y),
-          );
+    let color = Self::scale_color(self.color, self.color_scale);
 
-          renderer.update_model(
-            self.round_rect_render_id,
-            RoundRect {
-              position: (x, y, ROUND_RECT_Z),
-              radius: self.radius * self.scale,
-              size: (scaled_width, scaled_height),
-              color: utils::pack_color(color),
+    if self.position != self.old_position
+      || self.scale != old_scale
+      || self.color_scale != old_color_scale
+    {
+      let (scaled_width, scaled_height) = (width * self.scale, height * self.scale);
+      let (x, y) = (
+        (width - scaled_width).mul_add(0.5, x),
+        (height - scaled_height).mul_add(0.5, y),
+      );
+
+      renderer.update_model(
+        self.round_rect_render_id,
+        RoundRect {
+          position: (x, y, ROUND_RECT_Z),
+          radius: self.radius * self.scale,
+          size: (scaled_width, scaled_height),
+          color: utils::pack_color(color),
+        },
+        false,
+      );
+
+      if let Some(text_render_id) = self.text_render_id.take() {
+        renderer.remove_text(text_render_id);
+
+        self.text_render_id = Some(renderer.add_text(
+          Text {
+            position: (
+              scaled_width.mul_add(0.5, x),
+              scaled_height.mul_add(0.65, y),
+              TEXT_Z,
+            ),
+            color: utils::pack_color(self.text_color),
+            font_size: scaled_height * 0.4,
+            font_family: (&[FamilyName::SansSerif]).into(),
+            font_props: Properties {
+              weight: Weight::SEMIBOLD,
+              ..Default::default()
             },
-            false,
-          );
-
-          if let Some(text_render_id) = self.text_render_id.take() {
-            renderer.remove_text(text_render_id);
-
-            self.text_render_id = Some(renderer.add_text(
-              Text {
-                position: (
-                  scaled_width.mul_add(0.5, x),
-                  scaled_height.mul_add(0.65, y),
-                  TEXT_Z,
-                ),
-                color: utils::pack_color(self.text_color),
-                font_size: scaled_height * 0.4,
-                font_family: (&[FamilyName::SansSerif]).into(),
-                font_props: Properties {
-                  weight: Weight::SEMIBOLD,
-                  ..Default::default()
-                },
-                align: Align::Center,
-                text: self.text.clone(),
-              },
-              false,
-            ));
-          }
-        }
-
-        color
+            align: Align::Center,
+            text: self.text.clone(),
+          },
+          false,
+        ));
       }
-    };
+    }
 
     self.ripples.iter_mut().for_each(|ripple| {
       ripple.translate((x - old_x, y - old_y, 0.0));
@@ -477,6 +332,7 @@ impl Button {
     }
 
     self.old_position = self.position;
+    self.old_cursor_position = self.cursor_position;
   }
 
   #[inline]
