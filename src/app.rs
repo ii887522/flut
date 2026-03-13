@@ -1,11 +1,16 @@
 use crate::{
   app_loop::AppLoop,
-  models::model_capacities::ModelCapacities,
+  audio,
+  models::{audio_req::AudioReq, model_capacities::ModelCapacities},
   renderer::{Created, Creating, Renderer},
   renderer_ref::RendererRef,
 };
 use optarg2chain::optarg_impl;
-use std::borrow::Cow;
+use std::{
+  borrow::Cow,
+  sync::mpsc::{self, Sender},
+  thread,
+};
 use winit::{
   application::ApplicationHandler,
   event_loop::{ActiveEventLoop, EventLoop},
@@ -18,8 +23,9 @@ pub fn run<App: ApplicationHandler>(mut app: App) {
 
 #[must_use]
 pub struct App {
-  app_loop: AppLoop,
+  audio_tx: Sender<AudioReq>,
   renderer: Result<Renderer<Created>, Renderer<Creating>>,
+  app_loop: AppLoop,
 }
 
 #[optarg_impl]
@@ -33,11 +39,25 @@ impl App {
     #[optarg((512, 512))] glyph_atlas_size: (u16, u16),
     #[optarg_default] show_fps: bool,
   ) -> Self {
+    let (audio_tx, audio_rx) = mpsc::channel();
+    thread::spawn(|| audio::main(audio_rx));
+
+    let renderer =
+      Renderer::new(event_loop, &title, size, model_capacities, glyph_atlas_size).try_into();
+
+    let app_loop = AppLoop::new(title, show_fps);
+
     Self {
-      renderer: Renderer::new(event_loop, &title, size, model_capacities, glyph_atlas_size)
-        .try_into(),
-      app_loop: AppLoop::new(title, show_fps),
+      audio_tx,
+      renderer,
+      app_loop,
     }
+  }
+
+  #[must_use]
+  #[inline]
+  pub const fn get_audio_tx(&self) -> &Sender<AudioReq> {
+    &self.audio_tx
   }
 
   #[must_use]
@@ -53,15 +73,18 @@ impl App {
   }
 
   pub fn render(self) -> Self {
-    Self {
-      app_loop: self.app_loop,
-      renderer: match self.renderer {
+    let renderer = match self.renderer {
+      Ok(renderer) => renderer.render(),
+      Err(renderer) => match Renderer::<Created>::try_from(renderer) {
         Ok(renderer) => renderer.render(),
-        Err(renderer) => match Renderer::<Created>::try_from(renderer) {
-          Ok(renderer) => renderer.render(),
-          Err(renderer) => Err(renderer),
-        },
+        Err(renderer) => Err(renderer),
       },
+    };
+
+    Self {
+      audio_tx: self.audio_tx,
+      renderer,
+      app_loop: self.app_loop,
     }
   }
 

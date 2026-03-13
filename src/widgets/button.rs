@@ -265,7 +265,7 @@ impl Button {
           .mul_add(-dt, self.color_scale)
           .max(MIN_COLOR_SCALE);
       }
-      State::RightPressed => {}
+      State::RightPressed => (),
     }
 
     let color = Self::scale_color(self.color, self.color_scale);

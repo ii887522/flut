@@ -28,7 +28,7 @@ use std::{
 };
 
 // Settings
-const GLYPH_MARGIN: i32 = 3;
+const GLYPH_MARGIN: i32 = 6;
 const RESOLUTION_SCALE: f32 = 2.0;
 
 #[derive(Clone, PartialEq)]

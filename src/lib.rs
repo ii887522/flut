@@ -114,6 +114,7 @@
 
 pub mod app;
 mod app_loop;
+mod audio;
 pub mod collections;
 mod consts;
 mod model_sync;

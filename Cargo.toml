@@ -36,6 +36,11 @@ version = "0.38"
 default-features = false
 features = ["loaded", "std"]
 
+[dependencies.awedio]
+version = "0.6"
+default-features = false
+features = ["cpal", "symphonia", "symphonia-mp3"]
+
 [dependencies.rustc-hash]
 version = "2.1"
 default-features = false

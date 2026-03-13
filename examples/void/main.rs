@@ -114,6 +114,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod game;
+mod models;
 
 use crate::game::Game;
 use flut::app;
