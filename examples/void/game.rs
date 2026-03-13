@@ -1,4 +1,5 @@
-use flut::{app::App, widgets::button::Button};
+use crate::models::event::Event;
+use flut::{app::App, models::audio_req::AudioReq, widgets::button::Button};
 use std::{cell::RefCell, mem, rc::Rc};
 use winit::{
   application::ApplicationHandler,
@@ -12,18 +13,12 @@ use winit::{
 const APP_SIZE: (f32, f32) = (1280.0, 720.0);
 const BUTTON_SIZE: (f32, f32) = (80.0, 40.0);
 
-enum Command {
-  SetButtonRightMouseDown(bool),
-  MoveButton { cursor_position: (f32, f32) },
-  IncrementCount,
-}
-
 pub struct Game {
   app: Option<App>,
   button: Button,
   button_right_mouse_down: bool,
   count: usize,
-  commands: Rc<RefCell<Vec<Command>>>,
+  events: Rc<RefCell<Vec<Event>>>,
 }
 
 impl Game {
@@ -38,35 +33,32 @@ impl Game {
       .text("0")
       .call();
 
-    let commands = Rc::new(RefCell::new(vec![]));
+    let events = Rc::new(RefCell::new(vec![]));
 
     button.set_on_mouse_input({
-      let commands = Rc::clone(&commands);
+      let events = Rc::clone(&events);
 
       Box::new(move |input_state, button| {
-        if button != MouseButton::Right {
-          return;
-        }
-
-        commands.borrow_mut().push(Command::SetButtonRightMouseDown(
-          input_state == ElementState::Pressed,
-        ));
-      })
-    });
-
-    button.set_on_cursor_moved({
-      let commands = Rc::clone(&commands);
-
-      Box::new(move |(cursor_x, cursor_y)| {
-        commands.borrow_mut().push(Command::MoveButton {
-          cursor_position: (cursor_x, cursor_y),
+        events.borrow_mut().push(Event::MouseInput {
+          input_state,
+          button,
         });
       })
     });
 
+    button.set_on_cursor_moved({
+      let events = Rc::clone(&events);
+
+      Box::new(move |cursor_position| {
+        events
+          .borrow_mut()
+          .push(Event::CursorMoved { cursor_position });
+      })
+    });
+
     button.set_on_click({
-      let commands = Rc::clone(&commands);
-      Box::new(move || commands.borrow_mut().push(Command::IncrementCount))
+      let events = Rc::clone(&events);
+      Box::new(move || events.borrow_mut().push(Event::Click))
     });
 
     Self {
@@ -74,19 +66,35 @@ impl Game {
       button,
       button_right_mouse_down: false,
       count: 0,
-      commands,
+      events,
     }
   }
 
-  fn run_commands(&mut self) {
-    let mut commands = self.commands.borrow_mut();
+  fn process_events(&mut self, app: &App) {
+    let mut events = self.events.borrow_mut();
 
-    for cmd in mem::take(&mut *commands) {
-      match cmd {
-        Command::SetButtonRightMouseDown(button_right_mouse_down) => {
-          self.button_right_mouse_down = button_right_mouse_down;
-        }
-        Command::MoveButton {
+    for event in mem::take(&mut *events) {
+      match event {
+        Event::MouseInput {
+          input_state,
+          button,
+        } => match button {
+          MouseButton::Left => match input_state {
+            ElementState::Pressed => {
+              _ = app
+                .get_audio_tx()
+                .send(AudioReq::PlaySound("assets/void/audio/mouse_down.mp3"));
+            }
+            ElementState::Released => {
+              _ = app
+                .get_audio_tx()
+                .send(AudioReq::PlaySound("assets/void/audio/mouse_up.mp3"));
+            }
+          },
+          MouseButton::Right => self.button_right_mouse_down = input_state == ElementState::Pressed,
+          _ => (),
+        },
+        Event::CursorMoved {
           cursor_position: (cursor_x, cursor_y),
         } => {
           if self.button_right_mouse_down {
@@ -96,7 +104,7 @@ impl Game {
             ));
           }
         }
-        Command::IncrementCount => {
+        Event::Click => {
           self.count += 1;
           self.button.set_text(self.count.to_string().into());
         }
@@ -163,7 +171,7 @@ impl ApplicationHandler for Game {
           return;
         };
 
-        self.run_commands();
+        self.process_events(&app);
 
         app.update(|dt, renderer| {
           self.button.update(dt, renderer);
