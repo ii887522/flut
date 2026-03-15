@@ -113,8 +113,10 @@
 // endregion
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod consts;
 mod game;
 mod models;
+mod widgets;
 
 use crate::game::Game;
 use flut::app;
