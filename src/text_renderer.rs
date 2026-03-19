@@ -28,7 +28,7 @@ use std::{
 };
 
 // Settings
-const GLYPH_MARGIN: i32 = 6;
+const GLYPH_MARGIN: i32 = 1;
 const RESOLUTION_SCALE: f32 = 2.0;
 
 #[derive(Clone, PartialEq)]
@@ -245,8 +245,8 @@ impl TextRenderer {
 
         let mut canvas = Canvas::new(
           Vector2I::new(
-            glyph_width.cast_signed() + GLYPH_MARGIN,
-            glyph_height.cast_signed() + GLYPH_MARGIN,
+            glyph_width.cast_signed() + (GLYPH_MARGIN << 1),
+            glyph_height.cast_signed() + (GLYPH_MARGIN << 1),
           ),
           Format::A8,
         );
@@ -257,8 +257,10 @@ impl TextRenderer {
             glyph_id,
             font_size * self.window_scale_factor * RESOLUTION_SCALE,
             Transform2F::from_translation(Vector2F::new(
-              -bearing_x * self.window_scale_factor * RESOLUTION_SCALE,
-              -bearing_y * self.window_scale_factor * RESOLUTION_SCALE,
+              (bearing_x * self.window_scale_factor)
+                .mul_add(-RESOLUTION_SCALE, GLYPH_MARGIN as f32),
+              (bearing_y * self.window_scale_factor)
+                .mul_add(-RESOLUTION_SCALE, GLYPH_MARGIN as f32),
             )),
             HintingOptions::Vertical(font_size * self.window_scale_factor),
             RasterizationOptions::GrayscaleAa,
@@ -276,13 +278,13 @@ impl TextRenderer {
             layer_count: 1,
           },
           image_offset: vk::Offset3D {
-            x: glyph_x,
-            y: glyph_y,
+            x: glyph_x - GLYPH_MARGIN,
+            y: glyph_y - GLYPH_MARGIN,
             z: 0,
           },
           image_extent: vk::Extent3D {
-            width: glyph_width + GLYPH_MARGIN as u32,
-            height: glyph_height + GLYPH_MARGIN as u32,
+            width: glyph_width + (GLYPH_MARGIN << 1) as u32,
+            height: glyph_height + (GLYPH_MARGIN << 1) as u32,
             depth: 1,
           },
           ..Default::default()
@@ -387,8 +389,8 @@ impl TextRenderer {
 
             let glyph_alloc = loop {
               if let Some(glyph_alloc) = self.glyph_allocator.allocate(Size::new(
-                glyph_bounds.width() + GLYPH_MARGIN,
-                glyph_bounds.height() + GLYPH_MARGIN,
+                glyph_bounds.width() + (GLYPH_MARGIN << 1_i32),
+                glyph_bounds.height() + (GLYPH_MARGIN << 1_i32),
               )) {
                 break glyph_alloc;
               }
@@ -418,10 +420,13 @@ impl TextRenderer {
             changeset.push(glyph_key.clone());
 
             GlyphMetrics::Visible {
-              position: (glyph_alloc.rectangle.min.x, glyph_alloc.rectangle.min.y),
+              position: (
+                glyph_alloc.rectangle.min.x + GLYPH_MARGIN,
+                glyph_alloc.rectangle.min.y + GLYPH_MARGIN,
+              ),
               size: (
-                (glyph_alloc.rectangle.width() - GLYPH_MARGIN) as u32,
-                (glyph_alloc.rectangle.height() - GLYPH_MARGIN) as u32,
+                (glyph_alloc.rectangle.width() - (GLYPH_MARGIN << 1_i32)) as u32,
+                (glyph_alloc.rectangle.height() - (GLYPH_MARGIN << 1_i32)) as u32,
               ),
               bearing: (
                 glyph_bounds.min_x() as f32 / self.window_scale_factor / RESOLUTION_SCALE,
