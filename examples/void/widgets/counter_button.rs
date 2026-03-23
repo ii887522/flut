@@ -6,7 +6,8 @@ use std::{cell::RefCell, rc::Rc};
 use winit::event::{ElementState, MouseButton};
 
 // Settings
-pub(super) const BUTTON_SIZE: (f32, f32) = (80.0, 40.0);
+const BUTTON_SIZE: (f32, f32) = (80.0, 40.0);
+const BUTTON_Z: f32 = 0.001;
 
 pub struct CounterButton {
   button: Button,
@@ -20,6 +21,7 @@ impl CounterButton {
       .position((
         (consts::APP_SIZE.0 - BUTTON_SIZE.0) * 0.5,
         (consts::APP_SIZE.1 - BUTTON_SIZE.1) * 0.5,
+        BUTTON_Z,
       ))
       .size(BUTTON_SIZE)
       .text("0")
@@ -36,13 +38,13 @@ impl CounterButton {
       })
     });
 
-    button.set_on_cursor_moved({
+    button.set_on_mouse_moved({
       let events = Rc::clone(events);
 
-      Box::new(move |cursor_position| {
+      Box::new(move |mouse_position| {
         events
           .borrow_mut()
-          .push(Event::CursorMoved { cursor_position });
+          .push(Event::MouseMoved { mouse_position });
       })
     });
 
@@ -62,12 +64,12 @@ impl CounterButton {
     self.button.init(renderer);
   }
 
-  pub(crate) fn on_cursor_moved(
+  pub(crate) fn on_mouse_moved(
     &mut self,
-    cursor_position: (f32, f32),
+    mouse_position: (f32, f32),
     renderer: &mut RendererRef<'_>,
   ) {
-    self.button.on_cursor_moved(cursor_position, renderer);
+    self.button.on_mouse_moved(mouse_position, renderer);
   }
 
   pub(crate) fn on_mouse_input(
@@ -100,13 +102,14 @@ impl CounterButton {
         MouseButton::Right => self.button_right_mouse_down = input_state == ElementState::Pressed,
         _ => (),
       },
-      Event::CursorMoved {
-        cursor_position: (cursor_x, cursor_y),
+      Event::MouseMoved {
+        mouse_position: (mouse_x, mouse_y),
       } => {
         if self.button_right_mouse_down {
           self.button.set_position((
-            BUTTON_SIZE.0.mul_add(-0.5, cursor_x),
-            BUTTON_SIZE.1.mul_add(-0.5, cursor_y),
+            BUTTON_SIZE.0.mul_add(-0.5, mouse_x),
+            BUTTON_SIZE.1.mul_add(-0.5, mouse_y),
+            BUTTON_Z,
           ));
         }
       }

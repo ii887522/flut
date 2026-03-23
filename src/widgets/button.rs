@@ -1,9 +1,8 @@
 use crate::{
-  models::{align::Align, round_rect::RoundRect, text::Text},
+  glyph_renderer::{IconId, TextId},
+  models::{align::Align, font_key::FontKey, icon::Icon, round_rect::RoundRect, text::Text},
   renderer_ref::RendererRef,
-  sdf,
-  text_renderer::TextId,
-  utils,
+  sdf, utils,
   widgets::ripple::Ripple,
 };
 use font_kit::{
@@ -22,14 +21,14 @@ const SCALE_SPEED: f32 = 2.0;
 const MIN_SCALE: f32 = 0.9;
 const COLOR_SCALE_SPEED: f32 = 2.0;
 const MIN_COLOR_SCALE: f32 = 0.8;
-const ROUND_RECT_Z: f32 = 0.1;
+const TEXT_Z_OFFSET: f32 = -0.0001;
 
-// Computed settings
-const TEXT_Z: f32 = ROUND_RECT_Z - 0.1;
-
+// Event handlers
 type OnClick = dyn FnMut();
 type OnMouseInput = dyn FnMut(ElementState, MouseButton);
-type OnCursorMoved = dyn FnMut((f32, f32));
+type OnMouseMoved = dyn FnMut((f32, f32));
+type OnMouseEnter = dyn FnMut();
+type OnMouseLeave = dyn FnMut();
 
 enum State {
   Initial,
@@ -39,23 +38,28 @@ enum State {
 }
 
 pub struct Button {
-  old_position: (f32, f32),
-  position: (f32, f32),
+  old_position: (f32, f32, f32),
+  position: (f32, f32, f32),
   size: (f32, f32),
   radius: f32,
   color: (u8, u8, u8, u8),
   text_color: (u8, u8, u8, u8),
+  icon_font_path: Cow<'static, str>,
+  icon_codepoint: u16,
   text: Cow<'static, str>,
   on_click: Option<Box<OnClick>>,
   on_mouse_input: Option<Box<OnMouseInput>>,
-  on_cursor_moved: Option<Box<OnCursorMoved>>,
+  on_mouse_moved: Option<Box<OnMouseMoved>>,
+  on_mouse_enter: Option<Box<OnMouseEnter>>,
+  on_mouse_leave: Option<Box<OnMouseLeave>>,
   round_rect_render_id: u32,
   ripples: VecDeque<Ripple>,
+  icon_render_id: Option<IconId>,
   text_render_id: Option<TextId>,
   scale: f32,
   color_scale: f32,
-  old_cursor_position: (f32, f32),
-  cursor_position: (f32, f32),
+  old_mouse_position: (f32, f32),
+  mouse_position: (f32, f32),
   state: State,
 }
 
@@ -63,11 +67,13 @@ pub struct Button {
 impl Button {
   #[optarg_method(ButtonNewBuilder, call)]
   pub fn new(
-    #[optarg_default] position: (f32, f32),
+    #[optarg_default] position: (f32, f32, f32),
     #[optarg((80.0, 40.0))] size: (f32, f32),
     #[optarg(8.0)] radius: f32,
     #[optarg((255, 255, 255, 255))] color: (u8, u8, u8, u8),
     #[optarg((0, 0, 0, 255))] text_color: (u8, u8, u8, u8),
+    #[optarg_default] icon_font_path: Cow<'static, str>,
+    #[optarg_default] icon_codepoint: u16,
     #[optarg_default] text: Cow<'static, str>,
   ) -> Self {
     Self {
@@ -77,17 +83,22 @@ impl Button {
       radius,
       color,
       text_color,
+      icon_font_path,
+      icon_codepoint,
       text,
       on_click: None,
       on_mouse_input: None,
-      on_cursor_moved: None,
+      on_mouse_moved: None,
+      on_mouse_enter: None,
+      on_mouse_leave: None,
       round_rect_render_id: u32::MAX,
       ripples: VecDeque::new(),
+      icon_render_id: None,
       text_render_id: None,
       scale: 1.0,
       color_scale: 1.0,
-      old_cursor_position: (f32::MIN, f32::MIN),
-      cursor_position: (f32::MIN, f32::MIN),
+      old_mouse_position: (f32::MIN, f32::MIN),
+      mouse_position: (f32::MIN, f32::MIN),
       state: State::Initial,
     }
   }
@@ -103,17 +114,27 @@ impl Button {
   }
 
   #[inline]
-  pub fn set_on_cursor_moved(&mut self, on_cursor_moved: Box<OnCursorMoved>) {
-    self.on_cursor_moved = Some(on_cursor_moved);
+  pub fn set_on_mouse_moved(&mut self, on_mouse_moved: Box<OnMouseMoved>) {
+    self.on_mouse_moved = Some(on_mouse_moved);
+  }
+
+  #[inline]
+  pub fn set_on_mouse_enter(&mut self, on_mouse_enter: Box<OnMouseEnter>) {
+    self.on_mouse_enter = Some(on_mouse_enter);
+  }
+
+  #[inline]
+  pub fn set_on_mouse_leave(&mut self, on_mouse_leave: Box<OnMouseLeave>) {
+    self.on_mouse_leave = Some(on_mouse_leave);
   }
 
   pub fn init(&mut self, renderer: &mut RendererRef<'_>) {
     let (width, height) = self.size;
-    let (x, y) = self.position;
+    let (x, y, z) = self.position;
 
     self.round_rect_render_id = renderer.add_model(
       RoundRect {
-        position: (x, y, ROUND_RECT_Z),
+        position: (x, y, z),
         radius: self.radius,
         size: self.size,
         color: utils::pack_color(self.color),
@@ -121,16 +142,35 @@ impl Button {
       false,
     );
 
+    if self.icon_codepoint != 0 {
+      self.icon_render_id = Some(renderer.add_icon(
+        Icon {
+          position: (24.0, height.mul_add(0.75, y), z + TEXT_Z_OFFSET),
+          color: utils::pack_color(self.text_color),
+          font_size: height * 0.5,
+          font_key: FontKey::Path(self.icon_font_path.clone()),
+          codepoint: self.icon_codepoint,
+        },
+        false,
+      ));
+    }
+
     if !self.text.is_empty() {
       self.text_render_id = Some(renderer.add_text(
-        Text {
-          position: (width.mul_add(0.5, x), height.mul_add(0.65, y), TEXT_Z),
+        &Text {
+          position: (
+            width.mul_add(0.5, x),
+            height.mul_add(0.65, y),
+            z + TEXT_Z_OFFSET,
+          ),
           color: utils::pack_color(self.text_color),
           font_size: height * 0.4,
-          font_family: (&[FamilyName::SansSerif]).into(),
-          font_props: Properties {
-            weight: Weight::SEMIBOLD,
-            ..Default::default()
+          font_key: FontKey::Family {
+            font_family: (&[FamilyName::SansSerif]).into(),
+            font_props: Properties {
+              weight: Weight::SEMIBOLD,
+              ..Default::default()
+            },
           },
           align: Align::Center,
           text: self.text.clone(),
@@ -141,7 +181,7 @@ impl Button {
   }
 
   #[inline]
-  pub const fn set_position(&mut self, position: (f32, f32)) {
+  pub const fn set_position(&mut self, position: (f32, f32, f32)) {
     self.position = position;
   }
 
@@ -150,40 +190,55 @@ impl Button {
     self.text = text;
   }
 
-  pub fn on_cursor_moved(&mut self, cursor_position: (f32, f32), renderer: &mut RendererRef<'_>) {
+  pub fn on_mouse_moved(&mut self, mouse_position: (f32, f32), renderer: &mut RendererRef<'_>) {
     let (width, height) = self.size;
-    let (old_cursor_x, old_cursor_y) = self.old_cursor_position;
-    let (x, y) = self.position;
+    let (old_mouse_x, old_mouse_y) = self.old_mouse_position;
+    let (x, y, _) = self.position;
 
     let sd = sdf::sd_round_rect(
       (
-        width.mul_add(-0.5, old_cursor_x - x),
-        height.mul_add(-0.5, old_cursor_y - y),
+        width.mul_add(-0.5, old_mouse_x - x),
+        height.mul_add(-0.5, old_mouse_y - y),
       ),
       (width * 0.5, height * 0.5),
       self.radius,
     );
 
-    let (state, cursor_icon) = if sd > 0.0 {
-      (State::Initial, CursorIcon::Default)
+    let state = if sd > 0.0 {
+      State::Initial
     } else if matches!(self.state, State::LeftPressed) {
-      (State::LeftPressed, CursorIcon::Pointer)
+      State::LeftPressed
     } else if matches!(self.state, State::RightPressed) {
-      (State::RightPressed, CursorIcon::Pointer)
+      State::RightPressed
     } else {
-      (State::Hovered, CursorIcon::Pointer)
+      State::Hovered
     };
 
-    let window = renderer.get_window();
-    window.set_cursor(Cursor::Icon(cursor_icon));
+    if matches!(self.state, State::Initial) && !matches!(state, State::Initial) {
+      let window = renderer.get_window();
+      window.set_cursor(Cursor::Icon(CursorIcon::Pointer));
 
-    if !matches!(self.state, State::Initial)
-      && let Some(ref mut on_cursor_moved) = self.on_cursor_moved
-    {
-      on_cursor_moved(cursor_position);
+      if let Some(ref mut on_mouse_enter) = self.on_mouse_enter {
+        on_mouse_enter();
+      }
     }
 
-    self.cursor_position = cursor_position;
+    if !matches!(self.state, State::Initial)
+      && let Some(ref mut on_mouse_moved) = self.on_mouse_moved
+    {
+      on_mouse_moved(mouse_position);
+    }
+
+    if !matches!(self.state, State::Initial) && matches!(state, State::Initial) {
+      let window = renderer.get_window();
+      window.set_cursor(Cursor::Icon(CursorIcon::Default));
+
+      if let Some(ref mut on_mouse_leave) = self.on_mouse_leave {
+        on_mouse_leave();
+      }
+    }
+
+    self.mouse_position = mouse_position;
     self.state = state;
   }
 
@@ -206,11 +261,12 @@ impl Button {
       State::LeftPressed => match input_state {
         ElementState::Pressed => State::LeftPressed,
         ElementState::Released => {
-          let (cursor_x, cursor_y) = self.cursor_position;
+          let (mouse_x, mouse_y) = self.mouse_position;
+          let (_, _, z) = self.position;
           let (width, height) = self.size;
 
           let mut ripple = Ripple::new()
-            .position((cursor_x, cursor_y, ROUND_RECT_Z))
+            .position((mouse_x, mouse_y, z))
             .start_color(utils::mix_color(self.color, self.text_color))
             .end_color(self.color)
             .end_radius((width * width + height * height).sqrt())
@@ -244,8 +300,8 @@ impl Button {
   pub fn update(&mut self, dt: f32, renderer: &mut RendererRef<'_>) {
     let old_scale = self.scale;
     let old_color_scale = self.color_scale;
-    let (old_x, old_y) = self.old_position;
-    let (x, y) = self.position;
+    let (old_x, old_y, _) = self.old_position;
+    let (x, y, z) = self.position;
     let (width, height) = self.size;
 
     match self.state {
@@ -283,7 +339,7 @@ impl Button {
       renderer.update_model(
         self.round_rect_render_id,
         RoundRect {
-          position: (x, y, ROUND_RECT_Z),
+          position: (x, y, z),
           radius: self.radius * self.scale,
           size: (scaled_width, scaled_height),
           color: utils::pack_color(color),
@@ -295,18 +351,20 @@ impl Button {
         renderer.remove_text(text_render_id);
 
         self.text_render_id = Some(renderer.add_text(
-          Text {
+          &Text {
             position: (
               scaled_width.mul_add(0.5, x),
               scaled_height.mul_add(0.65, y),
-              TEXT_Z,
+              z + TEXT_Z_OFFSET,
             ),
             color: utils::pack_color(self.text_color),
             font_size: scaled_height * 0.4,
-            font_family: (&[FamilyName::SansSerif]).into(),
-            font_props: Properties {
-              weight: Weight::SEMIBOLD,
-              ..Default::default()
+            font_key: FontKey::Family {
+              font_family: (&[FamilyName::SansSerif]).into(),
+              font_props: Properties {
+                weight: Weight::SEMIBOLD,
+                ..Default::default()
+              },
             },
             align: Align::Center,
             text: self.text.clone(),
@@ -332,7 +390,7 @@ impl Button {
     }
 
     self.old_position = self.position;
-    self.old_cursor_position = self.cursor_position;
+    self.old_mouse_position = self.mouse_position;
   }
 
   #[inline]

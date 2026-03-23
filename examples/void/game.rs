@@ -1,13 +1,17 @@
 use crate::{consts, models::event::Event, widgets::counter_button::CounterButton};
-use flut::app::App;
+use flut::{app::App, widgets::button::Button};
 use std::{cell::RefCell, mem, rc::Rc};
 use winit::{
   application::ApplicationHandler, dpi::LogicalPosition, event::WindowEvent,
   event_loop::ActiveEventLoop, window::WindowId,
 };
 
+// Settings
+const SHOP_BUTTON_POSITION: (f32, f32, f32) = (8.0, 8.0, 0.002);
+
 pub struct Game {
   app: Option<App>,
+  shop_button: Button,
   counter_button: CounterButton,
   events: Rc<RefCell<Vec<Event>>>,
 }
@@ -16,10 +20,33 @@ impl Game {
   #[inline]
   pub(super) fn new() -> Self {
     let events = Rc::new(RefCell::new(vec![]));
+
+    let mut shop_button = Button::new()
+      .position(SHOP_BUTTON_POSITION)
+      .size((128.0, 40.0))
+      .text("SHOP")
+      .color((0, 0, 255, 255))
+      .text_color((255, 255, 255, 255))
+      .icon_font_path("assets/void/fonts/MaterialSymbolsOutlined-Regular.ttf")
+      .icon_codepoint(consts::ICON_SHOPPING_CART)
+      .call();
+
     let counter_button = CounterButton::new(&events);
+
+    shop_button.set_on_mouse_input({
+      let events = Rc::clone(&events);
+
+      Box::new(move |input_state, button| {
+        events.borrow_mut().push(Event::MouseInput {
+          input_state,
+          button,
+        });
+      })
+    });
 
     Self {
       app: None,
+      shop_button,
       counter_button,
       events,
     }
@@ -47,6 +74,7 @@ impl ApplicationHandler for Game {
       .call();
 
     let mut renderer = app.get_renderer();
+    self.shop_button.init(&mut renderer);
     self.counter_button.init(&mut renderer);
     self.app = Some(app);
   }
@@ -61,7 +89,7 @@ impl ApplicationHandler for Game {
       WindowEvent::CloseRequested => event_loop.exit(),
       WindowEvent::CursorMoved {
         device_id: _,
-        position: cursor_position,
+        position: mouse_position,
       } => {
         let Some(app) = self.app.as_mut() else {
           return;
@@ -69,8 +97,9 @@ impl ApplicationHandler for Game {
 
         let mut renderer = app.get_renderer();
         let window = renderer.get_window();
-        let LogicalPosition { x, y } = cursor_position.to_logical(window.scale_factor());
-        self.counter_button.on_cursor_moved((x, y), &mut renderer);
+        let LogicalPosition { x, y } = mouse_position.to_logical(window.scale_factor());
+        self.shop_button.on_mouse_moved((x, y), &mut renderer);
+        self.counter_button.on_mouse_moved((x, y), &mut renderer);
       }
       WindowEvent::MouseInput {
         device_id: _,
@@ -84,6 +113,10 @@ impl ApplicationHandler for Game {
         let mut renderer = app.get_renderer();
 
         self
+          .shop_button
+          .on_mouse_input(input_state, button, &mut renderer);
+
+        self
           .counter_button
           .on_mouse_input(input_state, button, &mut renderer);
       }
@@ -95,6 +128,7 @@ impl ApplicationHandler for Game {
         self.process_events(&app);
 
         app.update(|dt, renderer| {
+          self.shop_button.update(dt, renderer);
           self.counter_button.update(dt, renderer);
         });
 

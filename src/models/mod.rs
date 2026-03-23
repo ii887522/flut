@@ -1,6 +1,9 @@
 pub mod align;
 pub mod audio_req;
+pub mod font_key;
 pub(super) mod glyph;
+pub(super) mod glyph_key;
+pub mod icon;
 pub mod model_capacities;
 pub(super) mod push_consts;
 pub mod range;
