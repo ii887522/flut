@@ -2,7 +2,9 @@ use crate::{
   collections::lru_cache::LruCache,
   consts,
   model_sync::ModelSync,
-  models::{align::Align, glyph::Glyph, text::Text},
+  models::{
+    align::Align, font_key::FontKey, glyph::Glyph, glyph_key::GlyphKey, icon::Icon, text::Text,
+  },
   sampled_image::SampledImage,
   storage_buffer::StorageBuffer,
 };
@@ -10,10 +12,8 @@ use ash::vk;
 use etagere::{AllocId, BucketedAtlasAllocator, Size};
 use font_kit::{
   canvas::{Canvas, Format, RasterizationOptions},
-  family_name::FamilyName,
   font::Font,
   hinting::HintingOptions,
-  properties::{Properties, Stretch, Weight},
   source::SystemSource,
 };
 use pathfinder_geometry::{
@@ -21,67 +21,11 @@ use pathfinder_geometry::{
   vector::{Vector2F, Vector2I},
 };
 use rustc_hash::{FxBuildHasher, FxHashMap};
-use std::{
-  borrow::Cow,
-  collections::VecDeque,
-  hash::{Hash, Hasher},
-};
+use std::collections::VecDeque;
 
 // Settings
 const GLYPH_MARGIN: i32 = 1;
 const RESOLUTION_SCALE: f32 = 2.0;
-
-#[derive(Clone, PartialEq)]
-struct FontKey {
-  font_family: Cow<'static, [FamilyName]>,
-  font_props: Properties,
-}
-
-impl Hash for FontKey {
-  #[inline]
-  fn hash<H: Hasher>(&self, state: &mut H) {
-    let Self {
-      ref font_family,
-      font_props,
-    } = *self;
-    let Properties {
-      style,
-      weight: Weight(weight),
-      stretch: Stretch(stretch),
-    } = font_props;
-
-    font_family.hash(state);
-    style.hash(state);
-    weight.to_bits().hash(state);
-    stretch.to_bits().hash(state);
-  }
-}
-
-impl Eq for FontKey {}
-
-#[derive(Clone, PartialEq)]
-struct GlyphKey {
-  font_key: FontKey,
-  ch: char,
-  font_size: f32,
-}
-
-impl Hash for GlyphKey {
-  #[inline]
-  fn hash<H: Hasher>(&self, state: &mut H) {
-    let Self {
-      ref font_key,
-      ch,
-      font_size,
-    } = *self;
-
-    font_key.hash(state);
-    ch.hash(state);
-    font_size.to_bits().hash(state);
-  }
-}
-
-impl Eq for GlyphKey {}
 
 #[derive(Clone, Copy)]
 enum GlyphMetrics {
@@ -99,13 +43,20 @@ enum GlyphMetrics {
   },
 }
 
+#[derive(Clone, PartialEq, Eq, Hash)]
 pub struct TextId {
   glyph_ids: Box<[u32]>,
   glyph_keys: Box<[GlyphKey]>,
   clipped: bool,
 }
 
-pub struct TextRenderer {
+pub struct IconId {
+  glyph_id: u32,
+  glyph_key: GlyphKey,
+  clipped: bool,
+}
+
+pub struct GlyphRenderer {
   glyph_atlas: SampledImage,
   glyph_sync: ModelSync<Glyph>,
   clipped_glyph_sync: ModelSync<Glyph>,
@@ -114,11 +65,12 @@ pub struct TextRenderer {
   glyph_allocator: BucketedAtlasAllocator,
   glyph_metrics_cache: FxHashMap<GlyphKey, GlyphMetrics>,
   unused_glyph_metrics_cache: LruCache<GlyphKey, GlyphMetrics>,
+  text_sizes: FxHashMap<TextId, (f32, f32)>,
   changeset_queue: VecDeque<Vec<GlyphKey>>,
   window_scale_factor: f32,
 }
 
-impl TextRenderer {
+impl GlyphRenderer {
   #[inline]
   pub(super) fn new(
     vk_device: &ash::Device,
@@ -164,6 +116,7 @@ impl TextRenderer {
           FxBuildHasher,
         ),
         unused_glyph_metrics_cache: LruCache::with_capacity(glyph_metrics_cache_capacity),
+        text_sizes: FxHashMap::default(),
         changeset_queue: VecDeque::from_iter([vec![]]),
         window_scale_factor,
       },
@@ -328,35 +281,33 @@ impl TextRenderer {
     transfer_command_buffers.into_boxed_slice()
   }
 
-  pub(super) fn add_text(&mut self, text: Text, clipped: bool) -> TextId {
-    let font_key = FontKey {
-      font_family: text.font_family,
-      font_props: text.font_props,
-    };
-
-    let font = self.font_cache.entry(font_key.clone()).or_insert_with_key(
-      |&FontKey {
-         ref font_family,
-         font_props,
-       }| {
-        self
+  pub(super) fn add_text(&mut self, text: &Text, clipped: bool) -> TextId {
+    let font = self
+      .font_cache
+      .entry(text.font_key.clone())
+      .or_insert_with_key(|font_key| match *font_key {
+        FontKey::Family {
+          ref font_family,
+          font_props,
+        } => self
           .font_source
           .select_best_match(font_family, &font_props)
           .unwrap()
           .load()
-          .unwrap()
-      },
-    );
+          .unwrap(),
+        FontKey::Path(ref font_path) => Font::from_path(&**font_path, 0).unwrap(),
+      });
 
     let changeset = self.changeset_queue.back_mut().unwrap();
     let mut glyph_position = text.position;
+    let mut text_height = 0.0;
 
     let (glyph_keys, glyphs): (Vec<_>, Vec<_>) = text
       .text
       .chars()
       .map(|ch| {
         let glyph_key = GlyphKey {
-          font_key: font_key.clone(),
+          font_key: text.font_key.clone(),
           ch,
           font_size: text.font_size,
         };
@@ -457,23 +408,26 @@ impl TextRenderer {
               advance,
               alloc_id: _,
               ref mut ref_count,
-            } => (
-              Some(Glyph {
-                position: (
-                  glyph_position.0 + bearing_x,
-                  glyph_position.1 + bearing_y,
-                  glyph_position.2,
-                ),
-                color: text.color,
-                size: (
-                  glyph_width as f32 / self.window_scale_factor / RESOLUTION_SCALE,
-                  glyph_height as f32 / self.window_scale_factor / RESOLUTION_SCALE,
-                ),
-                atlas_position: (glyph_x as f32, glyph_y as f32),
-              }),
-              ref_count,
-              advance,
-            ),
+            } => {
+              let glyph_width = glyph_width as f32 / self.window_scale_factor / RESOLUTION_SCALE;
+              let glyph_height = glyph_height as f32 / self.window_scale_factor / RESOLUTION_SCALE;
+              text_height = glyph_height.max(text_height);
+
+              (
+                Some(Glyph {
+                  position: (
+                    glyph_position.0 + bearing_x,
+                    glyph_position.1 + bearing_y,
+                    glyph_position.2,
+                  ),
+                  color: text.color,
+                  size: (glyph_width, glyph_height),
+                  atlas_position: (glyph_x as f32, glyph_y as f32),
+                }),
+                ref_count,
+                advance,
+              )
+            }
             GlyphMetrics::Invisible {
               advance,
               ref mut ref_count,
@@ -515,14 +469,22 @@ impl TextRenderer {
 
     let glyph_ids = self.get_glyph_sync(clipped).bulk_add_models(glyphs);
 
-    TextId {
+    let text_id = TextId {
       glyph_ids,
       glyph_keys: glyph_keys.into_boxed_slice(),
       clipped,
-    }
+    };
+
+    self
+      .text_sizes
+      .insert(text_id.clone(), (text_width, text_height));
+
+    text_id
   }
 
   pub(super) fn remove_text(&mut self, text_id: TextId) {
+    self.text_sizes.remove(&text_id);
+
     let TextId {
       glyph_ids,
       glyph_keys,
@@ -553,6 +515,52 @@ impl TextRenderer {
         .unused_glyph_metrics_cache
         .insert(glyph_key, *glyph_metrics);
     }
+  }
+
+  pub(super) fn add_icon(&mut self, icon: Icon, clipped: bool) -> IconId {
+    let TextId {
+      glyph_ids,
+      glyph_keys,
+      clipped,
+    } = self.add_text(
+      &Text {
+        position: icon.position,
+        color: icon.color,
+        font_size: icon.font_size,
+        font_key: icon.font_key,
+        align: Align::Left,
+        text: String::from_utf16_lossy(&[icon.codepoint]).into(),
+      },
+      clipped,
+    );
+
+    IconId {
+      glyph_id: glyph_ids[0],
+      glyph_key: glyph_keys[0].clone(),
+      clipped,
+    }
+  }
+
+  pub(super) fn remove_icon(&mut self, icon_id: IconId) {
+    self.remove_text(TextId {
+      glyph_ids: Box::new([icon_id.glyph_id]),
+      glyph_keys: Box::new([icon_id.glyph_key]),
+      clipped: icon_id.clipped,
+    });
+  }
+
+  #[inline]
+  pub(super) fn get_text_size(&self, text_id: &TextId) -> (f32, f32) {
+    self.text_sizes[text_id]
+  }
+
+  #[inline]
+  pub(super) fn get_icon_size(&self, icon_id: &IconId) -> (f32, f32) {
+    self.get_text_size(&TextId {
+      glyph_ids: Box::new([icon_id.glyph_id]),
+      glyph_keys: Box::new([icon_id.glyph_key.clone()]),
+      clipped: icon_id.clipped,
+    })
   }
 
   #[inline]

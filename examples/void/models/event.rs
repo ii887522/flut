@@ -6,8 +6,8 @@ pub enum Event {
     input_state: ElementState,
     button: MouseButton,
   },
-  CursorMoved {
-    cursor_position: (f32, f32),
+  MouseMoved {
+    mouse_position: (f32, f32),
   },
   Click,
 }

@@ -1,12 +1,12 @@
 use crate::{
   consts,
+  glyph_renderer::GlyphRenderer,
   model_sync::ModelSync,
   models::{
     Model as _, glyph::Glyph, model_capacities::ModelCapacities, push_consts::PushConsts,
     round_rect::RoundRect,
   },
   storage_buffer::StorageBuffer,
-  text_renderer::TextRenderer,
 };
 use ash::{khr, vk};
 use rustc_hash::FxHashSet;
@@ -76,7 +76,7 @@ struct Shared {
   model_buffer: StorageBuffer,
   round_rect_sync: ModelSync<RoundRect>,
   clipped_round_rect_sync: ModelSync<RoundRect>,
-  text_renderer: TextRenderer,
+  glyph_renderer: GlyphRenderer,
   msaa_sample_count: vk::SampleCountFlags,
   model_capacities: ModelCapacities,
   glyph_atlas_size: (u16, u16),
@@ -1066,7 +1066,7 @@ impl Shared {
     let round_rect_sync = ModelSync::new(round_rect_capacity);
     let clipped_round_rect_sync = ModelSync::new(clipped_round_rect_capacity);
 
-    let (mut text_renderer, transfer_command_buffer) = TextRenderer::new(
+    let (mut glyph_renderer, transfer_command_buffer) = GlyphRenderer::new(
       &vk_device,
       &vk_allocator,
       graphics_queue_family_index,
@@ -1100,7 +1100,7 @@ impl Shared {
         .unwrap();
     }
 
-    let descriptor_image_infos = text_renderer
+    let descriptor_image_infos = glyph_renderer
       .get_glyph_atlas()
       .get_image_views()
       .iter()
@@ -1229,7 +1229,7 @@ impl Shared {
       model_buffer,
       round_rect_sync,
       clipped_round_rect_sync,
-      text_renderer,
+      glyph_renderer,
       msaa_sample_count,
       model_capacities,
       glyph_atlas_size,
@@ -1275,7 +1275,10 @@ impl Shared {
         .for_each(|&command_pool| self.vk_device.destroy_command_pool(command_pool, None));
     }
 
-    self.text_renderer.drop(&self.vk_device, &self.vk_allocator);
+    self
+      .glyph_renderer
+      .drop(&self.vk_device, &self.vk_allocator);
+
     self.model_buffer.drop(&self.vk_device, &self.vk_allocator);
     drop(self.vk_allocator);
 
@@ -1773,7 +1776,7 @@ impl Renderer<Created> {
       false,
     );
 
-    let glyph_transfer_command_buffers = shared.text_renderer.sync_to(
+    let glyph_transfer_command_buffers = shared.glyph_renderer.sync_to(
       &shared.model_buffer,
       &shared.vk_device,
       glyph_buffer_offset,
@@ -1798,7 +1801,7 @@ impl Renderer<Created> {
     .chain(glyph_transfer_command_buffers)
     .collect::<Box<_>>();
 
-    let glyph_atlas = shared.text_renderer.get_glyph_atlas();
+    let glyph_atlas = shared.glyph_renderer.get_glyph_atlas();
     shared.model_buffer.done_write();
     glyph_atlas.done_write();
     let descriptor_set = shared.descriptor_sets[glyph_atlas.get_read_index()];
@@ -1989,7 +1992,7 @@ impl Renderer<Created> {
     .try_into()
     .unwrap();
 
-    let glyph_vertex_count = (shared.text_renderer.get_glyph_count() * Glyph::get_vertex_count())
+    let glyph_vertex_count = (shared.glyph_renderer.get_glyph_count() * Glyph::get_vertex_count())
       .try_into()
       .unwrap();
 
@@ -1998,7 +2001,7 @@ impl Renderer<Created> {
     .try_into()
     .unwrap();
 
-    let clipped_glyph_vertex_count = (shared.text_renderer.get_clipped_glyph_count()
+    let clipped_glyph_vertex_count = (shared.glyph_renderer.get_clipped_glyph_count()
       * Glyph::get_vertex_count())
     .try_into()
     .unwrap();
@@ -2255,7 +2258,12 @@ impl<State> Renderer<State> {
   }
 
   #[inline]
-  pub(super) const fn get_text_renderer(&mut self) -> &mut TextRenderer {
-    &mut self.shared.text_renderer
+  pub(super) const fn get_glyph_renderer(&self) -> &GlyphRenderer {
+    &self.shared.glyph_renderer
+  }
+
+  #[inline]
+  pub(super) const fn get_glyph_renderer_mut(&mut self) -> &mut GlyphRenderer {
+    &mut self.shared.glyph_renderer
   }
 }
