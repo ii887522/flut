@@ -22,6 +22,7 @@ const MIN_SCALE: f32 = 0.9;
 const COLOR_SCALE_SPEED: f32 = 2.0;
 const MIN_COLOR_SCALE: f32 = 0.8;
 const TEXT_Z_OFFSET: f32 = -0.0001;
+const ICON_MARGIN: f32 = 16.0;
 
 // Event handlers
 type OnClick = dyn FnMut();
@@ -142,27 +143,36 @@ impl Button {
       false,
     );
 
-    if self.icon_codepoint != 0 {
-      self.icon_render_id = Some(renderer.add_icon(
+    let (icon_render_id, icon_width, children_width) = if self.icon_codepoint != 0 {
+      let icon_render_id = renderer.add_icon(
         Icon {
-          position: (24.0, height.mul_add(0.75, y), z + TEXT_Z_OFFSET),
+          position: (0.0, 0.0, 0.0),
           color: utils::pack_color(self.text_color),
           font_size: height * 0.5,
           font_key: FontKey::Path(self.icon_font_path.clone()),
           codepoint: self.icon_codepoint,
         },
         false,
-      ));
-    }
+      );
 
-    if !self.text.is_empty() {
-      self.text_render_id = Some(renderer.add_text(
+      let (icon_width, _icon_height) = renderer.get_icon_size(&icon_render_id);
+      (Some(icon_render_id), icon_width, icon_width)
+    } else {
+      (None, 0.0, 0.0)
+    };
+
+    let children_width = if self.icon_codepoint != 0 && !self.text.is_empty() {
+      children_width + ICON_MARGIN
+    } else {
+      children_width
+    };
+
+    let (text_render_id, children_width) = if self.text.is_empty() {
+      (None, children_width)
+    } else {
+      let text_render_id = renderer.add_text(
         &Text {
-          position: (
-            width.mul_add(0.5, x),
-            height.mul_add(0.65, y),
-            z + TEXT_Z_OFFSET,
-          ),
+          position: (0.0, 0.0, 0.0),
           color: utils::pack_color(self.text_color),
           font_size: height * 0.4,
           font_key: FontKey::Family {
@@ -172,11 +182,58 @@ impl Button {
               ..Default::default()
             },
           },
-          align: Align::Center,
+          align: Align::Left,
           text: self.text.clone(),
         },
         false,
-      ));
+      );
+
+      let (text_width, _text_height) = renderer.get_text_size(&text_render_id);
+      (Some(text_render_id), children_width + text_width)
+    };
+
+    let child_x = (width - children_width).mul_add(0.5, x);
+
+    let child_x = if let Some(icon_render_id) = icon_render_id {
+      let final_icon_render_id = renderer.add_icon(
+        Icon {
+          position: (child_x, height.mul_add(0.75, y), z + TEXT_Z_OFFSET),
+          color: utils::pack_color(self.text_color),
+          font_size: height * 0.5,
+          font_key: FontKey::Path(self.icon_font_path.clone()),
+          codepoint: self.icon_codepoint,
+        },
+        false,
+      );
+
+      renderer.remove_icon(icon_render_id);
+      self.icon_render_id = Some(final_icon_render_id);
+      child_x + icon_width + ICON_MARGIN
+    } else {
+      child_x
+    };
+
+    if let Some(text_render_id) = text_render_id {
+      let final_text_render_id = renderer.add_text(
+        &Text {
+          position: (child_x, height.mul_add(0.65, y), z + TEXT_Z_OFFSET),
+          color: utils::pack_color(self.text_color),
+          font_size: height * 0.4,
+          font_key: FontKey::Family {
+            font_family: (&[FamilyName::SansSerif]).into(),
+            font_props: Properties {
+              weight: Weight::SEMIBOLD,
+              ..Default::default()
+            },
+          },
+          align: Align::Left,
+          text: self.text.clone(),
+        },
+        false,
+      );
+
+      renderer.remove_text(text_render_id);
+      self.text_render_id = Some(final_text_render_id);
     }
   }
 
@@ -347,16 +404,84 @@ impl Button {
         false,
       );
 
-      if let Some(text_render_id) = self.text_render_id.take() {
-        renderer.remove_text(text_render_id);
+      let (icon_render_id, icon_width, children_width) =
+        if let Some(icon_render_id) = self.icon_render_id.take() {
+          let final_icon_render_id = renderer.add_icon(
+            Icon {
+              position: (0.0, 0.0, 0.0),
+              color: utils::pack_color(self.text_color),
+              font_size: scaled_height * 0.5,
+              font_key: FontKey::Path(self.icon_font_path.clone()),
+              codepoint: self.icon_codepoint,
+            },
+            false,
+          );
 
-        self.text_render_id = Some(renderer.add_text(
+          renderer.remove_icon(icon_render_id);
+          let (icon_width, _icon_height) = renderer.get_icon_size(&final_icon_render_id);
+          (Some(final_icon_render_id), icon_width, icon_width)
+        } else {
+          (None, 0.0, 0.0)
+        };
+
+      let children_width = if self.icon_codepoint != 0 && !self.text.is_empty() {
+        ICON_MARGIN.mul_add(self.scale, children_width)
+      } else {
+        children_width
+      };
+
+      let (text_render_id, children_width) =
+        if let Some(text_render_id) = self.text_render_id.take() {
+          let final_text_render_id = renderer.add_text(
+            &Text {
+              position: (0.0, 0.0, 0.0),
+              color: utils::pack_color(self.text_color),
+              font_size: scaled_height * 0.4,
+              font_key: FontKey::Family {
+                font_family: (&[FamilyName::SansSerif]).into(),
+                font_props: Properties {
+                  weight: Weight::SEMIBOLD,
+                  ..Default::default()
+                },
+              },
+              align: Align::Left,
+              text: self.text.clone(),
+            },
+            false,
+          );
+
+          renderer.remove_text(text_render_id);
+          let (text_width, _text_height) = renderer.get_text_size(&final_text_render_id);
+          (Some(final_text_render_id), children_width + text_width)
+        } else {
+          (None, children_width)
+        };
+
+      let child_x = (scaled_width - children_width).mul_add(0.5, x);
+
+      let child_x = if let Some(icon_render_id) = icon_render_id {
+        let final_icon_render_id = renderer.add_icon(
+          Icon {
+            position: (child_x, scaled_height.mul_add(0.75, y), z + TEXT_Z_OFFSET),
+            color: utils::pack_color(self.text_color),
+            font_size: scaled_height * 0.5,
+            font_key: FontKey::Path(self.icon_font_path.clone()),
+            codepoint: self.icon_codepoint,
+          },
+          false,
+        );
+
+        renderer.remove_icon(icon_render_id);
+        self.icon_render_id = Some(final_icon_render_id);
+        ICON_MARGIN.mul_add(self.scale, child_x + icon_width)
+      } else {
+        child_x
+      };
+
+      if let Some(text_render_id) = text_render_id {
+        let final_text_render_id = renderer.add_text(
           &Text {
-            position: (
-              scaled_width.mul_add(0.5, x),
-              scaled_height.mul_add(0.65, y),
-              z + TEXT_Z_OFFSET,
-            ),
+            position: (child_x, scaled_height.mul_add(0.65, y), z + TEXT_Z_OFFSET),
             color: utils::pack_color(self.text_color),
             font_size: scaled_height * 0.4,
             font_key: FontKey::Family {
@@ -366,11 +491,14 @@ impl Button {
                 ..Default::default()
               },
             },
-            align: Align::Center,
+            align: Align::Left,
             text: self.text.clone(),
           },
           false,
-        ));
+        );
+
+        renderer.remove_text(text_render_id);
+        self.text_render_id = Some(final_text_render_id);
       }
     }
 
