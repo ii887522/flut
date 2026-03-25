@@ -47,6 +47,7 @@ pub struct Button {
   text_color: (u8, u8, u8, u8),
   icon_font_path: Cow<'static, str>,
   icon_codepoint: u16,
+  old_text: Cow<'static, str>,
   text: Cow<'static, str>,
   on_click: Option<Box<OnClick>>,
   on_mouse_input: Option<Box<OnMouseInput>>,
@@ -86,6 +87,7 @@ impl Button {
       text_color,
       icon_font_path,
       icon_codepoint,
+      old_text: text.clone(),
       text,
       on_click: None,
       on_mouse_input: None,
@@ -386,6 +388,7 @@ impl Button {
     if self.position != self.old_position
       || self.scale != old_scale
       || self.color_scale != old_color_scale
+      || self.text != self.old_text
     {
       let (scaled_width, scaled_height) = (width * self.scale, height * self.scale);
       let (x, y) = (
@@ -518,6 +521,7 @@ impl Button {
     }
 
     self.old_position = self.position;
+    self.old_text = self.text.clone();
     self.old_mouse_position = self.mouse_position;
   }
 
