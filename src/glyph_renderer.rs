@@ -20,7 +20,7 @@ use pathfinder_geometry::{
   transform2d::Transform2F,
   vector::{Vector2F, Vector2I},
 };
-use rustc_hash::{FxBuildHasher, FxHashMap};
+use rustc_hash::{FxBuildHasher, FxHashMap, FxHashSet};
 use std::collections::VecDeque;
 
 // Settings
@@ -66,7 +66,7 @@ pub struct GlyphRenderer {
   glyph_metrics_cache: FxHashMap<GlyphKey, GlyphMetrics>,
   unused_glyph_metrics_cache: LruCache<GlyphKey, GlyphMetrics>,
   text_sizes: FxHashMap<TextId, (f32, f32)>,
-  changeset_queue: VecDeque<Vec<GlyphKey>>,
+  changeset_queue: VecDeque<FxHashSet<GlyphKey>>,
   window_scale_factor: f32,
 }
 
@@ -117,7 +117,7 @@ impl GlyphRenderer {
         ),
         unused_glyph_metrics_cache: LruCache::with_capacity(glyph_metrics_cache_capacity),
         text_sizes: FxHashMap::default(),
-        changeset_queue: VecDeque::from_iter([vec![]]),
+        changeset_queue: VecDeque::from_iter([FxHashSet::default()]),
         window_scale_factor,
       },
       transfer_command_buffer,
@@ -277,7 +277,7 @@ impl GlyphRenderer {
       self.changeset_queue.pop_front();
     }
 
-    self.changeset_queue.push_back(vec![]);
+    self.changeset_queue.push_back(FxHashSet::default());
     transfer_command_buffers.into_boxed_slice()
   }
 
@@ -298,7 +298,6 @@ impl GlyphRenderer {
         FontKey::Path(ref font_path) => Font::from_path(&**font_path, 0).unwrap(),
       });
 
-    let changeset = self.changeset_queue.back_mut().unwrap();
     let mut glyph_position = text.position;
     let mut text_height = 0.0;
 
@@ -356,6 +355,10 @@ impl GlyphRenderer {
 
                 self.glyph_metrics_cache.remove(&unused_glyph_key);
 
+                self.changeset_queue.iter_mut().for_each(|changeset| {
+                  changeset.remove(&unused_glyph_key);
+                });
+
                 if let GlyphMetrics::Visible {
                   alloc_id: unused_alloc_id,
                   ..
@@ -368,7 +371,8 @@ impl GlyphRenderer {
               unused_glyph_evict_count <<= 1_usize;
             };
 
-            changeset.push(glyph_key.clone());
+            let changeset = self.changeset_queue.back_mut().unwrap();
+            changeset.insert(glyph_key.clone());
 
             GlyphMetrics::Visible {
               position: (
