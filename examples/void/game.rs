@@ -23,7 +23,7 @@ impl Game {
 
     let mut shop_button = Button::new()
       .position(SHOP_BUTTON_POSITION)
-      .size((128.0, 40.0))
+      .size((112.0, 40.0))
       .text("SHOP")
       .color((0, 0, 255, 255))
       .text_color((255, 255, 255, 255))
